@@ -63,6 +63,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#1a1025;font-family:
   </div>
   <div id="actions">
     <button class="action-btn" id="clear-btn" onclick="clearWord()">CLEAR</button>
+    <button class="action-btn" id="shuffle-btn" onclick="shuffleTiles()" style="background:rgba(255,255,255,0.08);color:#aaa;border:1px solid rgba(255,255,255,0.1)">🔀</button>
     <button class="action-btn" id="submit-btn" onclick="submitWord()" disabled>SUBMIT</button>
   </div>
 </div>
@@ -151,8 +152,12 @@ function startGame(){
   if(timerInterval)clearInterval(timerInterval);
   timerInterval=setInterval(()=>{
     roundTime--;
-    document.getElementById('timer-fill').style.width=(roundTime/ROUND_SECONDS*100)+'%';
-    if(roundTime<=10)document.getElementById('timer-fill').style.background='#e94560';
+    const pct=roundTime/ROUND_SECONDS*100;
+    document.getElementById('timer-fill').style.width=pct+'%';
+    if(roundTime<=10){
+      document.getElementById('timer-fill').style.background='#e94560';
+      if(roundTime<=5)playTone(800,0.05,0.04); // tick sound
+    }
     if(roundTime<=0){clearInterval(timerInterval);endGame()}
   },1000);
 }
@@ -199,6 +204,17 @@ function getWord(){
 function clearWord(){
   selected=[];renderTiles();renderWordDisplay();
   document.getElementById('submit-btn').disabled=true;
+}
+
+function shuffleTiles(){
+  // Shuffle tile positions (not their content, keep same tiles)
+  for(let i=tiles.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [tiles[i],tiles[j]]=[tiles[j],tiles[i]];
+  }
+  selected=[];renderTiles();renderWordDisplay();
+  document.getElementById('submit-btn').disabled=true;
+  playTone(400,0.06);setTimeout(()=>playTone(500,0.06),50);
 }
 
 function submitWord(){

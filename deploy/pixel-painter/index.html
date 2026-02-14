@@ -35,6 +35,8 @@ canvas{flex:1;display:block;background:#16213e}
   <button id="btn-draw" class="active" onclick="setTool('draw')">✏️</button>
   <button id="btn-erase" onclick="setTool('erase')">🧹</button>
   <button id="btn-fill" onclick="setTool('fill')">🪣</button>
+  <button id="btn-pick" onclick="setTool('pick')">💉</button>
+  <button id="btn-mirror" onclick="toggleMirror()">🪞</button>
   <button id="btn-undo" onclick="undo()">↩️</button>
   <button id="btn-redo" onclick="redo()">↪️</button>
   <button onclick="clearCanvas()">🗑️</button>
@@ -68,6 +70,12 @@ const COLORS=[
 let gridSize=16,pixels=[],tool='draw',currentColor='#ff6b6b';
 let history=[],historyIdx=-1,maxHistory=50;
 let cellPx,offX,offY,drawing=false;
+let mirrorMode=false;
+
+function toggleMirror(){
+  mirrorMode=!mirrorMode;
+  document.getElementById('btn-mirror').classList.toggle('active',mirrorMode);
+}
 
 const PROMPTS=['a sunset','your pet','a robot','a tree','a spaceship','a castle','a dragon','pizza','a ghost','the ocean','a mountain','a flower','a cat face','a mushroom','a sword','rainy day','a star','your mood','a burger','the moon','a house','a bird','a fish','a heart','a skull','fire','ice cream','a rainbow','a crown','lightning'];
 
@@ -152,8 +160,24 @@ function getCellFromEvent(e){
 
 function paint(cell){
   if(!cell)return;
-  if(tool==='draw'){pixels[cell.y][cell.x]=currentColor}
-  else if(tool==='erase'){pixels[cell.y][cell.x]=null}
+  if(tool==='pick'){
+    if(pixels[cell.y][cell.x]){
+      currentColor=pixels[cell.y][cell.x];
+      document.querySelectorAll('.swatch').forEach(s=>{
+        s.classList.toggle('active',s.style.background===currentColor);
+      });
+      tool='draw';setTool('draw');
+    }
+    return;
+  }
+  if(tool==='draw'){
+    pixels[cell.y][cell.x]=currentColor;
+    if(mirrorMode)pixels[cell.y][gridSize-1-cell.x]=currentColor;
+  }
+  else if(tool==='erase'){
+    pixels[cell.y][cell.x]=null;
+    if(mirrorMode)pixels[cell.y][gridSize-1-cell.x]=null;
+  }
   else if(tool==='fill'){floodFill(cell.x,cell.y,pixels[cell.y][cell.x],currentColor)}
 }
 

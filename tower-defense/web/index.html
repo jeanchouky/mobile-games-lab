@@ -41,6 +41,7 @@ canvas{display:block}
   <div class="hud-item">❤️ <span id="lives">20</span></div>
   <div class="hud-item">💰 <span id="gold">100</span></div>
   <div class="hud-item">🌊 Wave <span id="wave">0</span>/10</div>
+  <div class="hud-item"><button id="speed-btn" onclick="toggleSpeed()" style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;cursor:pointer">1x</button></div>
 </div>
 <div id="tower-panel">
   <div class="tower-btn" data-type="arrow" onclick="selectTower('arrow')">
@@ -88,6 +89,12 @@ let gold=100,lives=20,wave=0,maxWaves=10,gameActive=false;
 let selectedType=null,selectedTower=null;
 let spawnTimer=0,waveEnemies=0,waveSpawned=0,betweenWaves=true,waveDelay=3;
 let shakeX=0,shakeY=0,shakeMag=0;
+let gameSpeed=1;
+
+function toggleSpeed(){
+  gameSpeed=gameSpeed===1?2:gameSpeed===2?3:1;
+  document.getElementById('speed-btn').textContent=gameSpeed+'x';
+}
 
 const TOWER_TYPES={
   arrow:{cost:25,range:3,rate:0.8,dmg:10,color:'#ffd93d',name:'Arrow'},
@@ -446,7 +453,7 @@ function render(){
 
 let lastT=0;
 function loop(t){
-  let dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  let dt=Math.min((t-lastT)/1000,0.05)*gameSpeed;lastT=t;
   update(dt);
   requestAnimationFrame(loop);
 }

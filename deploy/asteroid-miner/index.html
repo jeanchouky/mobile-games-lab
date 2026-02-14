@@ -41,6 +41,7 @@ canvas{display:block;width:100%;height:100%}
 <div id="shop">
   <h2>⛏️ Upgrades</h2>
   <div id="upgrade-list"></div>
+  <div id="achievements"></div>
   <div id="prestige-info">Prestige resets progress but gives ⭐ multiplier</div>
   <button id="prestige-btn" onclick="prestige()">🌟 Prestige (need 1M ore)</button>
 </div>
@@ -288,7 +289,38 @@ function load(){
   if(d.levels)d.levels.forEach((l,i)=>{if(upgrades[i]){upgrades[i].level=l;upgrades[i].effect()}});
 }
 
-setInterval(()=>{renderUpgrades();save()},2000);
+// Achievements
+const ACHIEVEMENTS=[
+  {id:'first_tap',name:'First Strike',desc:'Mine your first ore',icon:'⛏️',check:()=>totalOre>=1},
+  {id:'hundred',name:'Getting Started',desc:'Mine 100 ore',icon:'💎',check:()=>totalOre>=100},
+  {id:'thousand',name:'Ore Hoarder',desc:'Mine 1,000 ore',icon:'📦',check:()=>totalOre>=1000},
+  {id:'auto',name:'Automation',desc:'Buy first auto-miner',icon:'🤖',check:()=>upgrades[1].level>=1},
+  {id:'lucky',name:'Feeling Lucky',desc:'Buy Lucky Strike',icon:'🍀',check:()=>upgrades[4].level>=1},
+  {id:'prestige1',name:'Rebirth',desc:'Prestige for the first time',icon:'🌟',check:()=>prestigePoints>=1},
+  {id:'million',name:'Millionaire',desc:'Mine 1M ore total',icon:'💰',check:()=>totalOre>=1e6},
+];
+let unlockedAchievements=new Set(JSON.parse(localStorage.getItem('astminer_ach')||'[]'));
+
+function checkAchievements(){
+  let newUnlock=false;
+  ACHIEVEMENTS.forEach(a=>{
+    if(!unlockedAchievements.has(a.id)&&a.check()){
+      unlockedAchievements.add(a.id);
+      newUnlock=true;
+      // Toast
+      const toast=document.createElement('div');
+      toast.className='tap-text';
+      toast.style.cssText='left:50%;top:20%;transform:translateX(-50%);font-size:14px;color:#ffd93d;white-space:nowrap';
+      toast.textContent=`🏆 ${a.name}!`;
+      document.getElementById('space').appendChild(toast);
+      setTimeout(()=>toast.remove(),1500);
+      snd(800,0.2,'sine',0.1);snd(1000,0.15,'triangle',0.08);
+    }
+  });
+  if(newUnlock)localStorage.setItem('astminer_ach',JSON.stringify([...unlockedAchievements]));
+}
+
+setInterval(()=>{renderUpgrades();checkAchievements();save()},2000);
 
 window.addEventListener('resize',resize);
 load();resize();renderUpgrades();

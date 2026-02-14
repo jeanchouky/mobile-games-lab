@@ -41,7 +41,7 @@ canvas{display:block;width:100vw;height:100vh}
   <h1>⬡ Hex Match</h1>
   <p>Match 3+ to score • Swipe to swap</p>
   <button onclick="startGame('timed')">⏱ Timed Mode</button>
-  <button class="zen" onclick="startGame('zen')">🧘 Zen Mode</button>
+  <button class="zen" onclick="startGame('zen')">🧘 Zen Mode (∞)</button>
 </div>
 <div id="game-over" class="hidden">
   <h2>Game Over</h2>
@@ -425,6 +425,8 @@ function endGame(){
   document.getElementById('final-score').textContent=score;
   document.getElementById('final-best').textContent=bestScore;
   document.getElementById('game-over').classList.remove('hidden');
+  // Victory sound
+  playSound(523,0.15,'sine',0.1);setTimeout(()=>playSound(659,0.15,'sine',0.1),100);setTimeout(()=>playSound(784,0.2,'sine',0.1),200);
 }
 
 function startGame(m){
