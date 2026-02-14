@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Conspiracy Board</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #8b7355;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: 'Courier New', monospace;
+}
+canvas {
+  display: block;
+  width: 100%; height: 100%;
+  cursor: crosshair;
+}
+</style>
+</head>
+<body>
+<canvas id="board"></canvas>
+<script>
+'use strict';
+
+// ============================================================
+// CONSPIRACY BOARD — Detective Puzzle Game
+// ============================================================
+
+const canvas = document.getElementById('board');
+const ctx = canvas.getContext('2d');
+
+// --- GLOBALS ---
+let W, H, scale;
+let gameTime = 0, deltaTime = 0, lastTime = 0;
+let currentCase = null;
+let caseIndex = 0;
+let clues = [];
+let connections = [];
+let draggedClue = null;
+let dragOffset = { x: 0, y: 0 };
+let drawingString = false;
+let stringStart = null;
+let stringCurrent = { x: 0, y: 0 };
+let camera = { x: 0, y: 0, zoom: 1, targetZoom: 1 };
+let inputEvents = [];
+let gameState = 'menu'; // menu, playing, solved
+let solveTime = 0;
+let correctConnections = 0;
+let totalRequired = 0;
+let revealAnim = 0;
+let pinchDist = 0;
+let corkTexture = null;
+
+// --- RESIZE ---
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  scale = Math.min(W / 400, H / 700);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ============================================================
+// AUDIO ENGINE
+// ============================================================
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playTone(freq, duration, type = 'sine', vol = 0.12) {
+  ensureAudio();
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + duration);
+}
+
+function playNoise(duration, vol = 0.08, filterFreq = null) {
+  ensureAudio();
+  const bufSize = audioCtx.sampleRate * duration;
+  const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+  const src = audioCtx.createBufferSource();
+  const gain = audioCtx.createGain();
+  src.buffer = buf;
+  gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  
+  if (filterFreq) {
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = filterFreq;
+    src.connect(filter);
+    filter.connect(gain);
+  } else {
+    src.connect(gain);
+  }
+  
+  gain.connect(audioCtx.destination);
+  src.start();
+}
+
+function sfxPin() { playTone(800, 0.04, 'sine', 0.1); playTone(400, 0.03, 'sine', 0.08); }
+function sfxPaperShuffle() { playNoise(0.15, 0.06, 2000); }
+function sfxStringStretch() { playTone(300 + Math.random() * 100, 0.08, 'triangle', 0.05); }
+function sfxRevelation() { 
+  playTone(523, 0.1, 'sine', 0.12); 
+  setTimeout(() => playTone(659, 0.1, 'sine', 0.12), 100); 
+  setTimeout(() => playTone(784, 0.15, 'sine', 0.12), 200); 
+  setTimeout(() => playTone(1047, 0.2, 'sine', 0.12), 300);
+}
+function sfxCorrect() { playTone(880, 0.08, 'sine', 0.1); }
+function sfxWrong() { playTone(220, 0.12, 'sawtooth', 0.08); }
+
+// ============================================================
+// PROCEDURAL CASE GENERATION
+// ============================================================
+
+const caseTemplates = [
+  {
+    type: 'murder',
+    title: 'The Midnight Manor Murder',
+    suspects: ['Butler', 'Gardener', 'Cook', 'Maid', 'Doctor'],
+    evidence: [
+      { type: 'photo', desc: 'Crime scene - Study', connects: ['weapon', 'time'] },
+      { type: 'document', desc: 'Will - £5M inheritance', connects: ['suspect1', 'motive'] },
+      { type: 'photo', desc: 'Bloody candlestick', connects: ['suspect2', 'crime'] },
+      { type: 'statement', desc: 'Butler: "I heard arguing at 11pm"', connects: ['time', 'suspect1'] },
+      { type: 'photo', desc: 'Muddy footprints', connects: ['suspect3', 'crime'] },
+      { type: 'document', desc: 'Poison report - negative', connects: ['weapon', 'crime'] },
+      { type: 'statement', desc: 'Gardener alibi contradicted', connects: ['suspect3', 'motive'] },
+      { type: 'evidence', desc: 'Thread from cook\'s apron', connects: ['suspect2', 'crime'] }
+    ],
+    solution: [
+      ['crime', 'weapon'], ['weapon', 'suspect2'], ['suspect2', 'motive'],
+      ['time', 'suspect1'], ['crime', 'suspect3']
+    ]
+  },
+  {
+    type: 'heist',
+    title: 'The Gallery Heist',
+    suspects: ['Security Guard', 'Curator', 'Janitor', 'Donor', 'Artist'],
+    evidence: [
+      { type: 'photo', desc: 'Empty frame - $10M painting gone', connects: ['crime', 'time'] },
+      { type: 'document', desc: 'Security logs altered', connects: ['suspect1', 'crime'] },
+      { type: 'photo', desc: 'Ventilation shaft opened', connects: ['entry', 'crime'] },
+      { type: 'statement', desc: 'Curator: "I left at 8pm sharp"', connects: ['suspect2', 'time'] },
+      { type: 'evidence', desc: 'Janitor key card used at 3am', connects: ['suspect3', 'entry'] },
+      { type: 'document', desc: 'Donor bankruptcy filing', connects: ['suspect4', 'motive'] },
+      { type: 'photo', desc: 'Paint samples match artist studio', connects: ['suspect5', 'crime'] },
+      { type: 'statement', desc: 'Security footage "corrupted"', connects: ['suspect1', 'motive'] }
+    ],
+    solution: [
+      ['crime', 'entry'], ['entry', 'suspect3'], ['suspect3', 'suspect1'],
+      ['suspect1', 'motive'], ['time', 'suspect2']
+    ]
+  },
+  {
+    type: 'missing',
+    title: 'The Vanishing Heiress',
+    suspects: ['Fiancé', 'Business Partner', 'Brother', 'Therapist', 'Driver'],
+    evidence: [
+      { type: 'photo', desc: 'Last seen - Café at 2pm', connects: ['time', 'location'] },
+      { type: 'document', desc: 'Text: "Meet me at the docks"', connects: ['location', 'suspect1'] },
+      { type: 'statement', desc: 'Fiancé claims she went abroad', connects: ['suspect1', 'motive'] },
+      { type: 'photo', desc: 'Her car found abandoned', connects: ['location', 'crime'] },
+      { type: 'document', desc: 'Recent life insurance policy', connects: ['motive', 'suspect1'] },
+      { type: 'statement', desc: 'Brother: "She feared someone"', connects: ['suspect3', 'motive'] },
+      { type: 'evidence', desc: 'Therapist notes - paranoia', connects: ['suspect4', 'motive'] },
+      { type: 'photo', desc: 'Driver GPS log - warehouse', connects: ['suspect5', 'location'] }
+    ],
+    solution: [
+      ['crime', 'location'], ['location', 'suspect1'], ['suspect1', 'motive'],
+      ['time', 'suspect5'], ['suspect3', 'suspect4']
+    ]
+  }
+];
+
+function generateCase(templateIndex) {
+  const template = caseTemplates[templateIndex % caseTemplates.length];
+  const boardW = W * 1.5, boardH = H * 1.5;
+  const padding = 80 * scale;
+  
+  const caseClues = template.evidence.map((ev, i) => {
+    const x = padding + Math.random() * (boardW - padding * 2);
+    const y = padding + Math.random() * (boardH - padding * 2);
+    const rotation = (Math.random() - 0.5) * 0.15;
+    const size = ev.type === 'photo' ? 140 : 120;
+    
+    return {
+      id: `clue${i}`,
+      type: ev.type,
+      desc: ev.desc,
+      x, y,
+      rotation,
+      width: size * scale,
+      height: (size * 0.75) * scale,
+      connects: ev.connects,
+      pinned: false,
+      discovered: true
+    };
+  });
+  
+  return {
+    title: template.title,
+    type: template.type,
+    clues: caseClues,
+    solution: template.solution,
+    suspect: template.suspects[Math.floor(Math.random() * template.suspects.length)]
+  };
+}
+
+function startCase(index) {
+  caseIndex = index;
+  currentCase = generateCase(index);
+  clues = currentCase.clues;
+  connections = [];
+  gameState = 'playing';
+  solveTime = 0;
+  correctConnections = 0;
+  totalRequired = currentCase.solution.length;
+  camera = { x: W * 0.75, y: H * 0.75, zoom: 0.65, targetZoom: 0.65 };
+  
+  // Scatter clues with drop animation
+  clues.forEach((c, i) => {
+    setTimeout(() => {
+      c.discovered = true;
+      sfxPaperShuffle();
+    }, i * 100);
+  });
+}
+
+// ============================================================
+// DRAWING - Cork Board Aesthetic
+// ============================================================
+
+function drawCorkTexture() {
+  // Cork background color with noise
+  const grad = ctx.createLinearGradient(0, 0, W, H);
+  grad.addColorStop(0, '#8b7355');
+  grad.addColorStop(0.5, '#9d8264');
+  grad.addColorStop(1, '#8b7355');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  
+  // Cork grain texture
+  ctx.save();
+  ctx.globalAlpha = 0.15;
+  for (let i = 0; i < 500; i++) {
+    const x = Math.random() * W;
+    const y = Math.random() * H;
+    const size = Math.random() * 2;
+    ctx.fillStyle = Math.random() > 0.5 ? '#6d5a45' : '#a08060';
+    ctx.fillRect(x, y, size, size);
+  }
+  ctx.restore();
+}
+
+function drawClue(clue) {
+  if (!clue.discovered) return;
+  
+  ctx.save();
+  ctx.translate(clue.x, clue.y);
+  ctx.rotate(clue.rotation);
+  
+  const hw = clue.width / 2;
+  const hh = clue.height / 2;
+  
+  // Shadow
+  ctx.shadowColor = 'rgba(0,0,0,0.3)';
+  ctx.shadowBlur = 8 * scale;
+  ctx.shadowOffsetX = 3 * scale;
+  ctx.shadowOffsetY = 3 * scale;
+  
+  // Clue background based on type
+  if (clue.type === 'photo') {
+    // Polaroid style
+    ctx.fillStyle = '#f5f0e6';
+    ctx.fillRect(-hw - 4*scale, -hh - 4*scale, clue.width + 8*scale, clue.height + 20*scale);
+    ctx.fillStyle = '#ddd';
+    ctx.fillRect(-hw, -hh, clue.width, clue.height);
+    // Photo "image" area
+    const photoGrad = ctx.createLinearGradient(-hw, -hh, hw, hh);
+    photoGrad.addColorStop(0, '#555');
+    photoGrad.addColorStop(0.5, '#888');
+    photoGrad.addColorStop(1, '#555');
+    ctx.fillStyle = photoGrad;
+    ctx.fillRect(-hw, -hh, clue.width, clue.height * 0.85);
+    // Caption area
+    ctx.fillStyle = '#f5f0e6';
+    ctx.fillRect(-hw, -hh + clue.height * 0.85, clue.width, clue.height * 0.15);
+  } else if (clue.type === 'document') {
+    // Paper with lines
+    ctx.fillStyle = '#fefef8';
+    ctx.fillRect(-hw, -hh, clue.width, clue.height);
+    ctx.strokeStyle = 'rgba(180,210,240,0.4)';
+    ctx.lineWidth = 0.5;
+    for (let ly = -hh + 10*scale; ly < hh; ly += 12*scale) {
+      ctx.beginPath();
+      ctx.moveTo(-hw + 5*scale, ly);
+      ctx.lineTo(hw - 5*scale, ly);
+      ctx.stroke();
+    }
+  } else if (clue.type === 'statement') {
+    // Handwritten note
+    ctx.fillStyle = '#ffffcc';
+    ctx.fillRect(-hw, -hh, clue.width, clue.height);
+    ctx.strokeStyle = '#dda';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(-hw, -hh, clue.width, clue.height);
+  } else {
+    // Evidence tag
+    ctx.fillStyle = '#e8e0d5';
+    ctx.fillRect(-hw, -hh, clue.width, clue.height);
+  }
+  
+  // Border
+  ctx.shadowColor = 'transparent';
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 1.5;
+  if (clue.type === 'photo') {
+    ctx.strokeRect(-hw - 4*scale, -hh - 4*scale, clue.width + 8*scale, clue.height + 20*scale);
+  } else {
+    ctx.strokeRect(-hw, -hh, clue.width, clue.height);
+  }
+  
+  // Text content
+  ctx.fillStyle = '#222';
+  ctx.font = `${10 * scale}px 'Courier New', monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  
+  // Word wrap
+  const words = clue.desc.split(' ');
+  const lines = [];
+  let line = '';
+  const maxWidth = clue.width - 16*scale;
+  for (const word of words) {
+    const test = line + word + ' ';
+    const metrics = ctx.measureText(test);
+    if (metrics.width > maxWidth && line.length > 0) {
+      lines.push(line.trim());
+      line = word + ' ';
+    } else {
+      line = test;
+    }
+  }
+  lines.push(line.trim());
+  
+  const lineHeight = 12 * scale;
+  const startY = -(lines.length - 1) * lineHeight / 2;
+  lines.forEach((ln, i) => {
+    ctx.fillText(ln, 0, startY + i * lineHeight);
+  });
+  
+  // Pushpin if pinned
+  if (clue.pinned) {
+    drawPushpin(0, -hh - (clue.type === 'photo' ? 8*scale : 4*scale));
+  }
+  
+  ctx.restore();
+}
+
+function drawPushpin(x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  
+  // Pin shadow
+  ctx.shadowColor = 'rgba(0,0,0,0.4)';
+  ctx.shadowBlur = 3 * scale;
+  
+  // Pin head
+  const pinColors = ['#c41e3a', '#ffd700', '#4169e1', '#228b22', '#ff8c00'];
+  const color = pinColors[Math.floor(Math.random() * pinColors.length)];
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(0, 0, 5 * scale, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Pin point
+  ctx.shadowColor = 'transparent';
+  ctx.strokeStyle = '#888';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(0, 8 * scale);
+  ctx.stroke();
+  
+  ctx.restore();
+}
+
+function drawString(x1, y1, x2, y2, isCorrect = null, alpha = 1) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  
+  // String color based on correctness
+  let color = '#c41e3a';
+  if (isCorrect === true) {
+    color = '#ffd700'; // Gold for correct
+  } else if (isCorrect === false) {
+    color = '#666'; // Gray for wrong
+  }
+  
+  // Yarn texture with multiple strands
+  for (let offset = -1; offset <= 1; offset++) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = (2 + Math.abs(offset)) * scale;
+    ctx.globalAlpha = alpha * (offset === 0 ? 1 : 0.5);
+    
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    
+    // Slight sag in the middle
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const sag = Math.min(30 * scale, dist * 0.1);
+    const mx = (x1 + x2) / 2;
+    const my = (y1 + y2) / 2 + sag;
+    
+    ctx.quadraticCurveTo(mx + offset, my, x2, y2);
+    ctx.stroke();
+  }
+  
+  ctx.restore();
+}
+
+function drawConnections() {
+  connections.forEach(conn => {
+    const c1 = clues.find(c => c.id === conn.from);
+    const c2 = clues.find(c => c.id === conn.to);
+    if (c1 && c2) {
+      drawString(c1.x, c1.y, c2.x, c2.y, conn.correct);
+    }
+  });
+}
+
+// ============================================================
+// GAME LOGIC
+// ============================================================
+
+function checkSolution() {
+  correctConnections = 0;
+  
+  connections.forEach(conn => {
+    const c1 = clues.find(c => c.id === conn.from);
+    const c2 = clues.find(c => c.id === conn.to);
+    
+    if (!c1 || !c2) {
+      conn.correct = false;
+      return;
+    }
+    
+    // Check if these clues should connect
+    const connects1 = new Set(c1.connects);
+    const connects2 = new Set(c2.connects);
+    
+    // Find common tags
+    const common = [...connects1].filter(tag => connects2.has(tag));
+    
+    if (common.length > 0) {
+      conn.correct = true;
+      correctConnections++;
+    } else {
+      conn.correct = false;
+    }
+  });
+  
+  // Check win condition (80%+ correct)
+  const requiredCorrect = Math.ceil(totalRequired * 0.8);
+  if (correctConnections >= requiredCorrect && connections.length >= totalRequired) {
+    gameState = 'solved';
+    revealAnim = 0;
+    sfxRevelation();
+  }
+}
+
+function worldToScreen(wx, wy) {
+  return {
+    x: (wx - camera.x) * camera.zoom + W / 2,
+    y: (wy - camera.y) * camera.zoom + H / 2
+  };
+}
+
+function screenToWorld(sx, sy) {
+  return {
+    x: (sx - W / 2) / camera.zoom + camera.x,
+    y: (sy - H / 2) / camera.zoom + camera.y
+  };
+}
+
+function getClueAtPoint(wx, wy) {
+  // Check from top to bottom (last drawn = on top)
+  for (let i = clues.length - 1; i >= 0; i--) {
+    const c = clues[i];
+    if (!c.discovered) continue;
+    
+    const dx = wx - c.x;
+    const dy = wy - c.y;
+    
+    // Rotate point to match clue rotation
+    const cos = Math.cos(-c.rotation);
+    const sin = Math.sin(-c.rotation);
+    const rx = dx * cos - dy * sin;
+    const ry = dx * sin + dy * cos;
+    
+    if (Math.abs(rx) < c.width / 2 && Math.abs(ry) < c.height / 2) {
+      return c;
+    }
+  }
+  return null;
+}
+
+// ============================================================
+// INPUT HANDLING
+// ============================================================
+
+function handlePointerDown(x, y) {
+  ensureAudio();
+  const world = screenToWorld(x, y);
+  const clue = getClueAtPoint(world.x, world.y);
+  
+  if (clue) {
+    // Check if clicking near the top (to pin/draw string)
+    const dy = world.y - clue.y;
+    if (dy < -clue.height * 0.3) {
+      // Start drawing string
+      drawingString = true;
+      stringStart = clue;
+      stringCurrent = { x, y };
+      sfxPin();
+      clue.pinned = true;
+    } else {
+      // Drag clue
+      draggedClue = clue;
+      dragOffset = { x: clue.x - world.x, y: clue.y - world.y };
+      sfxPaperShuffle();
+      
+      // Move to top
+      const index = clues.indexOf(clue);
+      clues.splice(index, 1);
+      clues.push(clue);
+    }
+  }
+}
+
+function handlePointerMove(x, y) {
+  if (draggedClue) {
+    const world = screenToWorld(x, y);
+    draggedClue.x = world.x + dragOffset.x;
+    draggedClue.y = world.y + dragOffset.y;
+  }
+  
+  if (drawingString) {
+    stringCurrent = { x, y };
+  }
+}
+
+function handlePointerUp(x, y) {
+  if (drawingString) {
+    const world = screenToWorld(x, y);
+    const endClue = getClueAtPoint(world.x, world.y);
+    
+    if (endClue && endClue !== stringStart) {
+      // Create connection
+      const exists = connections.find(c => 
+        (c.from === stringStart.id && c.to === endClue.id) ||
+        (c.from === endClue.id && c.to === stringStart.id)
+      );
+      
+      if (!exists) {
+        connections.push({
+          from: stringStart.id,
+          to: endClue.id,
+          correct: null
+        });
+        sfxStringStretch();
+        endClue.pinned = true;
+        checkSolution();
+      }
+    }
+    
+    drawingString = false;
+    stringStart = null;
+  }
+  
+  draggedClue = null;
+}
+
+// Touch events
+let touches = {};
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  
+  if (e.touches.length === 1) {
+    const t = e.touches[0];
+    touches[t.identifier] = { x: t.clientX, y: t.clientY };
+    handlePointerDown(t.clientX, t.clientY);
+  } else if (e.touches.length === 2) {
+    // Start pinch
+    const t1 = e.touches[0];
+    const t2 = e.touches[1];
+    const dx = t2.clientX - t1.clientX;
+    const dy = t2.clientY - t1.clientY;
+    pinchDist = Math.sqrt(dx * dx + dy * dy);
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  
+  if (e.touches.length === 1) {
+    const t = e.touches[0];
+    handlePointerMove(t.clientX, t.clientY);
+  } else if (e.touches.length === 2) {
+    // Pinch zoom
+    const t1 = e.touches[0];
+    const t2 = e.touches[1];
+    const dx = t2.clientX - t1.clientX;
+    const dy = t2.clientY - t1.clientY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    
+    if (pinchDist > 0) {
+      const scale = dist / pinchDist;
+      camera.targetZoom *= scale;
+      camera.targetZoom = Math.max(0.5, Math.min(2, camera.targetZoom));
+    }
+    pinchDist = dist;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  
+  if (e.touches.length === 0) {
+    handlePointerUp(0, 0);
+    pinchDist = 0;
+  }
+});
+
+// Mouse events
+canvas.addEventListener('mousedown', (e) => {
+  ensureAudio();
+  handlePointerDown(e.clientX, e.clientY);
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  handlePointerMove(e.clientX, e.clientY);
+});
+
+canvas.addEventListener('mouseup', (e) => {
+  handlePointerUp(e.clientX, e.clientY);
+});
+
+// Mouse wheel zoom
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? 0.9 : 1.1;
+  camera.targetZoom *= delta;
+  camera.targetZoom = Math.max(0.5, Math.min(2, camera.targetZoom));
+}, { passive: false });
+
+// ============================================================
+// UI
+// ============================================================
+
+function drawUI() {
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  
+  if (gameState === 'menu') {
+    // Title
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, W, H);
+    
+    ctx.fillStyle = '#f5f0e6';
+    ctx.font = `bold ${32 * scale}px 'Courier New', monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText('CONSPIRACY BOARD', W / 2, H * 0.3);
+    
+    ctx.font = `${14 * scale}px 'Courier New', monospace`;
+    ctx.fillText('Connect the evidence', W / 2, H * 0.4);
+    ctx.fillText('Solve the mystery', W / 2, H * 0.45);
+    
+    // Case selection
+    const btnY = H * 0.6;
+    const btnW = 200 * scale;
+    const btnH = 50 * scale;
+    
+    caseTemplates.forEach((template, i) => {
+      const y = btnY + i * (btnH + 15 * scale);
+      
+      ctx.fillStyle = '#8b4513';
+      ctx.fillRect(W / 2 - btnW / 2, y - btnH / 2, btnW, btnH);
+      ctx.strokeStyle = '#f5f0e6';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(W / 2 - btnW / 2, y - btnH / 2, btnW, btnH);
+      
+      ctx.fillStyle = '#f5f0e6';
+      ctx.font = `${12 * scale}px 'Courier New', monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText(template.title, W / 2, y - 5);
+      ctx.font = `${10 * scale}px 'Courier New', monospace`;
+      ctx.fillText(`(${template.type})`, W / 2, y + 10);
+      
+      // Hit test for menu
+      if (inputEvents.length > 0) {
+        const ev = inputEvents[0];
+        if (ev.type === 'tap' && 
+            ev.x > W / 2 - btnW / 2 && ev.x < W / 2 + btnW / 2 &&
+            ev.y > y - btnH / 2 && ev.y < y + btnH / 2) {
+          startCase(i);
+        }
+      }
+    });
+  } else if (gameState === 'playing') {
+    // Top bar
+    ctx.fillStyle = 'rgba(139, 115, 85, 0.9)';
+    ctx.fillRect(0, 0, W, 50 * scale);
+    
+    ctx.fillStyle = '#f5f0e6';
+    ctx.font = `bold ${14 * scale}px 'Courier New', monospace`;
+    ctx.textAlign = 'left';
+    ctx.fillText(currentCase.title, 10 * scale, 20 * scale);
+    
+    ctx.font = `${10 * scale}px 'Courier New', monospace`;
+    ctx.fillText(`Connections: ${connections.length}/${totalRequired}`, 10 * scale, 38 * scale);
+    
+    ctx.textAlign = 'right';
+    const mins = Math.floor(solveTime / 60);
+    const secs = Math.floor(solveTime % 60);
+    ctx.fillText(`Time: ${mins}:${secs.toString().padStart(2, '0')}`, W - 10 * scale, 20 * scale);
+    ctx.fillText(`Correct: ${correctConnections}`, W - 10 * scale, 38 * scale);
+    
+    // Bottom toolbar
+    const toolY = H - 60 * scale;
+    ctx.fillStyle = 'rgba(139, 115, 85, 0.9)';
+    ctx.fillRect(0, toolY, W, 60 * scale);
+    
+    // Reset zoom button
+    const resetBtnX = W / 2;
+    const resetBtnY = toolY + 30 * scale;
+    ctx.fillStyle = '#8b4513';
+    ctx.fillRect(resetBtnX - 50 * scale, resetBtnY - 20 * scale, 100 * scale, 40 * scale);
+    ctx.strokeStyle = '#f5f0e6';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(resetBtnX - 50 * scale, resetBtnY - 20 * scale, 100 * scale, 40 * scale);
+    ctx.fillStyle = '#f5f0e6';
+    ctx.font = `${12 * scale}px 'Courier New', monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText('Reset View', resetBtnX, resetBtnY);
+    
+    // Check button
+    const checkBtnX = W - 80 * scale;
+    ctx.fillStyle = '#228b22';
+    ctx.fillRect(checkBtnX - 50 * scale, resetBtnY - 20 * scale, 100 * scale, 40 * scale);
+    ctx.strokeStyle = '#f5f0e6';
+    ctx.strokeRect(checkBtnX - 50 * scale, resetBtnY - 20 * scale, 100 * scale, 40 * scale);
+    ctx.fillStyle = '#f5f0e6';
+    ctx.fillText('Check', checkBtnX, resetBtnY);
+    
+    // Menu button
+    const menuBtnX = 80 * scale;
+    ctx.fillStyle = '#8b4513';
+    ctx.fillRect(menuBtnX - 50 * scale, resetBtnY - 20 * scale, 100 * scale, 40 * scale);
+    ctx.strokeStyle = '#f5f0e6';
+    ctx.strokeRect(menuBtnX - 50 * scale, resetBtnY - 20 * scale, 100 * scale, 40 * scale);
+    ctx.fillStyle = '#f5f0e6';
+    ctx.fillText('Menu', menuBtnX, resetBtnY);
+    
+    // Button hit tests
+    if (inputEvents.length > 0) {
+      const ev = inputEvents[inputEvents.length - 1];
+      if (ev.type === 'tap') {
+        // Reset view
+        if (ev.x > resetBtnX - 50 * scale && ev.x < resetBtnX + 50 * scale &&
+            ev.y > resetBtnY - 20 * scale && ev.y < resetBtnY + 20 * scale) {
+          camera.x = 0;
+          camera.y = 0;
+          camera.targetZoom = 1;
+        }
+        
+        // Check solution
+        if (ev.x > checkBtnX - 50 * scale && ev.x < checkBtnX + 50 * scale &&
+            ev.y > resetBtnY - 20 * scale && ev.y < resetBtnY + 20 * scale) {
+          checkSolution();
+        }
+        
+        // Menu
+        if (ev.x > menuBtnX - 50 * scale && ev.x < menuBtnX + 50 * scale &&
+            ev.y > resetBtnY - 20 * scale && ev.y < resetBtnY + 20 * scale) {
+          gameState = 'menu';
+        }
+      }
+    }
+  } else if (gameState === 'solved') {
+    // Victory overlay
+    ctx.fillStyle = `rgba(0,0,0,${Math.min(0.8, revealAnim * 2)})`;
+    ctx.fillRect(0, 0, W, H);
+    
+    if (revealAnim > 0.5) {
+      ctx.fillStyle = '#ffd700';
+      ctx.font = `bold ${36 * scale}px 'Courier New', monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText('CASE SOLVED!', W / 2, H * 0.3);
+      
+      ctx.fillStyle = '#f5f0e6';
+      ctx.font = `${16 * scale}px 'Courier New', monospace`;
+      ctx.fillText(`Time: ${Math.floor(solveTime / 60)}:${(Math.floor(solveTime % 60)).toString().padStart(2, '0')}`, W / 2, H * 0.45);
+      ctx.fillText(`Accuracy: ${Math.round(correctConnections / connections.length * 100)}%`, W / 2, H * 0.52);
+      
+      // Next case button
+      const btnY = H * 0.7;
+      const btnW = 200 * scale;
+      const btnH = 50 * scale;
+      
+      ctx.fillStyle = '#228b22';
+      ctx.fillRect(W / 2 - btnW / 2, btnY - btnH / 2, btnW, btnH);
+      ctx.strokeStyle = '#ffd700';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(W / 2 - btnW / 2, btnY - btnH / 2, btnW, btnH);
+      ctx.fillStyle = '#fff';
+      ctx.font = `bold ${14 * scale}px 'Courier New', monospace`;
+      ctx.fillText('Next Case', W / 2, btnY);
+      
+      // Menu button
+      const menuBtnY = btnY + 70 * scale;
+      ctx.fillStyle = '#8b4513';
+      ctx.fillRect(W / 2 - btnW / 2, menuBtnY - btnH / 2, btnW, btnH);
+      ctx.strokeStyle = '#f5f0e6';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(W / 2 - btnW / 2, menuBtnY - btnH / 2, btnW, btnH);
+      ctx.fillStyle = '#f5f0e6';
+      ctx.fillText('Case Select', W / 2, menuBtnY);
+      
+      // Hit tests
+      if (inputEvents.length > 0) {
+        const ev = inputEvents[inputEvents.length - 1];
+        if (ev.type === 'tap') {
+          if (ev.x > W / 2 - btnW / 2 && ev.x < W / 2 + btnW / 2) {
+            if (ev.y > btnY - btnH / 2 && ev.y < btnY + btnH / 2) {
+              startCase((caseIndex + 1) % caseTemplates.length);
+            } else if (ev.y > menuBtnY - btnH / 2 && ev.y < menuBtnY + btnH / 2) {
+              gameState = 'menu';
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  ctx.restore();
+}
+
+// ============================================================
+// GAME LOOP
+// ============================================================
+
+function gameLoop(time) {
+  deltaTime = time - lastTime;
+  lastTime = time;
+  gameTime = time * 0.001;
+  
+  if (gameState === 'playing') {
+    solveTime += deltaTime * 0.001;
+  }
+  
+  if (gameState === 'solved') {
+    revealAnim += deltaTime * 0.001;
+  }
+  
+  // Smooth zoom
+  camera.zoom += (camera.targetZoom - camera.zoom) * 0.1;
+  
+  // Draw
+  ctx.save();
+  
+  // Cork background
+  drawCorkTexture();
+  
+  if (gameState !== 'menu') {
+    // Apply camera transform
+    ctx.translate(W / 2, H / 2);
+    ctx.scale(camera.zoom, camera.zoom);
+    ctx.translate(-camera.x, -camera.y);
+    
+    // Draw connections first (under clues)
+    drawConnections();
+    
+    // Active string being drawn
+    if (drawingString && stringStart) {
+      const startScreen = worldToScreen(stringStart.x, stringStart.y);
+      drawString(startScreen.x, startScreen.y, stringCurrent.x, stringCurrent.y, null, 0.6);
+    }
+    
+    // Draw clues
+    clues.forEach(clue => drawClue(clue));
+  }
+  
+  ctx.restore();
+  
+  // UI on top
+  drawUI();
+  
+  // Clear input events
+  inputEvents = [];
+  
+  requestAnimationFrame(gameLoop);
+}
+
+// ============================================================
+// INPUT QUEUE
+// ============================================================
+
+canvas.addEventListener('click', (e) => {
+  inputEvents.push({ type: 'tap', x: e.clientX, y: e.clientY });
+});
+
+// ============================================================
+// START
+// ============================================================
+
+gameState = 'menu';
+requestAnimationFrame(gameLoop);
+
+</script>
+</body>
+</html>

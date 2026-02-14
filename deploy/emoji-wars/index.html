@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Emoji Wars ⚔️</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: linear-gradient(180deg, #87CEEB 0%, #DDA0DD 100%);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+canvas {
+  display: block;
+  width: 100%; height: 100%;
+}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+'use strict';
+
+// ============================================================
+// EMOJI WARS - Real-Time Strategy with Emoji Armies
+// ============================================================
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+// --- GLOBALS ---
+let W, H, dpr, centerX, centerY;
+let gameTime = 0, deltaTime = 0, lastTime = 0;
+let gameState = 'menu'; // menu, armyBuilder, battle, victory, defeat
+let playerWins = 0, playerLosses = 0;
+let inputEvents = [];
+
+// --- EMOJI UNIT DATABASE ---
+const emojiDB = {
+  // MELEE (beats Ranged, weak to Magic)
+  '⚔️': { name: 'Sword', type: 'melee', atk: 15, def: 10, spd: 1.5, cost: 2, ability: 'slash', desc: 'Basic warrior' },
+  '🗡️': { name: 'Dagger', type: 'melee', atk: 12, def: 5, spd: 2.5, cost: 1, ability: 'quick', desc: 'Fast attacker' },
+  '🛡️': { name: 'Shield', type: 'melee', atk: 5, def: 30, spd: 0.8, cost: 2, ability: 'block', desc: 'Tank' },
+  '🦁': { name: 'Lion', type: 'melee', atk: 18, def: 12, spd: 2.0, cost: 3, ability: 'roar', desc: 'King of beasts' },
+  '🐺': { name: 'Wolf', type: 'melee', atk: 14, def: 8, spd: 2.2, cost: 2, ability: 'pack', desc: 'Pack hunter' },
+  '💀': { name: 'Reaper', type: 'melee', atk: 20, def: 5, spd: 1.2, cost: 3, ability: 'death', desc: 'High risk, high reward' },
+  
+  // RANGED (beats Magic, weak to Melee)
+  '🏹': { name: 'Archer', type: 'ranged', atk: 12, def: 5, spd: 1.0, cost: 2, ability: 'volley', desc: 'Long range' },
+  '🎯': { name: 'Sniper', type: 'ranged', atk: 25, def: 3, spd: 0.6, cost: 4, ability: 'headshot', desc: 'Precise killer' },
+  '💣': { name: 'Bomber', type: 'ranged', atk: 30, def: 2, spd: 0.8, cost: 3, ability: 'explode', desc: 'Area damage on death' },
+  '🦅': { name: 'Eagle', type: 'ranged', atk: 10, def: 8, spd: 2.5, cost: 2, ability: 'dive', desc: 'Flying attacker' },
+  
+  // MAGIC (beats Melee, weak to Ranged)
+  '🧙‍♂️': { name: 'Wizard', type: 'magic', atk: 18, def: 6, spd: 1.0, cost: 3, ability: 'fireball', desc: 'Elemental power' },
+  '⚡': { name: 'Lightning', type: 'magic', atk: 15, def: 4, spd: 3.0, cost: 2, ability: 'chain', desc: 'Chains to enemies' },
+  '🔥': { name: 'Fire', type: 'magic', atk: 12, def: 6, spd: 1.5, cost: 2, ability: 'burn', desc: 'Damage over time' },
+  '🌊': { name: 'Wave', type: 'magic', atk: 10, def: 10, spd: 1.2, cost: 3, ability: 'flood', desc: 'Pushes enemies back' },
+  '❄️': { name: 'Ice', type: 'magic', atk: 8, def: 8, spd: 1.0, cost: 2, ability: 'freeze', desc: 'Slows enemies' },
+  
+  // CREATURES (balanced)
+  '🐉': { name: 'Dragon', type: 'creature', atk: 35, def: 25, spd: 1.5, cost: 5, ability: 'breathe', desc: 'Legendary powerhouse' },
+  '🤖': { name: 'Robot', type: 'creature', atk: 16, def: 20, spd: 1.0, cost: 3, ability: 'repair', desc: 'Self-healing' },
+  '👻': { name: 'Ghost', type: 'creature', atk: 10, def: 5, spd: 2.0, cost: 2, ability: 'phase', desc: 'Dodges attacks' },
+  '🐍': { name: 'Snake', type: 'creature', atk: 14, def: 6, spd: 1.8, cost: 2, ability: 'poison', desc: 'Venomous bite' },
+  '🦂': { name: 'Scorpion', type: 'creature', atk: 12, def: 10, spd: 1.3, cost: 2, ability: 'sting', desc: 'Critical strikes' },
+  
+  // SPECIALS (unique mechanics)
+  '🏰': { name: 'Castle', type: 'special', atk: 0, def: 50, spd: 0, cost: 4, ability: 'fortify', desc: 'Immovable wall' },
+  '🌪️': { name: 'Tornado', type: 'special', atk: 20, def: 0, spd: 2.5, cost: 3, ability: 'scatter', desc: 'Displaces enemies' },
+  '💥': { name: 'Blast', type: 'special', atk: 40, def: 1, spd: 0.5, cost: 4, ability: 'nuke', desc: 'One-time explosion' },
+  '🌟': { name: 'Star', type: 'special', atk: 5, def: 5, spd: 1.5, cost: 1, ability: 'buff', desc: 'Boosts nearby allies' },
+};
+
+const emojiCategories = {
+  melee: ['⚔️', '🗡️', '🛡️', '🦁', '🐺', '💀'],
+  ranged: ['🏹', '🎯', '💣', '🦅'],
+  magic: ['🧙‍♂️', '⚡', '🔥', '🌊', '❄️'],
+  creature: ['🐉', '🤖', '👻', '🐍', '🦂'],
+  special: ['🏰', '🌪️', '💥', '🌟']
+};
+
+// --- PLAYER STATE ---
+let playerArmy = []; // Array of emoji strings (max 8)
+let playerDeck = {}; // { emoji: count } for battle deployment
+let enemyArmy = [];
+let enemyDeck = {};
+let difficulty = 'medium'; // easy, medium, hard
+
+// --- BATTLE STATE ---
+let battleTimer = 120; // 2 minutes
+let playerHP = 5000;
+let enemyHP = 5000;
+let units = []; // Active units on battlefield
+let particles = [];
+let battleLog = []; // For replay
+let dragState = { active: false, emoji: null, startX: 0, startY: 0, x: 0, y: 0 };
+
+// --- AUDIO ENGINE ---
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playTone(freq, duration, type = 'square', vol = 0.08) {
+  ensureAudio();
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + duration);
+}
+
+function sfxClick() { playTone(800, 0.05, 'sine', 0.06); }
+function sfxDeploy() { playTone(600, 0.08, 'square', 0.08); }
+function sfxHit() { playTone(300, 0.1, 'sawtooth', 0.05); }
+function sfxDeath() { playTone(200, 0.15, 'triangle', 0.06); }
+function sfxVictory() { 
+  playTone(523, 0.12, 'sine', 0.08); 
+  setTimeout(() => playTone(659, 0.12, 'sine', 0.08), 120); 
+  setTimeout(() => playTone(784, 0.25, 'sine', 0.08), 240); 
+}
+function sfxDefeat() { 
+  playTone(400, 0.3, 'sawtooth', 0.08); 
+  setTimeout(() => playTone(300, 0.5, 'sawtooth', 0.08), 300); 
+}
+function sfxMarch() { playTone(400 + Math.random() * 100, 0.05, 'square', 0.03); }
+
+// --- RESIZE ---
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  centerX = W / 2;
+  centerY = H / 2;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// --- INPUT HANDLING ---
+function getEventPos(e) {
+  if (e.touches) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  return { x: e.clientX, y: e.clientY };
+}
+
+function hitTest(px, py, x, y, w, h) {
+  return px >= x - w/2 && px <= x + w/2 && py >= y - h/2 && py <= y + h/2;
+}
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  ensureAudio();
+  const pos = getEventPos(e);
+  inputEvents.push({ type: 'tap', x: pos.x, y: pos.y });
+  dragState.active = true;
+  dragState.startX = pos.x;
+  dragState.startY = pos.y;
+  dragState.x = pos.x;
+  dragState.y = pos.y;
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (dragState.active) {
+    const pos = getEventPos(e);
+    dragState.x = pos.x;
+    dragState.y = pos.y;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  if (dragState.active) {
+    inputEvents.push({ type: 'release', x: dragState.x, y: dragState.y, startX: dragState.startX, startY: dragState.startY });
+    dragState.active = false;
+  }
+});
+
+canvas.addEventListener('mousedown', (e) => {
+  ensureAudio();
+  inputEvents.push({ type: 'tap', x: e.clientX, y: e.clientY });
+  dragState.active = true;
+  dragState.startX = e.clientX;
+  dragState.startY = e.clientY;
+  dragState.x = e.clientX;
+  dragState.y = e.clientY;
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  if (dragState.active) {
+    dragState.x = e.clientX;
+    dragState.y = e.clientY;
+  }
+});
+
+canvas.addEventListener('mouseup', (e) => {
+  if (dragState.active) {
+    inputEvents.push({ type: 'release', x: e.clientX, y: e.clientY, startX: dragState.startX, startY: dragState.startY });
+    dragState.active = false;
+  }
+});
+
+// --- DRAWING HELPERS ---
+function drawRect(x, y, w, h, color, stroke = null, lineWidth = 2) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x - w/2, y - h/2, w, h);
+  if (stroke) {
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = lineWidth;
+    ctx.strokeRect(x - w/2, y - h/2, w, h);
+  }
+}
+
+function drawRoundRect(x, y, w, h, r, color, stroke = null) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.roundRect(x - w/2, y - h/2, w, h, r);
+  ctx.fill();
+  if (stroke) {
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+}
+
+function drawText(text, x, y, size, color, align = 'center', weight = '400') {
+  ctx.fillStyle = color;
+  ctx.font = `${weight} ${size}px -apple-system, 'Segoe UI', sans-serif`;
+  ctx.textAlign = align;
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, x, y);
+}
+
+function drawEmoji(emoji, x, y, size) {
+  ctx.font = `${size}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(emoji, x, y);
+}
+
+function drawButton(x, y, w, h, label, bg, fg, onClick) {
+  const hovered = dragState.x > x - w/2 && dragState.x < x + w/2 && dragState.y > y - h/2 && dragState.y < y + h/2;
+  const finalBg = hovered ? darkenColor(bg, 0.9) : bg;
+  drawRoundRect(x, y, w, h, 12, finalBg);
+  drawText(label, x, y, 20, fg, 'center', '700');
+  return { x, y, w, h, onClick };
+}
+
+function darkenColor(hex, factor) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgb(${Math.floor(r * factor)}, ${Math.floor(g * factor)}, ${Math.floor(b * factor)})`;
+}
+
+// --- PARTICLES ---
+function spawnParticle(x, y, emoji, vx = 0, vy = 0) {
+  particles.push({ x, y, emoji, vx, vy, life: 1, decay: 0.02, size: 20 + Math.random() * 10 });
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.3;
+    p.life -= p.decay;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    ctx.save();
+    ctx.globalAlpha = p.life;
+    drawEmoji(p.emoji, p.x, p.y, p.size);
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// GAME STATES
+// ============================================================
+
+// --- MENU ---
+function initMenu() {
+  playerArmy = [];
+  enemyArmy = [];
+}
+
+function updateMenu() {
+  for (const ev of inputEvents) {
+    if (ev.type === 'tap') {
+      // Start button
+      if (hitTest(ev.x, ev.y, centerX, centerY + 20, 280, 70)) {
+        sfxClick();
+        gameState = 'armyBuilder';
+        initArmyBuilder();
+        return;
+      }
+      
+      // Difficulty buttons
+      if (hitTest(ev.x, ev.y, centerX - 110, centerY + 120, 90, 50)) {
+        difficulty = 'easy';
+        sfxClick();
+      }
+      if (hitTest(ev.x, ev.y, centerX, centerY + 120, 90, 50)) {
+        difficulty = 'medium';
+        sfxClick();
+      }
+      if (hitTest(ev.x, ev.y, centerX + 110, centerY + 120, 90, 50)) {
+        difficulty = 'hard';
+        sfxClick();
+      }
+    }
+  }
+}
+
+function drawMenu() {
+  // Background
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#FFD700');
+  grad.addColorStop(1, '#FFA500');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  
+  // Title
+  drawText('⚔️ EMOJI WARS ⚔️', centerX, centerY - 120, 48, '#8B4513', 'center', '900');
+  drawText('Real-Time Strategy with Emoji Armies', centerX, centerY - 70, 16, '#654321', 'center', '500');
+  
+  // Emoji explosion background
+  const emojis = ['⚔️', '🏹', '🧙‍♂️', '🐉', '💥', '⚡', '🔥', '🛡️'];
+  for (let i = 0; i < 15; i++) {
+    const angle = (i / 15) * Math.PI * 2;
+    const radius = 150 + Math.sin(gameTime * 2 + i) * 20;
+    const x = centerX + Math.cos(angle) * radius;
+    const y = centerY - 40 + Math.sin(angle) * radius;
+    ctx.save();
+    ctx.globalAlpha = 0.3;
+    drawEmoji(emojis[i % emojis.length], x, y, 32);
+    ctx.restore();
+  }
+  
+  // Start button
+  drawRoundRect(centerX, centerY + 20, 280, 70, 20, '#FF4444');
+  drawText('BUILD ARMY & BATTLE!', centerX, centerY + 20, 22, '#FFF', 'center', '700');
+  
+  // Difficulty selection
+  drawText('AI Difficulty:', centerX, centerY + 80, 14, '#654321');
+  drawRoundRect(centerX - 110, centerY + 120, 90, 50, 10, difficulty === 'easy' ? '#4CAF50' : '#CCC');
+  drawText('Easy', centerX - 110, centerY + 120, 16, '#000', 'center', '600');
+  drawRoundRect(centerX, centerY + 120, 90, 50, 10, difficulty === 'medium' ? '#FFA500' : '#CCC');
+  drawText('Medium', centerX, centerY + 120, 16, '#000', 'center', '600');
+  drawRoundRect(centerX + 110, centerY + 120, 90, 50, 10, difficulty === 'hard' ? '#F44336' : '#CCC');
+  drawText('Hard', centerX + 110, centerY + 120, 16, '#000', 'center', '600');
+  
+  // Score
+  drawText(`W: ${playerWins} | L: ${playerLosses}`, centerX, H - 30, 16, '#654321');
+}
+
+// --- ARMY BUILDER ---
+let selectedCategory = 'melee';
+let armySlots = 8; // Max 8 units
+
+function initArmyBuilder() {
+  if (playerArmy.length === 0) {
+    // Default army
+    playerArmy = ['⚔️', '🏹', '🧙‍♂️', '🛡️', '🐉', '⚔️', '🏹', '🧙‍♂️'];
+  }
+}
+
+function updateArmyBuilder() {
+  for (const ev of inputEvents) {
+    if (ev.type === 'tap') {
+      // Category tabs
+      const tabY = 150;
+      const tabW = W / 5;
+      const categories = ['melee', 'ranged', 'magic', 'creature', 'special'];
+      for (let i = 0; i < categories.length; i++) {
+        const tabX = (i + 0.5) * tabW;
+        if (hitTest(ev.x, ev.y, tabX, tabY, tabW - 10, 50)) {
+          selectedCategory = categories[i];
+          sfxClick();
+        }
+      }
+      
+      // Emoji selection grid
+      const emojis = emojiCategories[selectedCategory];
+      const gridStartY = 220;
+      const cellW = W / 6;
+      const cellH = 90;
+      for (let i = 0; i < emojis.length; i++) {
+        const row = Math.floor(i / 6);
+        const col = i % 6;
+        const cellX = col * cellW + cellW / 2;
+        const cellY = gridStartY + row * cellH + cellH / 2;
+        if (hitTest(ev.x, ev.y, cellX, cellY, cellW - 10, cellH - 10)) {
+          if (playerArmy.length < armySlots) {
+            playerArmy.push(emojis[i]);
+            sfxDeploy();
+          }
+        }
+      }
+      
+      // Army slots (tap to remove)
+      const slotY = 80;
+      const slotW = W / armySlots;
+      for (let i = 0; i < playerArmy.length; i++) {
+        const slotX = i * slotW + slotW / 2;
+        if (hitTest(ev.x, ev.y, slotX, slotY, slotW - 10, 90)) {
+          playerArmy.splice(i, 1);
+          sfxClick();
+          break;
+        }
+      }
+      
+      // Battle button
+      if (playerArmy.length > 0 && hitTest(ev.x, ev.y, centerX, H - 60, 300, 70)) {
+        sfxClick();
+        gameState = 'battle';
+        initBattle();
+        return;
+      }
+    }
+  }
+}
+
+function drawArmyBuilder() {
+  // Background
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#FFE066');
+  grad.addColorStop(1, '#FFAA33');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  
+  // Title
+  drawText('BUILD YOUR ARMY', centerX, 25, 28, '#654321', 'center', '800');
+  
+  // Army slots
+  const slotY = 80;
+  const slotW = W / armySlots;
+  drawText(`Your Army (${playerArmy.length}/${armySlots}):`, centerX, 50, 14, '#654321');
+  for (let i = 0; i < armySlots; i++) {
+    const slotX = i * slotW + slotW / 2;
+    drawRoundRect(slotX, slotY, slotW - 10, 90, 10, '#FFF', '#4FC3F7');
+    if (playerArmy[i]) {
+      drawEmoji(playerArmy[i], slotX, slotY - 10, 36);
+      const data = emojiDB[playerArmy[i]];
+      drawText(`Lv${Math.ceil(data.cost)}`, slotX, slotY + 30, 10, '#666', 'center', '600');
+    }
+  }
+  
+  // Category tabs
+  const tabY = 150;
+  const tabW = W / 5;
+  const categories = ['melee', 'ranged', 'magic', 'creature', 'special'];
+  const tabLabels = ['⚔️ Combat', '🏹 Ranged', '🧙‍♂️ Magic', '🐉 Creatures', '✨ Specials'];
+  for (let i = 0; i < categories.length; i++) {
+    const tabX = (i + 0.5) * tabW;
+    const isActive = selectedCategory === categories[i];
+    drawRoundRect(tabX, tabY, tabW - 10, 50, 8, isActive ? '#FFF' : '#DDD');
+    drawText(tabLabels[i], tabX, tabY, 12, '#000', 'center', '600');
+  }
+  
+  // Emoji grid
+  const emojis = emojiCategories[selectedCategory];
+  const gridStartY = 220;
+  const cellW = W / 6;
+  const cellH = 90;
+  for (let i = 0; i < emojis.length; i++) {
+    const row = Math.floor(i / 6);
+    const col = i % 6;
+    const cellX = col * cellW + cellW / 2;
+    const cellY = gridStartY + row * cellH + cellH / 2;
+    const emoji = emojis[i];
+    const data = emojiDB[emoji];
+    const typeColors = { melee: '#FF6B6B', ranged: '#4ECDC4', magic: '#A29BFE', creature: '#FD79A8', special: '#FDCB6E' };
+    drawRoundRect(cellX, cellY, cellW - 15, cellH - 15, 8, '#FFF', typeColors[data.type]);
+    drawEmoji(emoji, cellX, cellY - 10, 32);
+    drawText(data.name, cellX, cellY + 22, 10, '#333', 'center', '600');
+  }
+  
+  // Battle button
+  if (playerArmy.length > 0) {
+    const pulse = Math.sin(gameTime * 5) * 5;
+    drawRoundRect(centerX, H - 60, 300 + pulse, 70, 20, '#44FF44');
+    drawText('BATTLE! ⚔️', centerX, H - 60, 26, '#000', 'center', '800');
+  } else {
+    drawRoundRect(centerX, H - 60, 300, 70, 20, '#AAA');
+    drawText('Select units to battle', centerX, H - 60, 18, '#666', 'center', '600');
+  }
+}
+
+// --- BATTLE ---
+function initBattle() {
+  // Generate enemy army based on difficulty
+  enemyArmy = generateEnemyArmy();
+  
+  // Setup decks
+  playerDeck = {};
+  enemyDeck = {};
+  for (const emoji of playerArmy) {
+    playerDeck[emoji] = (playerDeck[emoji] || 0) + 1;
+  }
+  for (const emoji of enemyArmy) {
+    enemyDeck[emoji] = (enemyDeck[emoji] || 0) + 1;
+  }
+  
+  // Reset battle state
+  battleTimer = 120;
+  playerHP = 5000;
+  enemyHP = 5000;
+  units = [];
+  particles = [];
+  battleLog = [];
+}
+
+function generateEnemyArmy() {
+  const allEmojis = Object.keys(emojiDB);
+  const army = [];
+  const armySize = 8;
+  
+  if (difficulty === 'easy') {
+    // Random weak units
+    for (let i = 0; i < armySize; i++) {
+      const weakUnits = allEmojis.filter(e => emojiDB[e].cost <= 2);
+      army.push(weakUnits[Math.floor(Math.random() * weakUnits.length)]);
+    }
+  } else if (difficulty === 'medium') {
+    // Balanced mix
+    for (let i = 0; i < armySize; i++) {
+      army.push(allEmojis[Math.floor(Math.random() * allEmojis.length)]);
+    }
+  } else {
+    // Hard counter-composition
+    const playerTypes = {};
+    for (const emoji of playerArmy) {
+      const type = emojiDB[emoji].type;
+      playerTypes[type] = (playerTypes[type] || 0) + 1;
+    }
+    
+    // Counter dominant type
+    const dominantType = Object.keys(playerTypes).reduce((a, b) => playerTypes[a] > playerTypes[b] ? a : b);
+    const counterType = { melee: 'magic', ranged: 'melee', magic: 'ranged' }[dominantType] || 'creature';
+    const counterEmojis = allEmojis.filter(e => emojiDB[e].type === counterType);
+    
+    for (let i = 0; i < armySize; i++) {
+      if (Math.random() < 0.7) {
+        army.push(counterEmojis[Math.floor(Math.random() * counterEmojis.length)]);
+      } else {
+        army.push(allEmojis[Math.floor(Math.random() * allEmojis.length)]);
+      }
+    }
+  }
+  
+  return army;
+}
+
+function updateBattle() {
+  battleTimer -= deltaTime;
+  
+  if (battleTimer <= 0 || playerHP <= 0 || enemyHP <= 0) {
+    if (playerHP > enemyHP) {
+      gameState = 'victory';
+      playerWins++;
+      sfxVictory();
+    } else {
+      gameState = 'defeat';
+      playerLosses++;
+      sfxDefeat();
+    }
+    return;
+  }
+  
+  // AI deployment
+  if (Math.random() < 0.02 * (difficulty === 'easy' ? 0.5 : difficulty === 'hard' ? 2 : 1)) {
+    const availableUnits = Object.keys(enemyDeck).filter(e => enemyDeck[e] > 0);
+    if (availableUnits.length > 0) {
+      const emoji = availableUnits[Math.floor(Math.random() * availableUnits.length)];
+      const lane = Math.floor(Math.random() * 3);
+      deployUnit(emoji, lane, 'enemy');
+    }
+  }
+  
+  // Update units
+  for (let i = units.length - 1; i >= 0; i--) {
+    const u = units[i];
+    
+    // March forward
+    if (u.owner === 'player') {
+      u.y -= emojiDB[u.emoji].spd * deltaTime * 30;
+      if (Math.random() < 0.02) sfxMarch();
+    } else {
+      u.y += emojiDB[u.emoji].spd * deltaTime * 30;
+      if (Math.random() < 0.02) sfxMarch();
+    }
+    
+    // Reach enemy base
+    if (u.owner === 'player' && u.y < 80) {
+      enemyHP -= emojiDB[u.emoji].atk;
+      spawnParticle(u.x, u.y, '💥', 0, -3);
+      units.splice(i, 1);
+      sfxHit();
+      continue;
+    }
+    if (u.owner === 'enemy' && u.y > H - 180) {
+      playerHP -= emojiDB[u.emoji].atk;
+      spawnParticle(u.x, u.y, '💥', 0, 3);
+      units.splice(i, 1);
+      sfxHit();
+      continue;
+    }
+    
+    // Combat with enemies in same lane
+    for (let j = units.length - 1; j >= 0; j--) {
+      if (i >= units.length || j >= units.length) break;
+      const u2 = units[j];
+      if (u.owner !== u2.owner && u.lane === u2.lane && Math.abs(u.y - u2.y) < 40) {
+        // Combat!
+        const u1Data = emojiDB[u.emoji];
+        const u2Data = emojiDB[u2.emoji];
+        
+        // Rock-paper-scissors advantage
+        let u1Advantage = 1;
+        let u2Advantage = 1;
+        if ((u1Data.type === 'melee' && u2Data.type === 'ranged') ||
+            (u1Data.type === 'ranged' && u2Data.type === 'magic') ||
+            (u1Data.type === 'magic' && u2Data.type === 'melee')) {
+          u1Advantage = 1.5;
+          u2Advantage = 0.7;
+        } else if ((u2Data.type === 'melee' && u1Data.type === 'ranged') ||
+                   (u2Data.type === 'ranged' && u1Data.type === 'magic') ||
+                   (u2Data.type === 'magic' && u1Data.type === 'melee')) {
+          u2Advantage = 1.5;
+          u1Advantage = 0.7;
+        }
+        
+        // Deal damage
+        u.hp -= u2Data.atk * u2Advantage * deltaTime * 10;
+        u2.hp -= u1Data.atk * u1Advantage * deltaTime * 10;
+        
+        // Death
+        if (u.hp <= 0) {
+          spawnParticle(u.x, u.y, u.emoji, (Math.random() - 0.5) * 3, -5);
+          spawnParticle(u.x, u.y, '💀', 0, -2);
+          sfxDeath();
+          units.splice(i, 1);
+        }
+        if (u2.hp <= 0 && j < units.length) {
+          spawnParticle(u2.x, u2.y, u2.emoji, (Math.random() - 0.5) * 3, -5);
+          spawnParticle(u2.x, u2.y, '💀', 0, -2);
+          sfxDeath();
+          units.splice(j, 1);
+        }
+        break;
+      }
+    }
+  }
+  
+  updateParticles();
+  
+  // Player input - deploy units
+  for (const ev of inputEvents) {
+    if (ev.type === 'tap') {
+      // Tap emoji card to start drag
+      const deckEmojis = Object.keys(playerDeck).filter(e => playerDeck[e] > 0);
+      const cardY = H - 100;
+      const cardW = W / deckEmojis.length;
+      for (let i = 0; i < deckEmojis.length; i++) {
+        const cardX = i * cardW + cardW / 2;
+        if (hitTest(ev.x, ev.y, cardX, cardY, cardW - 10, 90)) {
+          dragState.emoji = deckEmojis[i];
+          dragState.startY = ev.y;
+          sfxClick();
+        }
+      }
+    }
+    
+    if (ev.type === 'release' && dragState.emoji) {
+      // Determine lane based on release position
+      const battleFieldTop = 80;
+      const battleFieldBottom = H - 180;
+      const laneHeight = (battleFieldBottom - battleFieldTop) / 3;
+      
+      if (ev.y >= battleFieldTop && ev.y <= battleFieldBottom) {
+        const lane = Math.floor((ev.y - battleFieldTop) / laneHeight);
+        deployUnit(dragState.emoji, lane, 'player');
+      }
+      
+      dragState.emoji = null;
+    }
+  }
+}
+
+function deployUnit(emoji, lane, owner) {
+  const deck = owner === 'player' ? playerDeck : enemyDeck;
+  if (deck[emoji] > 0) {
+    deck[emoji]--;
+    
+    const laneX = W * 0.15 + lane * (W * 0.7 / 3) + (W * 0.7 / 6);
+    const y = owner === 'player' ? H - 200 : 100;
+    
+    units.push({
+      emoji,
+      owner,
+      lane,
+      x: laneX,
+      y,
+      hp: 100,
+      spawnTime: gameTime
+    });
+    
+    sfxDeploy();
+    spawnParticle(laneX, y, emoji, 0, 0);
+    battleLog.push(`${owner}: ${emoji} → Lane ${lane + 1}`);
+  }
+}
+
+function drawBattle() {
+  // Background gradient
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#87CEEB');
+  grad.addColorStop(0.5, '#B19CD9');
+  grad.addColorStop(1, '#DDA0DD');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  
+  // Timer
+  const mins = Math.floor(battleTimer / 60);
+  const secs = Math.floor(battleTimer % 60);
+  drawRoundRect(centerX, 30, 100, 40, 15, '#333');
+  drawText(`${mins}:${secs.toString().padStart(2, '0')}`, centerX, 30, 22, '#FFF', 'center', '700');
+  
+  // Enemy HP bar
+  drawRect(centerX, 70, W - 60, 40, '#FF6B6B');
+  const enemyHPRatio = Math.max(0, enemyHP / 5000);
+  drawRect(centerX - (W - 60) / 2 + (W - 60) * enemyHPRatio / 2, 70, (W - 60) * enemyHPRatio, 40, '#FF3333');
+  drawText('🏰 ENEMY', centerX, 55, 18, '#FFF', 'center', '700');
+  drawText(`${Math.max(0, Math.floor(enemyHP))}/5000`, centerX, 70, 16, '#FFF', 'center', '600');
+  
+  // Battlefield (3 lanes)
+  const battleFieldTop = 100;
+  const battleFieldBottom = H - 180;
+  const laneHeight = (battleFieldBottom - battleFieldTop) / 3;
+  
+  for (let i = 0; i < 3; i++) {
+    const laneY = battleFieldTop + i * laneHeight + laneHeight / 2;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.fillRect(W * 0.1, battleFieldTop + i * laneHeight, W * 0.8, laneHeight);
+    
+    // Lane separators
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(W * 0.1, battleFieldTop + i * laneHeight);
+    ctx.lineTo(W * 0.9, battleFieldTop + i * laneHeight);
+    ctx.stroke();
+  }
+  
+  // Units
+  for (const u of units) {
+    drawEmoji(u.emoji, u.x, u.y, 32);
+    
+    // HP bar
+    const hpRatio = u.hp / 100;
+    const barW = 30;
+    ctx.fillStyle = '#333';
+    ctx.fillRect(u.x - barW / 2, u.y - 25, barW, 4);
+    ctx.fillStyle = hpRatio > 0.5 ? '#4CAF50' : hpRatio > 0.25 ? '#FFC107' : '#F44336';
+    ctx.fillRect(u.x - barW / 2, u.y - 25, barW * hpRatio, 4);
+  }
+  
+  drawParticles();
+  
+  // Player HP bar
+  drawRect(centerX, H - 140, W - 60, 40, '#4CAF50');
+  const playerHPRatio = Math.max(0, playerHP / 5000);
+  drawRect(centerX - (W - 60) / 2 + (W - 60) * playerHPRatio / 2, H - 140, (W - 60) * playerHPRatio, 40, '#2E7D32');
+  drawText('🛡️ YOU', centerX, H - 155, 18, '#FFF', 'center', '700');
+  drawText(`${Math.max(0, Math.floor(playerHP))}/5000`, centerX, H - 140, 16, '#FFF', 'center', '600');
+  
+  // Player deck
+  const deckEmojis = Object.keys(playerDeck).filter(e => playerDeck[e] > 0);
+  const cardY = H - 60;
+  const cardW = W / deckEmojis.length;
+  for (let i = 0; i < deckEmojis.length; i++) {
+    const cardX = i * cardW + cardW / 2;
+    const emoji = deckEmojis[i];
+    const count = playerDeck[emoji];
+    
+    drawRoundRect(cardX, cardY, cardW - 10, 90, 10, '#FFF', '#4FC3F7');
+    drawEmoji(emoji, cardX, cardY - 10, 32);
+    
+    // Count badge
+    drawRoundRect(cardX + cardW / 2 - 20, cardY - 35, 28, 28, 14, '#FFD700');
+    drawText(count.toString(), cardX + cardW / 2 - 20, cardY - 35, 16, '#000', 'center', '700');
+  }
+  
+  // Drag preview
+  if (dragState.emoji && dragState.active) {
+    ctx.save();
+    ctx.globalAlpha = 0.7;
+    drawEmoji(dragState.emoji, dragState.x, dragState.y, 48);
+    
+    // Lane highlight
+    if (dragState.y >= battleFieldTop && dragState.y <= battleFieldBottom) {
+      const lane = Math.floor((dragState.y - battleFieldTop) / laneHeight);
+      ctx.fillStyle = 'rgba(100, 255, 100, 0.3)';
+      ctx.fillRect(W * 0.1, battleFieldTop + lane * laneHeight, W * 0.8, laneHeight);
+    }
+    ctx.restore();
+  }
+}
+
+// --- VICTORY / DEFEAT ---
+function updateVictoryDefeat() {
+  for (const ev of inputEvents) {
+    if (ev.type === 'tap') {
+      // Next Battle button
+      if (hitTest(ev.x, ev.y, centerX, H - 70, 300, 60)) {
+        sfxClick();
+        gameState = 'armyBuilder';
+        initArmyBuilder();
+        return;
+      }
+      
+      // Copy Emoji String button
+      if (hitTest(ev.x, ev.y, centerX, H - 150, 300, 50)) {
+        sfxClick();
+        const replayStr = generateReplayString();
+        navigator.clipboard.writeText(replayStr).catch(() => {});
+        alert('Battle replay copied to clipboard! 🎉');
+      }
+      
+      // Menu button
+      if (hitTest(ev.x, ev.y, centerX, H - 230, 200, 50)) {
+        sfxClick();
+        gameState = 'menu';
+        initMenu();
+        return;
+      }
+    }
+  }
+}
+
+function generateReplayString() {
+  const playerEmojis = playerArmy.join('');
+  const enemyEmojis = enemyArmy.join('');
+  const result = gameState === 'victory' ? 'YOU WON! 👑' : 'YOU LOST 💀';
+  return `⚔️ EMOJI WARS ⚔️\n\nYOU:\n${playerEmojis}\n\nVS\n\nENEMY:\n${enemyEmojis}\n\n→ ${result}`;
+}
+
+function drawVictoryDefeat() {
+  // Background
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  if (gameState === 'victory') {
+    grad.addColorStop(0, '#FFD700');
+    grad.addColorStop(1, '#FFA500');
+  } else {
+    grad.addColorStop(0, '#FF6B6B');
+    grad.addColorStop(1, '#C0392B');
+  }
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  
+  // Celebration particles
+  if (gameState === 'victory') {
+    for (let i = 0; i < 20; i++) {
+      const x = W * Math.random();
+      const y = (H * 0.5) * Math.random() + Math.sin(gameTime * 3 + i) * 30;
+      ctx.save();
+      ctx.globalAlpha = 0.6;
+      drawEmoji(['🎉', '✨', '⭐', '👑'][i % 4], x, y, 24);
+      ctx.restore();
+    }
+  }
+  
+  // Title
+  const titleText = gameState === 'victory' ? 'VICTORY!' : 'DEFEAT';
+  const titleEmoji = gameState === 'victory' ? '👑' : '💀';
+  drawText(titleText, centerX, 80, 56, gameState === 'victory' ? '#FF4444' : '#FFF', 'center', '900');
+  drawEmoji(titleEmoji, centerX, 140, 48);
+  
+  // Stats box
+  const boxY = centerY - 40;
+  drawRoundRect(centerX, boxY, W - 80, 200, 15, 'rgba(255, 255, 255, 0.95)');
+  
+  const finalPlayerHP = Math.max(0, Math.floor(playerHP));
+  const finalEnemyHP = Math.max(0, Math.floor(enemyHP));
+  const damageDealt = 5000 - finalEnemyHP;
+  const damageBlocked = finalPlayerHP;
+  
+  drawText(`⚔️ Damage Dealt: ${damageDealt}`, centerX, boxY - 70, 18, '#333', 'center', '600');
+  drawText(`💀 Enemy HP Left: ${finalEnemyHP}`, centerX, boxY - 40, 18, '#333', 'center', '600');
+  drawText(`🛡️ Damage Blocked: ${damageBlocked}`, centerX, boxY - 10, 18, '#333', 'center', '600');
+  drawText(`⏱️ Time: ${Math.floor(120 - battleTimer)}s`, centerX, boxY + 20, 18, '#333', 'center', '600');
+  drawText(`🏆 Record: ${playerWins}W - ${playerLosses}L`, centerX, boxY + 50, 18, '#333', 'center', '600');
+  
+  // Battle Replay section
+  drawText('Battle Replay:', centerX, boxY + 95, 16, '#654321', 'center', '700');
+  const replayPreview = `YOU: ${playerArmy.join('')} VS ENEMY: ${enemyArmy.join('')}`;
+  ctx.save();
+  ctx.font = '12px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#333';
+  // Truncate if too long
+  const maxChars = 40;
+  const displayText = replayPreview.length > maxChars ? replayPreview.slice(0, maxChars) + '...' : replayPreview;
+  ctx.fillText(displayText, centerX, boxY + 120);
+  ctx.restore();
+  
+  // Copy button
+  drawRoundRect(centerX, H - 150, 300, 50, 15, '#9C27B0');
+  drawText('COPY EMOJI STRING 📋', centerX, H - 150, 16, '#FFF', 'center', '700');
+  
+  // Next battle button
+  drawRoundRect(centerX, H - 70, 300, 60, 20, '#4CAF50');
+  drawText('NEXT BATTLE ⚔️', centerX, H - 70, 22, '#FFF', 'center', '700');
+  
+  // Menu button
+  drawRoundRect(centerX, H - 230, 200, 50, 15, '#666');
+  drawText('Main Menu', centerX, H - 230, 16, '#FFF', 'center', '600');
+}
+
+// ============================================================
+// MAIN LOOP
+// ============================================================
+
+function gameLoop(timestamp) {
+  const now = timestamp / 1000;
+  deltaTime = lastTime ? Math.min(now - lastTime, 0.1) : 0.016;
+  lastTime = now;
+  gameTime = now;
+  
+  // Update
+  if (gameState === 'menu') updateMenu();
+  else if (gameState === 'armyBuilder') updateArmyBuilder();
+  else if (gameState === 'battle') updateBattle();
+  else if (gameState === 'victory' || gameState === 'defeat') updateVictoryDefeat();
+  
+  // Draw
+  ctx.clearRect(0, 0, W, H);
+  if (gameState === 'menu') drawMenu();
+  else if (gameState === 'armyBuilder') drawArmyBuilder();
+  else if (gameState === 'battle') drawBattle();
+  else if (gameState === 'victory' || gameState === 'defeat') drawVictoryDefeat();
+  
+  // Clear input
+  inputEvents = [];
+  
+  requestAnimationFrame(gameLoop);
+}
+
+// --- INIT ---
+initMenu();
+requestAnimationFrame(gameLoop);
+
+</script>
+</body>
+</html>

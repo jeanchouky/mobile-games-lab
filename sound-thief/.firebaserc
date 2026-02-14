@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "mobile-games-lab-jc"
+  },
+  "targets": {
+    "mobile-games-lab-jc": {
+      "hosting": {
+        "jc-sound-thief-game": [
+          "jc-sound-thief-game"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "mobile-games-lab-jc"
+  },
+  "targets": {
+    "mobile-games-lab-jc": {
+      "hosting": {
+        "jc-gravity-flip-game": [
+          "jc-gravity-flip-game"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

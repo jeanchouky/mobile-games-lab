@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "mobile-games-lab-jc"
+  },
+  "targets": {
+    "mobile-games-lab-jc": {
+      "hosting": {
+        "mobile-games-lab-jc": [
+          "mobile-games-lab-jc"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

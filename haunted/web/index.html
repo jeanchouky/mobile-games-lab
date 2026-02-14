@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>HAUNTED</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #000;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+}
+canvas {
+  display: block;
+  width: 100%; height: 100%;
+  position: absolute;
+  top: 0; left: 0;
+  image-rendering: auto;
+}
+#glitch-overlay {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  z-index: 100;
+  mix-blend-mode: screen;
+  opacity: 0;
+}
+#notification {
+  position: fixed;
+  top: -100px;
+  left: 10px;
+  right: 10px;
+  background: rgba(255,255,255,0.98);
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  z-index: 200;
+  transition: top 0.3s cubic-bezier(0.25, 0.1, 0.25, 1);
+  max-width: 380px;
+  margin: 0 auto;
+}
+#notification.show { top: 10px; }
+#notification .app-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #000;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#notification .message {
+  font-size: 14px;
+  color: #333;
+  line-height: 1.4;
+}
+#camera-dot {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #00ff00;
+  box-shadow: 0 0 10px #00ff00;
+  z-index: 150;
+  display: none;
+}
+#camera-dot.active { display: block; animation: pulse 1s infinite; }
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.1); }
+}
+#toast {
+  position: fixed;
+  bottom: -100px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(40,40,40,0.95);
+  color: #fff;
+  padding: 12px 20px;
+  border-radius: 20px;
+  font-size: 14px;
+  z-index: 200;
+  transition: bottom 0.3s ease;
+}
+#toast.show { bottom: 40px; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="glitch-overlay"></div>
+<div id="notification">
+  <div class="app-name"><span id="notif-icon"></span><span id="notif-app"></span></div>
+  <div class="message" id="notif-message"></div>
+</div>
+<div id="camera-dot"></div>
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+// ============================================================
+// HAUNTED — Social Horror Game
+// Demo Mode: Haunt Your Own Phone
+// ============================================================
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const glitchOverlay = document.getElementById('glitch-overlay');
+const notification = document.getElementById('notification');
+const cameraDot = document.getElementById('camera-dot');
+const toast = document.getElementById('toast');
+
+// --- GLOBALS ---
+let W, H, scale;
+let gameTime = 0, deltaTime = 0, lastTime = 0;
+let gameState = 'menu'; // menu, playing, solved
+let hauntLevel = 0; // 0-3 (subtle → obvious → nightmare)
+let survivalTime = 0;
+let glitchIntensity = 0;
+let inputEvents = [];
+let particles = [];
+let shakeAmount = 0;
+let colorInvert = false;
+let rgbShift = 0;
+let staticNoise = 0;
+let hauntSchedule = [];
+let nextHauntTime = 0;
+let secretCode = []; // puzzle: figure out how to stop it
+let correctCode = ['top-left', 'bottom-right', 'center', 'top-right']; // tap pattern
+let tapHistory = [];
+let solved = false;
+
+// Screen regions for tap detection
+const regions = {
+  'top-left': { x: 0, y: 0, w: 0.33, h: 0.33 },
+  'top-center': { x: 0.33, y: 0, w: 0.34, h: 0.33 },
+  'top-right': { x: 0.67, y: 0, w: 0.33, h: 0.33 },
+  'center-left': { x: 0, y: 0.33, w: 0.33, h: 0.34 },
+  'center': { x: 0.33, y: 0.33, w: 0.34, h: 0.34 },
+  'center-right': { x: 0.67, y: 0.33, w: 0.33, h: 0.34 },
+  'bottom-left': { x: 0, y: 0.67, w: 0.33, h: 0.33 },
+  'bottom-center': { x: 0.33, y: 0.67, w: 0.34, h: 0.33 },
+  'bottom-right': { x: 0.67, y: 0.67, w: 0.33, h: 0.33 }
+};
+
+// --- RESIZE ---
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  scale = Math.min(W / 400, H / 700);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ============================================================
+// AUDIO ENGINE
+// ============================================================
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playTone(freq, duration, type = 'sine', vol = 0.1) {
+  ensureAudio();
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + duration);
+}
+
+function playNoise(duration, vol = 0.08, filterFreq = null) {
+  ensureAudio();
+  const bufSize = audioCtx.sampleRate * duration;
+  const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+  const src = audioCtx.createBufferSource();
+  const gain = audioCtx.createGain();
+  src.buffer = buf;
+  gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  
+  if (filterFreq) {
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = filterFreq;
+    src.connect(filter);
+    filter.connect(gain);
+  } else {
+    src.connect(gain);
+  }
+  gain.connect(audioCtx.destination);
+  src.start();
+}
+
+function playHeartbeat() {
+  playTone(60, 0.15, 'sine', 0.2);
+  setTimeout(() => playTone(60, 0.1, 'sine', 0.15), 150);
+}
+
+function playWhisper() {
+  playNoise(0.8, 0.05, 800);
+}
+
+function playStaticBurst() {
+  playNoise(0.3, 0.12);
+}
+
+function playCreepyTone() {
+  playTone(220 + Math.random() * 100, 1.5, 'triangle', 0.08);
+}
+
+function playJumpscare() {
+  playNoise(0.5, 0.25);
+  playTone(100, 0.6, 'sawtooth', 0.3);
+}
+
+function playWin() {
+  playTone(523, 0.1, 'sine', 0.15);
+  setTimeout(() => playTone(659, 0.1, 'sine', 0.15), 100);
+  setTimeout(() => playTone(784, 0.2, 'sine', 0.15), 200);
+}
+
+// ============================================================
+// HAUNT EVENTS
+// ============================================================
+
+function showNotification(appName, message, icon = '📱') {
+  const notifApp = document.getElementById('notif-app');
+  const notifMessage = document.getElementById('notif-message');
+  const notifIcon = document.getElementById('notif-icon');
+  
+  notifApp.textContent = appName;
+  notifMessage.textContent = message;
+  notifIcon.textContent = icon;
+  
+  notification.classList.add('show');
+  playTone(1000, 0.1, 'sine', 0.1);
+  
+  setTimeout(() => {
+    notification.classList.remove('show');
+  }, 4000);
+}
+
+function showToast(message) {
+  toast.textContent = message;
+  toast.classList.add('show');
+  setTimeout(() => {
+    toast.classList.remove('show');
+  }, 2500);
+}
+
+function activateCamera() {
+  cameraDot.classList.add('active');
+  showToast('📷 Camera accessed');
+  playTone(800, 0.1, 'sine', 0.1);
+  
+  setTimeout(() => {
+    cameraDot.classList.remove('active');
+  }, 5000);
+}
+
+function triggerGlitch(type = 'static', intensity = 0.3, duration = 0.5) {
+  if (type === 'static') {
+    staticNoise = intensity;
+    playStaticBurst();
+    setTimeout(() => { staticNoise *= 0.5; }, duration * 500);
+    setTimeout(() => { staticNoise = 0; }, duration * 1000);
+  } else if (type === 'invert') {
+    colorInvert = true;
+    setTimeout(() => { colorInvert = false; }, duration * 1000);
+  } else if (type === 'rgb-shift') {
+    rgbShift = intensity * 10 * scale;
+    setTimeout(() => { rgbShift *= 0.5; }, duration * 500);
+    setTimeout(() => { rgbShift = 0; }, duration * 1000);
+  } else if (type === 'shake') {
+    shakeAmount = intensity * 20 * scale;
+  }
+}
+
+function scheduleHaunts() {
+  hauntSchedule = [];
+  
+  // Level 0 (0-30s): Subtle
+  hauntSchedule.push({ time: 5, action: () => { playWhisper(); } });
+  hauntSchedule.push({ time: 12, action: () => { triggerGlitch('static', 0.1, 0.3); } });
+  hauntSchedule.push({ time: 18, action: () => { showNotification('Unknown', 'I can see you', '👁️'); } });
+  hauntSchedule.push({ time: 25, action: () => { playCreepyTone(); } });
+  
+  // Level 1 (30-60s): Unsettling
+  hauntSchedule.push({ time: 32, action: () => { activateCamera(); hauntLevel = 1; } });
+  hauntSchedule.push({ time: 38, action: () => { showNotification('Mom', 'Why did you do it?', '💀'); } });
+  hauntSchedule.push({ time: 45, action: () => { triggerGlitch('rgb-shift', 0.5, 1); } });
+  hauntSchedule.push({ time: 52, action: () => { showNotification('Battery', 'Battery at 13%', '🔋'); playHeartbeat(); } });
+  
+  // Level 2 (60-90s): Nightmare
+  hauntSchedule.push({ time: 62, action: () => { triggerGlitch('invert', 1, 2); hauntLevel = 2; } });
+  hauntSchedule.push({ time: 68, action: () => { showNotification('Unknown', 'T̴̢̛̝̳̆H̷͎̔E̶̡̯̾Y̷̧̭̔ ̵̣̈́̀K̴̰̈́N̶͎̔Ö̵̡W̵̱̍', '⚠️'); } });
+  hauntSchedule.push({ time: 75, action: () => { playStaticBurst(); triggerGlitch('shake', 1, 0.5); } });
+  hauntSchedule.push({ time: 82, action: () => { activateCamera(); showNotification('Camera', 'Recording...', '🎥'); } });
+  
+  // Level 3 (90s+): Jumpscare territory
+  hauntSchedule.push({ time: 92, action: () => { playJumpscare(); triggerGlitch('shake', 2, 1); hauntLevel = 3; } });
+  hauntSchedule.push({ time: 98, action: () => { showNotification('Unknown', 'BEHIND YOU', '👹'); } });
+  hauntSchedule.push({ time: 105, action: () => { triggerGlitch('static', 0.8, 2); playHeartbeat(); } });
+  hauntSchedule.push({ time: 112, action: () => { showNotification('System', 'Device will self-destruct in 10...', '💣'); } });
+}
+
+// ============================================================
+// PARTICLES
+// ============================================================
+function spawnParticles(x, y, count, color = '#ff4444') {
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 4 * scale,
+      vy: (Math.random() - 0.5) * 4 * scale - 2 * scale,
+      life: 1,
+      decay: 0.02,
+      size: (2 + Math.random() * 4) * scale,
+      color
+    });
+  }
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.2 * scale;
+    p.life -= p.decay;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    ctx.save();
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// GLITCH EFFECTS
+// ============================================================
+function applyGlitchEffects() {
+  // Screen shake
+  if (shakeAmount > 0.5) {
+    const sx = (Math.random() - 0.5) * shakeAmount;
+    const sy = (Math.random() - 0.5) * shakeAmount;
+    ctx.translate(sx, sy);
+    shakeAmount *= 0.9;
+  }
+  
+  // Static noise overlay
+  if (staticNoise > 0) {
+    ctx.save();
+    ctx.globalAlpha = staticNoise;
+    for (let i = 0; i < 100; i++) {
+      ctx.fillStyle = Math.random() > 0.5 ? '#fff' : '#000';
+      ctx.fillRect(
+        Math.random() * W,
+        Math.random() * H,
+        Math.random() * 3 * scale + 1,
+        Math.random() * 3 * scale + 1
+      );
+    }
+    ctx.restore();
+  }
+  
+  // RGB shift
+  if (rgbShift > 0) {
+    // Simulated chromatic aberration
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = '#ff0000';
+    ctx.fillRect(rgbShift, 0, W, H);
+    ctx.fillStyle = '#00ff00';
+    ctx.fillRect(-rgbShift, 0, W, H);
+    ctx.restore();
+  }
+  
+  // Color inversion
+  if (colorInvert) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'difference';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+}
+
+function drawScanlines() {
+  ctx.save();
+  ctx.globalAlpha = 0.05 + hauntLevel * 0.02;
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 1;
+  for (let y = 0; y < H; y += 4) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ============================================================
+// TEXT RENDERING
+// ============================================================
+function drawText(text, x, y, size = 16, color = '#fff', align = 'center', font = null, glitch = false) {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.font = `${size * scale}px ${font || '-apple-system, sans-serif'}`;
+  ctx.textAlign = align;
+  ctx.textBaseline = 'middle';
+  
+  if (glitch && hauntLevel >= 2) {
+    // Glitchy text rendering
+    ctx.save();
+    ctx.fillStyle = '#ff0000';
+    ctx.fillText(text, x + Math.random() * 2 * scale, y + Math.random() * 2 * scale);
+    ctx.fillStyle = '#00ff00';
+    ctx.fillText(text, x - Math.random() * 2 * scale, y - Math.random() * 2 * scale);
+    ctx.restore();
+  }
+  
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+function drawGlitchText(text, x, y, size = 16, color = '#fff') {
+  // Corrupted text effect
+  const chars = text.split('');
+  let offsetX = 0;
+  
+  ctx.save();
+  ctx.font = `${size * scale}px 'Courier New', monospace`;
+  ctx.textAlign = 'left';
+  
+  for (let i = 0; i < chars.length; i++) {
+    let char = chars[i];
+    
+    // Random corruption
+    if (Math.random() < 0.1 + hauntLevel * 0.1) {
+      const glitchChars = ['█', '▓', '▒', '░', '▀', '▄', '■', '□', '▪', '▫'];
+      char = glitchChars[Math.floor(Math.random() * glitchChars.length)];
+    }
+    
+    ctx.fillStyle = color;
+    if (Math.random() < 0.05) {
+      ctx.fillStyle = '#ff0000';
+    }
+    
+    const yOffset = Math.sin(gameTime * 5 + i) * 2 * scale;
+    ctx.fillText(char, x + offsetX, y + yOffset);
+    offsetX += ctx.measureText(char).width;
+  }
+  ctx.restore();
+}
+
+// ============================================================
+// INPUT HANDLING
+// ============================================================
+function getTapRegion(x, y) {
+  const normX = x / W;
+  const normY = y / H;
+  
+  for (const [name, region] of Object.entries(regions)) {
+    if (normX >= region.x && normX < region.x + region.w &&
+        normY >= region.y && normY < region.y + region.h) {
+      return name;
+    }
+  }
+  return null;
+}
+
+function checkSecretCode() {
+  if (tapHistory.length < correctCode.length) return false;
+  
+  const recent = tapHistory.slice(-correctCode.length);
+  return recent.every((tap, i) => tap === correctCode[i]);
+}
+
+canvas.addEventListener('touchstart', handleTap);
+canvas.addEventListener('mousedown', handleTap);
+
+function handleTap(e) {
+  e.preventDefault();
+  ensureAudio();
+  
+  const pos = e.touches ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : { x: e.clientX, y: e.clientY };
+  inputEvents.push({ type: 'tap', x: pos.x, y: pos.y });
+  
+  if (gameState === 'playing' && !solved) {
+    const region = getTapRegion(pos.x, pos.y);
+    if (region) {
+      tapHistory.push(region);
+      if (tapHistory.length > 10) tapHistory.shift();
+      
+      if (checkSecretCode()) {
+        solved = true;
+        gameState = 'solved';
+        playWin();
+        spawnParticles(W/2, H/2, 30, '#00ff00');
+      } else {
+        // Wrong tap — subtle feedback
+        if (hauntLevel >= 1) {
+          playTone(200, 0.05, 'square', 0.05);
+        }
+      }
+    }
+  }
+}
+
+// ============================================================
+// GAME STATES
+// ============================================================
+
+function startGame() {
+  gameState = 'playing';
+  survivalTime = 0;
+  hauntLevel = 0;
+  tapHistory = [];
+  solved = false;
+  scheduleHaunts();
+  playTone(440, 0.1, 'sine', 0.1);
+}
+
+function resetGame() {
+  gameState = 'menu';
+  survivalTime = 0;
+  hauntLevel = 0;
+  glitchIntensity = 0;
+  colorInvert = false;
+  rgbShift = 0;
+  staticNoise = 0;
+  hauntSchedule = [];
+  tapHistory = [];
+  solved = false;
+  particles = [];
+  shakeAmount = 0;
+}
+
+// ============================================================
+// UPDATE & DRAW
+// ============================================================
+
+function update() {
+  for (const ev of inputEvents) {
+    if (gameState === 'menu' && ev.type === 'tap') {
+      // Tap START button
+      const btnX = W/2, btnY = H/2 + 40 * scale;
+      const btnW = 200 * scale, btnH = 60 * scale;
+      if (ev.x >= btnX - btnW/2 && ev.x <= btnX + btnW/2 &&
+          ev.y >= btnY - btnH/2 && ev.y <= btnY + btnH/2) {
+        startGame();
+      }
+    } else if (gameState === 'solved' && ev.type === 'tap') {
+      // Tap PLAY AGAIN
+      const btnX = W/2, btnY = H/2 + 80 * scale;
+      const btnW = 200 * scale, btnH = 50 * scale;
+      if (ev.x >= btnX - btnW/2 && ev.x <= btnX + btnW/2 &&
+          ev.y >= btnY - btnH/2 && ev.y <= btnY + btnH/2) {
+        resetGame();
+      }
+    }
+  }
+  inputEvents = [];
+  
+  if (gameState === 'playing') {
+    survivalTime += deltaTime;
+    
+    // Execute scheduled haunts
+    for (const haunt of hauntSchedule) {
+      if (survivalTime >= haunt.time && !haunt.executed) {
+        haunt.action();
+        haunt.executed = true;
+      }
+    }
+    
+    // Ambient heartbeat at high levels
+    if (hauntLevel >= 2 && Math.random() < 0.002) {
+      playHeartbeat();
+    }
+    
+    // Random whispers
+    if (hauntLevel >= 1 && Math.random() < 0.0005) {
+      playWhisper();
+    }
+  }
+  
+  updateParticles();
+}
+
+function draw() {
+  // Clear
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  
+  ctx.save();
+  applyGlitchEffects();
+  
+  if (gameState === 'menu') {
+    drawMenu();
+  } else if (gameState === 'playing') {
+    drawPlaying();
+  } else if (gameState === 'solved') {
+    drawSolved();
+  }
+  
+  drawParticles();
+  drawScanlines();
+  ctx.restore();
+}
+
+function drawMenu() {
+  // Title with glitch
+  const titleY = H/2 - 80 * scale;
+  
+  // Glitch shadow
+  ctx.save();
+  ctx.globalAlpha = 0.3;
+  ctx.fillStyle = '#ff0000';
+  drawText('HAUNTED', W/2 + 3*scale, titleY + 3*scale, 48, '#ff0000', 'center', "'Courier New', monospace");
+  ctx.fillStyle = '#00ff00';
+  drawText('HAUNTED', W/2 - 3*scale, titleY - 3*scale, 48, '#00ff00', 'center', "'Courier New', monospace");
+  ctx.restore();
+  
+  // Main title
+  drawText('HAUNTED', W/2, titleY, 48, '#fff', 'center', "'Courier New', monospace");
+  
+  // Subtitle
+  drawText('Your phone is about to turn against you', W/2, titleY + 50*scale, 12, '#999', 'center');
+  
+  // START button
+  const btnY = H/2 + 40 * scale;
+  const pulse = Math.sin(gameTime * 3) * 5 * scale;
+  
+  ctx.save();
+  ctx.fillStyle = '#ff0000';
+  ctx.shadowColor = '#ff0000';
+  ctx.shadowBlur = 20 * scale + pulse;
+  roundRect(W/2 - 100*scale, btnY - 30*scale, 200*scale, 60*scale, 8*scale);
+  ctx.fill();
+  ctx.restore();
+  
+  drawText('START HAUNTING', W/2, btnY, 18, '#fff', 'center', null);
+  
+  // Instructions
+  const instrY = H - 120 * scale;
+  drawText('Survive as long as you can', W/2, instrY, 11, '#666');
+  drawText('Figure out how to STOP the haunting...', W/2, instrY + 25*scale, 11, '#666');
+  drawText('(There IS a way out)', W/2, instrY + 45*scale, 9, '#444');
+}
+
+function drawPlaying() {
+  // Creepy background
+  const bgPulse = Math.sin(gameTime * 2) * 10 + 10;
+  ctx.fillStyle = `rgb(${bgPulse}, 0, ${bgPulse * 0.5})`;
+  ctx.fillRect(0, 0, W, H);
+  
+  // Survival timer
+  const mins = Math.floor(survivalTime / 60);
+  const secs = Math.floor(survivalTime % 60);
+  const timeStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  
+  drawText('SURVIVAL TIME', W/2, 40*scale, 10, '#666', 'center');
+  drawGlitchText(timeStr, W/2 - 40*scale, 65*scale, 32, '#ff0000');
+  
+  // Haunt level indicator
+  const levelNames = ['SUBTLE', 'UNSETTLING', 'NIGHTMARE', 'TERROR'];
+  drawText(`LEVEL: ${levelNames[hauntLevel] || 'UNKNOWN'}`, W/2, 110*scale, 12, '#999', 'center');
+  
+  // Visual disturbances based on level
+  if (hauntLevel >= 1) {
+    // Eyes watching
+    for (let i = 0; i < 3; i++) {
+      const ex = W * 0.1 + i * W * 0.4;
+      const ey = H * 0.3 + Math.sin(gameTime * 2 + i) * 20 * scale;
+      const blink = Math.sin(gameTime * 3 + i * 2) > 0.9;
+      
+      if (!blink) {
+        ctx.save();
+        ctx.globalAlpha = 0.3 + hauntLevel * 0.1;
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.ellipse(ex, ey, 12*scale, 16*scale, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Pupil following
+        const pupilX = ex + Math.sin(gameTime + i) * 3 * scale;
+        const pupilY = ey + Math.cos(gameTime * 0.7 + i) * 3 * scale;
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.arc(pupilX, pupilY, 5*scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+  
+  if (hauntLevel >= 2) {
+    // Shadow figure
+    const figX = W * 0.8;
+    const figY = H * 0.6;
+    const figAlpha = 0.2 + Math.sin(gameTime) * 0.1;
+    
+    ctx.save();
+    ctx.globalAlpha = figAlpha;
+    ctx.fillStyle = '#000';
+    // Head
+    ctx.beginPath();
+    ctx.arc(figX, figY - 30*scale, 15*scale, 0, Math.PI * 2);
+    ctx.fill();
+    // Body
+    ctx.fillRect(figX - 10*scale, figY - 15*scale, 20*scale, 40*scale);
+    ctx.restore();
+  }
+  
+  if (hauntLevel >= 3) {
+    // Creepy message
+    const msgY = H * 0.75;
+    ctx.save();
+    ctx.globalAlpha = 0.4 + Math.sin(gameTime * 5) * 0.2;
+    drawGlitchText('I T   W O N T   S T O P', W/2 - 100*scale, msgY, 16, '#ff0000');
+    ctx.restore();
+  }
+  
+  // Hint system (very subtle)
+  if (survivalTime > 20 && tapHistory.length < 2) {
+    ctx.save();
+    ctx.globalAlpha = 0.1;
+    drawText('Tap the corners in order...', W/2, H - 30*scale, 9, '#444');
+    ctx.restore();
+  }
+  
+  if (tapHistory.length > 0 && tapHistory.length < correctCode.length) {
+    ctx.save();
+    ctx.globalAlpha = 0.15;
+    const progress = tapHistory.slice(-correctCode.length).map((r, i) => r === correctCode[i] ? '✓' : '?').join(' ');
+    drawText(progress, W/2, H - 50*scale, 11, '#00ff00');
+    ctx.restore();
+  }
+}
+
+function drawSolved() {
+  // Victory screen
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  
+  // Glitch clearing effect
+  ctx.save();
+  ctx.globalAlpha = Math.sin(gameTime * 2) * 0.3 + 0.7;
+  
+  drawText('YOU STOPPED IT', W/2, H/2 - 80*scale, 32, '#00ff00', 'center', "'Courier New', monospace");
+  
+  drawText(`Survived: ${Math.floor(survivalTime)}s`, W/2, H/2 - 20*scale, 18, '#fff');
+  drawText(`Haunt Level Reached: ${hauntLevel}`, W/2, H/2 + 10*scale, 14, '#999');
+  
+  // Rating
+  let rating = 'AMATEUR';
+  if (survivalTime > 120) rating = 'LEGEND';
+  else if (survivalTime > 90) rating = 'FEARLESS';
+  else if (survivalTime > 60) rating = 'BRAVE';
+  else if (survivalTime > 30) rating = 'SURVIVOR';
+  
+  drawText(`Rating: ${rating}`, W/2, H/2 + 40*scale, 16, '#ffd700');
+  
+  ctx.restore();
+  
+  // PLAY AGAIN button
+  const btnY = H/2 + 80 * scale;
+  ctx.save();
+  ctx.fillStyle = '#333';
+  roundRect(W/2 - 100*scale, btnY - 25*scale, 200*scale, 50*scale, 8*scale);
+  ctx.fill();
+  ctx.strokeStyle = '#666';
+  ctx.lineWidth = 2;
+  roundRect(W/2 - 100*scale, btnY - 25*scale, 200*scale, 50*scale, 8*scale);
+  ctx.stroke();
+  ctx.restore();
+  
+  drawText('PLAY AGAIN', W/2, btnY, 16, '#fff');
+  
+  // Secret revealed
+  drawText('Secret code: Tap corners TL → BR → C → TR', W/2, H - 40*scale, 9, '#555');
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
+// ============================================================
+// GAME LOOP
+// ============================================================
+function gameLoop(timestamp) {
+  deltaTime = timestamp - lastTime;
+  deltaTime = Math.min(deltaTime, 100) / 1000;
+  lastTime = timestamp;
+  gameTime += deltaTime;
+  
+  update();
+  draw();
+  
+  requestAnimationFrame(gameLoop);
+}
+
+// Start
+resetGame();
+requestAnimationFrame(gameLoop);
+
+</script>
+</body>
+</html>

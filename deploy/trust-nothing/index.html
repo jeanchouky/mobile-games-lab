@@ -1,0 +1,2702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Trust Nothing</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #000;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+canvas {
+  display: block;
+  width: 100%; height: 100%;
+  image-rendering: auto;
+}
+#overlay {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 10;
+}
+#overlay.active { pointer-events: auto; }
+#overlay-content {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="overlay"><div id="overlay-content"></div></div>
+<script>
+'use strict';
+
+// ============================================================
+// TRUST NOTHING — HTML5 Canvas Game
+// ============================================================
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const overlay = document.getElementById('overlay');
+const overlayContent = document.getElementById('overlay-content');
+
+// --- GLOBALS ---
+let W, H, scale, centerX, centerY;
+let gameTime = 0, deltaTime = 0, lastTime = 0;
+let totalDeaths = 0;
+let currentRoom = 0;
+let roomDeaths = 0; // deaths in current room
+let shakeAmount = 0, shakeDecay = 0.9;
+let slowMo = false, slowMoTimer = 0;
+let particles = [];
+let transitioning = false, transitionAlpha = 0, transitionDir = 0, transitionCallback = null;
+let inputEvents = []; // queued tap/click events
+let dragState = { active: false, startX: 0, startY: 0, x: 0, y: 0, dx: 0, dy: 0, target: null };
+let roomState = {}; // per-room state, reset on room entry
+let deathMessage = '';
+let deathAnimTimer = 0;
+let deathAnimType = '';
+let showingDeath = false;
+let stickFigure = { x: 0, y: 0, eyeState: 'normal', breathPhase: 0, lookDir: 0, visible: true, scale: 1 };
+let hintLevel = 0; // increases with deaths in room
+let audioMuted = false; // global mute state
+
+// --- RESIZE ---
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  scale = Math.min(W / 400, H / 700);
+  centerX = W / 2;
+  centerY = H / 2;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ============================================================
+// AUDIO ENGINE (Web Audio API) - Enhanced
+// ============================================================
+let audioCtx = null;
+let masterGain = null;
+let musicGain = null;
+let sfxGain = null;
+
+// Background music state
+let bgMusicNodes = [];
+let currentAmbientNodes = [];
+
+function ensureAudio() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    
+    // Create gain hierarchy
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = audioMuted ? 0 : 1;
+    masterGain.connect(audioCtx.destination);
+    
+    musicGain = audioCtx.createGain();
+    musicGain.gain.value = 0.15;
+    musicGain.connect(masterGain);
+    
+    sfxGain = audioCtx.createGain();
+    sfxGain.gain.value = 1;
+    sfxGain.connect(masterGain);
+    
+    startBackgroundMusic();
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function toggleMute() {
+  audioMuted = !audioMuted;
+  if (audioCtx && masterGain) {
+    masterGain.gain.setValueAtTime(audioMuted ? 0 : 1, audioCtx.currentTime);
+  }
+  if (audioMuted) {
+    stopAllAmbient();
+  } else {
+    startRoomAmbient(currentRoom);
+  }
+}
+
+// === CHIPTUNE BACKGROUND MUSIC ===
+function startBackgroundMusic() {
+  if (!audioCtx || audioMuted) return;
+  stopBackgroundMusic();
+  
+  // Chiptune melody - C major pentatonic scale
+  const melody = [261.63, 293.66, 329.63, 392.00, 440.00]; // C D E G A
+  const bassNotes = [130.81, 164.81, 196.00]; // C E G
+  
+  // Melody oscillator
+  const melodyOsc = audioCtx.createOscillator();
+  melodyOsc.type = 'square';
+  melodyOsc.frequency.value = melody[0];
+  
+  const melodyGainNode = audioCtx.createGain();
+  melodyGainNode.gain.value = 0.08;
+  
+  melodyOsc.connect(melodyGainNode);
+  melodyGainNode.connect(musicGain);
+  melodyOsc.start();
+  
+  // Bass oscillator
+  const bassOsc = audioCtx.createOscillator();
+  bassOsc.type = 'triangle';
+  bassOsc.frequency.value = bassNotes[0];
+  
+  const bassGainNode = audioCtx.createGain();
+  bassGainNode.gain.value = 0.12;
+  
+  bassOsc.connect(bassGainNode);
+  bassGainNode.connect(musicGain);
+  bassOsc.start();
+  
+  // Arpeggio oscillator
+  const arpOsc = audioCtx.createOscillator();
+  arpOsc.type = 'square';
+  arpOsc.frequency.value = melody[0] * 2;
+  
+  const arpGainNode = audioCtx.createGain();
+  arpGainNode.gain.value = 0.04;
+  
+  arpOsc.connect(arpGainNode);
+  arpGainNode.connect(musicGain);
+  arpOsc.start();
+  
+  bgMusicNodes.push({ osc: melodyOsc, gain: melodyGainNode });
+  bgMusicNodes.push({ osc: bassOsc, gain: bassGainNode });
+  bgMusicNodes.push({ osc: arpOsc, gain: arpGainNode });
+  
+  // Animate the melody - 8-step pattern
+  const melodyPattern = [0, 2, 4, 2, 3, 1, 2, 0]; // Indices into melody array
+  const bassPattern = [0, 0, 2, 2, 1, 1, 0, 0];
+  const arpPattern = [0, 4, 2, 3, 1, 2, 4, 0];
+  
+  let step = 0;
+  const noteLength = 0.25; // quarter note
+  
+  function updateMelody() {
+    if (!bgMusicNodes.length || audioMuted) return;
+    
+    const now = audioCtx.currentTime;
+    const nextNoteTime = now + 0.01;
+    
+    // Melody
+    melodyOsc.frequency.setValueAtTime(melody[melodyPattern[step % 8]], nextNoteTime);
+    
+    // Bass (plays half-speed)
+    if (step % 2 === 0) {
+      bassOsc.frequency.setValueAtTime(bassNotes[bassPattern[step % 8]], nextNoteTime);
+    }
+    
+    // Arpeggio (plays double-speed)
+    arpOsc.frequency.setValueAtTime(melody[arpPattern[step % 8]] * 2, nextNoteTime);
+    
+    step++;
+    setTimeout(updateMelody, noteLength * 1000);
+  }
+  
+  updateMelody();
+}
+
+function stopBackgroundMusic() {
+  bgMusicNodes.forEach(node => {
+    try {
+      node.osc.stop();
+    } catch(e) {}
+  });
+  bgMusicNodes = [];
+}
+
+// === ROOM-SPECIFIC AMBIENT SOUNDS ===
+function startRoomAmbient(roomIndex) {
+  stopAllAmbient();
+  if (audioMuted || !audioCtx) return;
+  
+  const now = audioCtx.currentTime;
+  
+  switch(roomIndex) {
+    case 2: // Timer Panic - ticking clock
+      startTickingClock();
+      break;
+    case 5: // System Alert - subtle typing sounds
+      startTypingSounds();
+      break;
+    case 6: // Helpful Arrow - wind ambience
+      startWindAmbience();
+      break;
+    case 8: // Mirror Room - eerie echo
+      startEchoAmbience();
+      break;
+    case 9: // Trust the Troll - troll breathing
+      startTrollAmbience();
+      break;
+  }
+}
+
+function startTickingClock() {
+  const tick = () => {
+    if (currentRoom !== 2 || audioMuted || roomState.expired) return;
+    
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    
+    osc.frequency.value = 800;
+    osc.type = 'sine';
+    
+    gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+    
+    osc.connect(gain);
+    gain.connect(sfxGain);
+    
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.05);
+    
+    setTimeout(tick, 500);
+  };
+  tick();
+}
+
+function startTypingSounds() {
+  const type = () => {
+    if (currentRoom !== 5 || audioMuted || roomState.dismissed) return;
+    
+    if (Math.random() < 0.3) {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      
+      osc.frequency.value = 100 + Math.random() * 200;
+      osc.type = 'square';
+      
+      gain.gain.setValueAtTime(0.02, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.03);
+      
+      osc.connect(gain);
+      gain.connect(sfxGain);
+      
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.03);
+    }
+    
+    setTimeout(type, 50 + Math.random() * 150);
+  };
+  type();
+}
+
+function startWindAmbience() {
+  const noise = audioCtx.createBufferSource();
+  const bufSize = audioCtx.sampleRate * 2;
+  const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  
+  for (let i = 0; i < bufSize; i++) {
+    data[i] = (Math.random() * 2 - 1) * 0.3;
+  }
+  
+  noise.buffer = buf;
+  noise.loop = true;
+  
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = 400;
+  
+  const gain = audioCtx.createGain();
+  gain.gain.value = 0.03;
+  
+  noise.connect(filter);
+  filter.connect(gain);
+  gain.connect(sfxGain);
+  
+  noise.start();
+  currentAmbientNodes.push({ node: noise, type: 'wind' });
+}
+
+function startEchoAmbience() {
+  const pulse = () => {
+    if (currentRoom !== 8 || audioMuted) return;
+    
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    
+    osc.frequency.value = 220;
+    osc.type = 'sine';
+    
+    gain.gain.setValueAtTime(0, audioCtx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.02, audioCtx.currentTime + 0.1);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 2);
+    
+    osc.connect(gain);
+    gain.connect(sfxGain);
+    
+    osc.start();
+    osc.stop(audioCtx.currentTime + 2);
+    
+    setTimeout(pulse, 3000 + Math.random() * 2000);
+  };
+  pulse();
+}
+
+function startTrollAmbience() {
+  // Low rumbling breathing
+  const breathe = () => {
+    if (currentRoom !== 9 || audioMuted) return;
+    
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    
+    osc.frequency.value = 80;
+    osc.type = 'sawtooth';
+    
+    gain.gain.setValueAtTime(0, audioCtx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.015, audioCtx.currentTime + 0.8);
+    gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 1.6);
+    
+    osc.connect(gain);
+    gain.connect(sfxGain);
+    
+    osc.start();
+    osc.stop(audioCtx.currentTime + 1.6);
+    
+    setTimeout(breathe, 2000);
+  };
+  breathe();
+}
+
+function stopAllAmbient() {
+  currentAmbientNodes.forEach(ambient => {
+    try {
+      ambient.node.stop();
+    } catch(e) {}
+  });
+  currentAmbientNodes = [];
+}
+
+// === SOUND EFFECTS ===
+function playTone(freq, duration, type = 'square', vol = 0.15) {
+  if (audioMuted) return;
+  ensureAudio();
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  osc.connect(gain);
+  gain.connect(sfxGain);
+  osc.start();
+  osc.stop(audioCtx.currentTime + duration);
+}
+
+function playNoise(duration, vol = 0.1) {
+  if (audioMuted) return;
+  ensureAudio();
+  const bufSize = audioCtx.sampleRate * duration;
+  const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+  const src = audioCtx.createBufferSource();
+  const gain = audioCtx.createGain();
+  src.buffer = buf;
+  gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  src.connect(gain);
+  gain.connect(sfxGain);
+  src.start();
+}
+
+// Death sounds - varied and comical
+function sfxDeath() {
+  const deathType = Math.floor(Math.random() * 5);
+  
+  switch(deathType) {
+    case 0: // Sad descending
+      playTone(200, 0.15, 'sawtooth', 0.2);
+      setTimeout(() => playTone(100, 0.3, 'sawtooth', 0.15), 150);
+      break;
+    case 1: // Boing
+      playTone(150, 0.05, 'sine', 0.2);
+      setTimeout(() => playTone(100, 0.05, 'sine', 0.15), 50);
+      setTimeout(() => playTone(80, 0.1, 'sine', 0.12), 100);
+      break;
+    case 2: // Splat
+      playNoise(0.15, 0.25);
+      break;
+    case 3: // Deflate
+      for (let i = 0; i < 10; i++) {
+        setTimeout(() => playTone(300 - i * 25, 0.05, 'square', 0.1), i * 30);
+      }
+      break;
+    case 4: // Cartoon pop
+      playTone(400, 0.05, 'sine', 0.2);
+      setTimeout(() => playNoise(0.1, 0.15), 50);
+      break;
+  }
+}
+
+function sfxClick() {
+  if (audioMuted) return;
+  playTone(800, 0.05, 'sine', 0.1);
+}
+
+function sfxHover() {
+  if (audioMuted) return;
+  playTone(600, 0.03, 'sine', 0.05);
+}
+
+function sfxDrag() {
+  if (audioMuted) return;
+  playTone(400 + Math.random() * 200, 0.02, 'sine', 0.04);
+}
+
+// Victory jingle - enhanced
+function sfxWin() {
+  if (audioMuted) return;
+  ensureAudio();
+  
+  const notes = [523.25, 659.25, 783.99, 1046.50]; // C E G C
+  notes.forEach((freq, i) => {
+    setTimeout(() => {
+      playTone(freq, 0.15, 'sine', 0.15);
+      if (i === notes.length - 1) {
+        // Final flourish
+        setTimeout(() => playTone(freq * 2, 0.3, 'sine', 0.12), 100);
+      }
+    }, i * 100);
+  });
+}
+
+function sfxExplosion() {
+  if (audioMuted) return;
+  playNoise(0.4, 0.2);
+  playTone(80, 0.4, 'sawtooth', 0.2);
+}
+
+function sfxTick() {
+  if (audioMuted) return;
+  playTone(1000, 0.03, 'sine', 0.08);
+}
+
+function sfxChime() {
+  if (audioMuted) return;
+  playTone(880, 0.15, 'sine', 0.1);
+  setTimeout(() => playTone(1100, 0.15, 'sine', 0.1), 120);
+}
+
+function sfxSadTrombone() {
+  if (audioMuted) return;
+  playTone(293, 0.3, 'sawtooth', 0.12);
+  setTimeout(() => playTone(277, 0.3, 'sawtooth', 0.12), 300);
+  setTimeout(() => playTone(261, 0.3, 'sawtooth', 0.12), 600);
+  setTimeout(() => playTone(246, 0.5, 'sawtooth', 0.12), 900);
+}
+
+function sfxDing() {
+  if (audioMuted) return;
+  playTone(1200, 0.05, 'sine', 0.2);
+}
+
+// Troll laugh - evil and comical
+function sfxTrollLaugh() {
+  if (audioMuted) return;
+  ensureAudio();
+  
+  // Ha ha ha ha!
+  const laughs = [
+    { freq: 300, delay: 0 },
+    { freq: 250, delay: 150 },
+    { freq: 320, delay: 300 },
+    { freq: 280, delay: 450 },
+    { freq: 350, delay: 600 },
+  ];
+  
+  laughs.forEach(laugh => {
+    setTimeout(() => {
+      playTone(laugh.freq, 0.1, 'sawtooth', 0.15);
+      playTone(laugh.freq * 1.5, 0.08, 'square', 0.08);
+    }, laugh.delay);
+  });
+  
+  // Evil rising pitch at end
+  setTimeout(() => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.5);
+    
+    gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+    
+    osc.connect(gain);
+    gain.connect(sfxGain);
+    
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.5);
+  }, 800);
+}
+
+// ============================================================
+// DRAWING HELPERS — Hand-drawn aesthetic
+// ============================================================
+
+function wobble(amt = 1.5) { return (Math.random() - 0.5) * amt * scale; }
+
+// Wobbly line
+function wobblyLine(x1, y1, x2, y2, color = '#222', width = 2) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width * scale;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x1 + wobble(), y1 + wobble());
+  const steps = Math.max(3, Math.floor(Math.hypot(x2 - x1, y2 - y1) / (20 * scale)));
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    ctx.lineTo(
+      x1 + (x2 - x1) * t + wobble(),
+      y1 + (y2 - y1) * t + wobble()
+    );
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Wobbly rectangle
+function wobblyRect(x, y, w, h, color = '#222', fill = null, lineWidth = 2) {
+  if (fill) {
+    ctx.save();
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.moveTo(x + wobble(), y + wobble());
+    ctx.lineTo(x + w + wobble(), y + wobble());
+    ctx.lineTo(x + w + wobble(), y + h + wobble());
+    ctx.lineTo(x + wobble(), y + h + wobble());
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  wobblyLine(x, y, x + w, y, color, lineWidth);
+  wobblyLine(x + w, y, x + w, y + h, color, lineWidth);
+  wobblyLine(x + w, y + h, x, y + h, color, lineWidth);
+  wobblyLine(x, y + h, x, y, color, lineWidth);
+}
+
+// Wobbly circle
+function wobblyCircle(cx, cy, r, color = '#222', fill = null, lineWidth = 2) {
+  ctx.save();
+  const pts = 24;
+  ctx.beginPath();
+  for (let i = 0; i <= pts; i++) {
+    const a = (i / pts) * Math.PI * 2;
+    const rr = r + wobble(2);
+    const px = cx + Math.cos(a) * rr;
+    const py = cy + Math.sin(a) * rr;
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth * scale;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Sketch-style button
+function drawSketchButton(x, y, w, h, label, color = '#222', fillColor = '#f5f0e6', highlight = false) {
+  const bx = x - w/2, by = y - h/2;
+  if (highlight) {
+    wobblyRect(bx - 3*scale, by - 3*scale, w + 6*scale, h + 6*scale, color, '#ffd700', 3);
+  }
+  wobblyRect(bx, by, w, h, color, fillColor, 2.5);
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.font = `bold ${16 * scale}px 'Comic Sans MS', 'Marker Felt', cursive, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, x + wobble(0.5), y + wobble(0.5));
+  ctx.restore();
+}
+
+// Clean UI button (for fake system stuff)
+function drawCleanButton(x, y, w, h, label, bg = '#007AFF', fg = '#fff', radius = 8) {
+  ctx.save();
+  ctx.fillStyle = bg;
+  roundRect(x - w/2, y - h/2, w, h, radius * scale);
+  ctx.fill();
+  ctx.fillStyle = fg;
+  ctx.font = `600 ${15 * scale}px -apple-system, 'Segoe UI', sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, x, y);
+  ctx.restore();
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
+// Draw text with sketch feel
+function drawText(text, x, y, size = 16, color = '#222', align = 'center', font = null) {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.font = `${size * scale}px ${font || "'Comic Sans MS', 'Marker Felt', cursive, sans-serif"}`;
+  ctx.textAlign = align;
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, x + wobble(0.3), y + wobble(0.3));
+  ctx.restore();
+}
+
+function drawCleanText(text, x, y, size = 16, color = '#333', align = 'center', fontWeight = '400') {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.font = `${fontWeight} ${size * scale}px -apple-system, 'Segoe UI', 'Helvetica Neue', sans-serif`;
+  ctx.textAlign = align;
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+// ============================================================
+// STICK FIGURE
+// ============================================================
+function drawStickFigure(x, y, scl = 1, eyeState = 'normal') {
+  if (!stickFigure.visible) return;
+  const s = 20 * scale * scl;
+  const breath = Math.sin(stickFigure.breathPhase) * 1.5 * scale;
+  
+  ctx.save();
+  ctx.strokeStyle = '#222';
+  ctx.lineWidth = 2 * scale;
+  ctx.lineCap = 'round';
+  
+  // Legs
+  ctx.beginPath();
+  ctx.moveTo(x, y + s * 0.7);
+  ctx.lineTo(x - s * 0.35 + wobble(0.5), y + s * 1.4 + wobble(0.5));
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x, y + s * 0.7);
+  ctx.lineTo(x + s * 0.35 + wobble(0.5), y + s * 1.4 + wobble(0.5));
+  ctx.stroke();
+  
+  // Body
+  ctx.beginPath();
+  ctx.moveTo(x + wobble(0.3), y - s * 0.2 + breath);
+  ctx.lineTo(x + wobble(0.3), y + s * 0.7);
+  ctx.stroke();
+  
+  // Arms
+  const armWave = Math.sin(gameTime * 2) * (eyeState === 'panic' ? 8 : 2) * scale;
+  ctx.beginPath();
+  ctx.moveTo(x, y + s * 0.15 + breath);
+  ctx.lineTo(x - s * 0.45 + wobble(0.5), y + s * 0.4 + armWave + wobble(0.5));
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x, y + s * 0.15 + breath);
+  ctx.lineTo(x + s * 0.45 + wobble(0.5), y + s * 0.4 - armWave + wobble(0.5));
+  ctx.stroke();
+  
+  // Head
+  const headY = y - s * 0.55 + breath;
+  wobblyCircle(x, headY, s * 0.35, '#222', '#f5f0e6', 2);
+  
+  // Eyes
+  const eyeSpread = s * 0.12;
+  const eyeY = headY - s * 0.02;
+  const lookX = stickFigure.lookDir * s * 0.04;
+  
+  if (eyeState === 'normal') {
+    ctx.fillStyle = '#222';
+    ctx.beginPath(); ctx.arc(x - eyeSpread + lookX, eyeY, 2 * scale, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + eyeSpread + lookX, eyeY, 2 * scale, 0, Math.PI * 2); ctx.fill();
+  } else if (eyeState === 'panic') {
+    // Wide eyes
+    ctx.fillStyle = '#222';
+    ctx.beginPath(); ctx.arc(x - eyeSpread, eyeY, 3.5 * scale, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + eyeSpread, eyeY, 3.5 * scale, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#f5f0e6';
+    ctx.beginPath(); ctx.arc(x - eyeSpread + scale, eyeY - scale, 1.2 * scale, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + eyeSpread + scale, eyeY - scale, 1.2 * scale, 0, Math.PI * 2); ctx.fill();
+  } else if (eyeState === 'dead') {
+    // X eyes
+    const es = 3 * scale;
+    ctx.lineWidth = 2 * scale;
+    ctx.beginPath(); ctx.moveTo(x - eyeSpread - es, eyeY - es); ctx.lineTo(x - eyeSpread + es, eyeY + es); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x - eyeSpread + es, eyeY - es); ctx.lineTo(x - eyeSpread - es, eyeY + es); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x + eyeSpread - es, eyeY - es); ctx.lineTo(x + eyeSpread + es, eyeY + es); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x + eyeSpread + es, eyeY - es); ctx.lineTo(x + eyeSpread - es, eyeY + es); ctx.stroke();
+  } else if (eyeState === 'happy') {
+    // ^ ^ eyes
+    ctx.lineWidth = 2 * scale;
+    ctx.beginPath(); ctx.moveTo(x - eyeSpread - 3*scale, eyeY + scale); ctx.lineTo(x - eyeSpread, eyeY - 2*scale); ctx.lineTo(x - eyeSpread + 3*scale, eyeY + scale); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x + eyeSpread - 3*scale, eyeY + scale); ctx.lineTo(x + eyeSpread, eyeY - 2*scale); ctx.lineTo(x + eyeSpread + 3*scale, eyeY + scale); ctx.stroke();
+  } else if (eyeState === 'confused') {
+    ctx.fillStyle = '#222';
+    ctx.beginPath(); ctx.arc(x - eyeSpread, eyeY, 2 * scale, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + eyeSpread, eyeY + 2*scale, 2 * scale, 0, Math.PI * 2); ctx.fill();
+    // Question mark above head
+    drawText('?', x + s*0.3, headY - s*0.5, 12, '#222');
+  }
+  
+  // Mouth based on state
+  if (eyeState === 'panic') {
+    ctx.beginPath(); ctx.arc(x, headY + s*0.15, 3*scale, 0, Math.PI); ctx.stroke();
+  } else if (eyeState === 'happy') {
+    ctx.beginPath(); ctx.arc(x, headY + s*0.1, 4*scale, 0, Math.PI); ctx.stroke();
+  }
+  
+  ctx.restore();
+}
+
+// ============================================================
+// PARTICLES
+// ============================================================
+function spawnParticles(x, y, count, color = '#ff4444', spread = 3) {
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * spread * scale,
+      vy: (Math.random() - 0.5) * spread * scale - 2 * scale,
+      life: 1,
+      decay: 0.02 + Math.random() * 0.02,
+      size: (2 + Math.random() * 4) * scale,
+      color
+    });
+  }
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.15 * scale;
+    p.life -= p.decay;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    ctx.save();
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// SCREEN SHAKE
+// ============================================================
+function shake(amount = 10) {
+  shakeAmount = amount * scale;
+}
+
+function applyShake() {
+  if (shakeAmount > 0.5) {
+    const sx = (Math.random() - 0.5) * shakeAmount;
+    const sy = (Math.random() - 0.5) * shakeAmount;
+    ctx.translate(sx, sy);
+    shakeAmount *= shakeDecay;
+  } else {
+    shakeAmount = 0;
+  }
+}
+
+// ============================================================
+// TRANSITIONS
+// ============================================================
+function fadeToRoom(roomIndex) {
+  if (transitioning) return;
+  transitioning = true;
+  transitionDir = 1;
+  transitionAlpha = 0;
+  transitionCallback = () => {
+    currentRoom = roomIndex;
+    roomDeaths = 0;
+    hintLevel = 0;
+    roomState = {};
+    showingDeath = false;
+    initRoom(roomIndex);
+    transitionDir = -1;
+  };
+}
+
+function updateTransition() {
+  if (!transitioning) return;
+  if (transitionDir === 1) {
+    transitionAlpha += 0.05;
+    if (transitionAlpha >= 1) {
+      transitionAlpha = 1;
+      if (transitionCallback) { transitionCallback(); transitionCallback = null; }
+    }
+  } else {
+    transitionAlpha -= 0.05;
+    if (transitionAlpha <= 0) {
+      transitionAlpha = 0;
+      transitioning = false;
+    }
+  }
+}
+
+function drawTransition() {
+  if (transitionAlpha > 0) {
+    ctx.save();
+    ctx.globalAlpha = transitionAlpha;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// DEATH SYSTEM
+// ============================================================
+function die(message, animType = 'default', shakeAmt = 12) {
+  if (showingDeath || transitioning) return;
+  ensureAudio();
+  sfxDeath();
+  showingDeath = true;
+  deathMessage = message;
+  deathAnimType = animType;
+  deathAnimTimer = 0;
+  totalDeaths++;
+  roomDeaths++;
+  hintLevel = Math.min(10, Math.floor(roomDeaths / 2));
+  shake(shakeAmt);
+  spawnParticles(stickFigure.x || centerX, stickFigure.y || centerY, 15, '#ff4444');
+  stickFigure.eyeState = 'dead';
+  
+  // Auto-respawn after delay
+  setTimeout(() => {
+    showingDeath = false;
+    deathAnimTimer = 0;
+    stickFigure.eyeState = 'normal';
+    stickFigure.visible = true;
+    roomState = {};
+    initRoom(currentRoom);
+  }, 1800);
+}
+
+function drawDeathOverlay() {
+  if (!showingDeath) return;
+  deathAnimTimer += deltaTime;
+  
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, deathAnimTimer * 3);
+  
+  // Dark overlay
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, 0, W, H);
+  
+  // Skull
+  const skullY = centerY - 40 * scale;
+  ctx.font = `${40 * scale}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#fff';
+  ctx.fillText('💀', centerX, skullY);
+  
+  // Death message
+  ctx.font = `bold ${14 * scale}px 'Comic Sans MS', cursive, sans-serif`;
+  ctx.fillStyle = '#ff6b6b';
+  ctx.textAlign = 'center';
+  
+  // Word wrap
+  const words = deathMessage.split(' ');
+  let lines = [];
+  let line = '';
+  for (const word of words) {
+    const test = line + word + ' ';
+    if (ctx.measureText(test).width > W * 0.8) {
+      lines.push(line.trim());
+      line = word + ' ';
+    } else {
+      line = test;
+    }
+  }
+  lines.push(line.trim());
+  
+  const lineH = 20 * scale;
+  const startY = skullY + 40 * scale;
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], centerX, startY + i * lineH);
+  }
+  
+  ctx.restore();
+}
+
+// Death counter skull (always visible)
+function drawDeathCounter() {
+  ctx.save();
+  ctx.font = `${12 * scale}px sans-serif`;
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#666';
+  ctx.fillText(`💀 ${totalDeaths}`, W - 12 * scale, 24 * scale);
+  ctx.restore();
+}
+
+// Mute button (always visible)
+function drawMuteButton() {
+  const btnX = 20 * scale;
+  const btnY = 20 * scale;
+  const btnSize = 30 * scale;
+  
+  // Check if mouse/touch is hovering
+  const isHovering = lastMouseX >= btnX - btnSize/2 && lastMouseX <= btnX + btnSize/2 &&
+                     lastMouseY >= btnY - btnSize/2 && lastMouseY <= btnY + btnSize/2;
+  
+  ctx.save();
+  
+  // Button background
+  ctx.fillStyle = isHovering ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.1)';
+  ctx.beginPath();
+  ctx.arc(btnX, btnY, btnSize/2, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Icon
+  ctx.font = `${18 * scale}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = audioMuted ? '#cc3333' : '#666';
+  ctx.fillText(audioMuted ? '🔇' : '🔊', btnX, btnY);
+  
+  ctx.restore();
+  
+  // Store button bounds for click detection
+  muteButtonBounds = { x: btnX, y: btnY, size: btnSize };
+}
+
+let muteButtonBounds = null;
+let lastMouseX = 0;
+let lastMouseY = 0;
+
+// ============================================================
+// SKETCHBOOK BACKGROUND
+// ============================================================
+function drawSketchBackground() {
+  // Paper color
+  ctx.fillStyle = '#f5f0e6';
+  ctx.fillRect(0, 0, W, H);
+  
+  // Subtle ruled lines
+  ctx.save();
+  ctx.strokeStyle = 'rgba(180,210,240,0.3)';
+  ctx.lineWidth = 1;
+  const lineSpacing = 28 * scale;
+  for (let y = lineSpacing; y < H; y += lineSpacing) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+  }
+  // Left margin line
+  ctx.strokeStyle = 'rgba(220,140,140,0.3)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(40 * scale, 0);
+  ctx.lineTo(40 * scale, H);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ============================================================
+// INPUT HANDLING
+// ============================================================
+function getEventPos(e) {
+  if (e.touches) {
+    return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }
+  return { x: e.clientX, y: e.clientY };
+}
+
+function hitTest(px, py, x, y, w, h) {
+  return px >= x - w/2 && px <= x + w/2 && py >= y - h/2 && py <= y + h/2;
+}
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  ensureAudio();
+  const pos = getEventPos(e);
+  lastMouseX = pos.x;
+  lastMouseY = pos.y;
+  
+  // Check mute button
+  if (muteButtonBounds) {
+    const dist = Math.hypot(pos.x - muteButtonBounds.x, pos.y - muteButtonBounds.y);
+    if (dist < muteButtonBounds.size / 2) {
+      toggleMute();
+      sfxClick();
+      return;
+    }
+  }
+  
+  inputEvents.push({ type: 'tap', x: pos.x, y: pos.y });
+  dragState.active = true;
+  dragState.startX = pos.x;
+  dragState.startY = pos.y;
+  dragState.x = pos.x;
+  dragState.y = pos.y;
+  dragState.dx = 0;
+  dragState.dy = 0;
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (dragState.active) {
+    const pos = getEventPos(e);
+    dragState.dx = pos.x - dragState.x;
+    dragState.dy = pos.y - dragState.y;
+    dragState.x = pos.x;
+    dragState.y = pos.y;
+    lastMouseX = pos.x;
+    lastMouseY = pos.y;
+    sfxDrag();
+    inputEvents.push({ type: 'drag', x: pos.x, y: pos.y, dx: dragState.dx, dy: dragState.dy, startX: dragState.startX, startY: dragState.startY });
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  if (dragState.active) {
+    inputEvents.push({ type: 'release', x: dragState.x, y: dragState.y, startX: dragState.startX, startY: dragState.startY });
+    dragState.active = false;
+  }
+});
+
+canvas.addEventListener('mousedown', (e) => {
+  ensureAudio();
+  lastMouseX = e.clientX;
+  lastMouseY = e.clientY;
+  
+  // Check mute button
+  if (muteButtonBounds) {
+    const dist = Math.hypot(e.clientX - muteButtonBounds.x, e.clientY - muteButtonBounds.y);
+    if (dist < muteButtonBounds.size / 2) {
+      toggleMute();
+      sfxClick();
+      return;
+    }
+  }
+  
+  inputEvents.push({ type: 'tap', x: e.clientX, y: e.clientY });
+  dragState.active = true;
+  dragState.startX = e.clientX;
+  dragState.startY = e.clientY;
+  dragState.x = e.clientX;
+  dragState.y = e.clientY;
+  dragState.dx = 0;
+  dragState.dy = 0;
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  lastMouseX = e.clientX;
+  lastMouseY = e.clientY;
+  
+  if (dragState.active) {
+    dragState.dx = e.clientX - dragState.x;
+    dragState.dy = e.clientY - dragState.y;
+    dragState.x = e.clientX;
+    dragState.y = e.clientY;
+    sfxDrag();
+    inputEvents.push({ type: 'drag', x: e.clientX, y: e.clientY, dx: dragState.dx, dy: dragState.dy, startX: dragState.startX, startY: dragState.startY });
+  }
+});
+
+canvas.addEventListener('mouseup', (e) => {
+  if (dragState.active) {
+    inputEvents.push({ type: 'release', x: dragState.x, y: dragState.y, startX: dragState.startX, startY: dragState.startY });
+    dragState.active = false;
+  }
+});
+
+// ============================================================
+// ROOMS
+// ============================================================
+
+const rooms = [];
+
+// --- ROOM 0: Press Start ---
+rooms[0] = {
+  init() {
+    roomState.tapCount = 0;
+    roomState.holdTimer = 0;
+    roomState.holding = false;
+    roomState.btnPulse = 0;
+    stickFigure.x = centerX;
+    stickFigure.y = centerY + 30 * scale;
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'normal';
+  },
+  update() {
+    roomState.btnPulse = (roomState.btnPulse || 0) + deltaTime * 3;
+    stickFigure.breathPhase += deltaTime * 2;
+    stickFigure.lookDir = Math.sin(gameTime * 0.7) * 0.5;
+    
+    if (roomState.holding) {
+      roomState.holdTimer += deltaTime;
+      if (roomState.holdTimer > 1.5) {
+        roomState.holding = false;
+        die('💀 Oh, you held it. That\'s worse.', 'explode', 18);
+        sfxExplosion();
+        return;
+      }
+    }
+    
+    for (const ev of inputEvents) {
+      if (showingDeath) continue;
+      if (ev.type === 'tap') {
+        // START button area
+        const btnW = 200 * scale, btnH = 60 * scale;
+        const btnX = centerX, btnY = centerY + 50 * scale;
+        if (hitTest(ev.x, ev.y, btnX, btnY, btnW, btnH)) {
+          sfxClick();
+          roomState.holding = true;
+          roomState.holdTimer = 0;
+          roomState.tapCount = (roomState.tapCount || 0) + 1;
+          
+          // Don't die on tap — die on release (so hold can be detected)
+        }
+        
+        // Skip text area
+        const skipX = W - 45 * scale, skipY = H - 35 * scale;
+        if (hitTest(ev.x, ev.y, skipX, skipY, 70 * scale, 30 * scale)) {
+          sfxWin();
+          spawnParticles(ev.x, ev.y, 8, '#44ff44');
+          fadeToRoom(1);
+          return;
+        }
+      }
+      if (ev.type === 'release') {
+        if (roomState.holding) {
+          roomState.holding = false;
+          const count = roomState.tapCount;
+          if (count === 1) {
+            sfxExplosion();
+            die('💀 That button was load-bearing.', 'explode');
+          } else if (count === 2) {
+            sfxExplosion();
+            die('💀 Safety equipment not rated for this.', 'explode');
+          } else {
+            sfxExplosion();
+            die('💀 You\'d think you\'d learn.', 'explode', 20);
+          }
+        }
+      }
+    }
+  },
+  draw() {
+    drawSketchBackground();
+    
+    // Title
+    const titleY = centerY - 100 * scale;
+    ctx.save();
+    ctx.font = `bold ${36 * scale}px 'Comic Sans MS', 'Marker Felt', cursive, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#222';
+    ctx.fillText('TRUST', centerX + wobble(0.5), titleY - 20 * scale + wobble(0.5));
+    ctx.fillStyle = '#cc3333';
+    ctx.fillText('NOTHING', centerX + wobble(0.5), titleY + 25 * scale + wobble(0.5));
+    ctx.restore();
+    
+    // Stick figure on the button
+    stickFigure.x = centerX;
+    stickFigure.y = centerY - 5 * scale;
+    drawStickFigure(stickFigure.x, stickFigure.y, 0.8, stickFigure.eyeState);
+    
+    // START button - big, pulsing, golden
+    const btnY = centerY + 50 * scale;
+    const pulse = Math.sin(roomState.btnPulse || 0) * 4 * scale;
+    const btnW = (200 + pulse) * scale;
+    const btnH = (60 + pulse * 0.5) * scale;
+    
+    // Glow
+    ctx.save();
+    ctx.shadowColor = '#ffd700';
+    ctx.shadowBlur = 20 * scale + pulse * 2;
+    ctx.fillStyle = '#ffd700';
+    roundRect(centerX - btnW/2, btnY - btnH/2, btnW, btnH, 12 * scale);
+    ctx.fill();
+    ctx.restore();
+    
+    // Button body
+    ctx.save();
+    ctx.fillStyle = '#ff8c00';
+    roundRect(centerX - btnW/2, btnY - btnH/2, btnW, btnH, 12 * scale);
+    ctx.fill();
+    ctx.strokeStyle = '#cc6600';
+    ctx.lineWidth = 3 * scale;
+    roundRect(centerX - btnW/2, btnY - btnH/2, btnW, btnH, 12 * scale);
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${22 * scale}px 'Comic Sans MS', cursive, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('START GAME', centerX, btnY);
+    ctx.restore();
+    
+    // Particle sparkles around button
+    if (Math.random() < 0.3) {
+      spawnParticles(
+        centerX + (Math.random()-0.5) * btnW,
+        btnY + (Math.random()-0.5) * btnH,
+        1, '#ffd700', 1
+      );
+    }
+    
+    // Skip text (nearly invisible)
+    const skipAlpha = 0.15 + hintLevel * 0.08;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, skipAlpha);
+    ctx.fillStyle = '#999';
+    ctx.font = `${8 * scale}px sans-serif`;
+    ctx.textAlign = 'right';
+    ctx.fillText('skip →', W - 15 * scale, H - 25 * scale);
+    ctx.restore();
+  }
+};
+
+// --- ROOM 1: The Door ---
+rooms[1] = {
+  init() {
+    roomState.titleX = 0;
+    roomState.dragging = false;
+    roomState.doorFell = false;
+    roomState.wallTaps = 0;
+    stickFigure.x = centerX - 60 * scale;
+    stickFigure.y = centerY + 40 * scale;
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'normal';
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 2;
+    stickFigure.lookDir = Math.sin(gameTime * 0.5);
+    
+    for (const ev of inputEvents) {
+      if (showingDeath) continue;
+      
+      // Title bar drag detection
+      const titleBarY = 45 * scale;
+      const titleBarH = 35 * scale;
+      
+      if (ev.type === 'tap') {
+        // Tap on title bar area
+        if (ev.y < titleBarY + titleBarH && ev.y > titleBarY - titleBarH/2) {
+          roomState.dragging = true;
+          sfxClick();
+        }
+        
+        // Tap on door
+        const doorX = centerX + 80 * scale;
+        const doorY = centerY + 10 * scale;
+        if (hitTest(ev.x, ev.y, doorX, doorY, 60 * scale, 100 * scale)) {
+          sfxClick();
+          die('💀 It wasn\'t even a real door. It was just leaning there.');
+        }
+        
+        // Tap on door handle
+        const handleX = centerX + 60 * scale;
+        const handleY = centerY + 15 * scale;
+        if (hitTest(ev.x, ev.y, handleX, handleY, 20 * scale, 20 * scale)) {
+          die('💀 Handle with care. Or don\'t.');
+        }
+        
+        // Tap on walls
+        if (ev.y > 100 * scale && ev.y < H - 50 * scale) {
+          if (ev.x < centerX - 100 * scale || (ev.x > centerX + 120 * scale)) {
+            roomState.wallTaps = (roomState.wallTaps || 0) + 1;
+            if (roomState.wallTaps >= 2) {
+              die('💀 The walls have feelings too. And grudges.');
+            }
+          }
+        }
+      }
+      
+      if (ev.type === 'drag' && roomState.dragging) {
+        roomState.titleX = (roomState.titleX || 0) + ev.dx;
+      }
+      
+      if (ev.type === 'release' && roomState.dragging) {
+        roomState.dragging = false;
+        // Check if dragged enough to solve
+        if ((roomState.titleX || 0) > W * 0.35) {
+          sfxWin();
+          spawnParticles(centerX, 45 * scale, 15, '#44ff44');
+          fadeToRoom(2);
+          return;
+        }
+      }
+    }
+  },
+  draw() {
+    drawSketchBackground();
+    
+    // Room walls
+    const floorY = centerY + 100 * scale;
+    wobblyLine(50 * scale, 90 * scale, 50 * scale, floorY, '#555', 3);
+    wobblyLine(W - 50 * scale, 90 * scale, W - 50 * scale, floorY, '#555', 3);
+    wobblyLine(50 * scale, floorY, W - 50 * scale, floorY, '#555', 3);
+    
+    // Brick pattern on walls
+    for (let y = 100 * scale; y < floorY; y += 18 * scale) {
+      const offset = (Math.floor(y / (18 * scale)) % 2) * 15 * scale;
+      for (let x = 55 * scale + offset; x < W - 50 * scale; x += 30 * scale) {
+        wobblyRect(x, y, 25 * scale, 14 * scale, 'rgba(150,100,80,0.3)');
+      }
+    }
+    
+    // Door (scenery)
+    const doorX = centerX + 50 * scale;
+    const doorY = centerY - 30 * scale;
+    const doorW = 55 * scale;
+    const doorH = 90 * scale;
+    wobblyRect(doorX, doorY, doorW, doorH, '#8B4513', '#a0522d', 2.5);
+    // Handle
+    wobblyCircle(doorX + doorW - 12 * scale, doorY + doorH/2, 5 * scale, '#DAA520', '#DAA520');
+    
+    // Stick figure
+    drawStickFigure(stickFigure.x, stickFigure.y, 1, stickFigure.eyeState);
+    
+    // Title bar (draggable)
+    const txOff = roomState.titleX || 0;
+    const titleBarX = txOff;
+    ctx.save();
+    ctx.fillStyle = 'rgba(240,235,220,0.95)';
+    ctx.fillRect(titleBarX, 20 * scale, W + 20, 40 * scale);
+    ctx.strokeStyle = '#aaa';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(titleBarX, 20 * scale, W + 20, 40 * scale);
+    ctx.restore();
+    
+    // Title text
+    const wobbleAmt = hintLevel > 2 ? Math.sin(gameTime * 4) * 2 * scale : 0;
+    drawText('Room 2: The Door', centerX + txOff + wobbleAmt, 42 * scale, 18, '#444');
+    
+    // Hint: reveal exit behind title bar when dragged
+    if (txOff > 20) {
+      const revealW = Math.min(txOff, W * 0.5);
+      ctx.save();
+      ctx.fillStyle = '#44dd44';
+      ctx.globalAlpha = 0.4;
+      ctx.fillRect(0, 20 * scale, revealW, 40 * scale);
+      ctx.restore();
+      // Exit glow
+      wobblyRect(5 * scale, 25 * scale, Math.min(revealW - 10, 40 * scale), 30 * scale, '#22aa22', 'rgba(68,221,68,0.6)');
+      drawText('EXIT', 25 * scale + Math.min(revealW/2, 20*scale), 42 * scale, 10, '#fff');
+    }
+  }
+};
+
+// --- ROOM 2: Timer Panic ---
+rooms[2] = {
+  init() {
+    roomState.timer = 10;
+    roomState.expired = false;
+    roomState.tickInterval = 0;
+    stickFigure.x = centerX;
+    stickFigure.y = centerY + 80 * scale;
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'panic';
+    startRoomAmbient(2);
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 4; // breathing fast
+    
+    if (!roomState.expired) {
+      roomState.timer -= deltaTime;
+      roomState.tickInterval += deltaTime;
+      if (roomState.tickInterval > 0.5) {
+        roomState.tickInterval = 0;
+        // Ticking handled by ambient now
+      }
+      if (roomState.timer <= 0) {
+        roomState.timer = 0;
+        roomState.expired = true;
+        stickFigure.eyeState = 'happy';
+        sfxChime();
+        stopAllAmbient();
+        // Chirpy birds after a moment
+        setTimeout(() => {
+          if (currentRoom === 2 && roomState.expired && !showingDeath) {
+            sfxWin();
+          }
+        }, 800);
+      }
+    }
+    
+    for (const ev of inputEvents) {
+      if (showingDeath) continue;
+      
+      if (ev.type === 'tap') {
+        if (roomState.expired) {
+          // Tap the door that appeared
+          const doorX = centerX;
+          const doorY = centerY;
+          if (hitTest(ev.x, ev.y, doorX, doorY, 80 * scale, 100 * scale)) {
+            sfxWin();
+            fadeToRoom(3);
+            return;
+          }
+        }
+        
+        // DEFUSE button
+        const defuseX = centerX - 70 * scale;
+        const defuseY = centerY + 40 * scale;
+        if (hitTest(ev.x, ev.y, defuseX, defuseY, 110 * scale, 45 * scale)) {
+          sfxExplosion();
+          die('💀 Bold choice. Wrong wire. All the wires were wrong.');
+        }
+        
+        // ESCAPE button
+        const escapeX = centerX + 70 * scale;
+        const escapeY = centerY + 40 * scale;
+        if (hitTest(ev.x, ev.y, escapeX, escapeY, 110 * scale, 45 * scale)) {
+          die('💀 That was the escape alright. Straight down.');
+        }
+        
+        // Tap the timer
+        const timerX = centerX;
+        const timerY = centerY - 60 * scale;
+        if (hitTest(ev.x, ev.y, timerX, timerY, 160 * scale, 60 * scale)) {
+          roomState.timer = Math.max(0.5, roomState.timer - 5);
+          sfxExplosion();
+          die('💀 You made it angry.');
+        }
+      }
+    }
+  },
+  draw() {
+    // Red urgent background
+    if (!roomState.expired) {
+      const urgency = Math.sin(gameTime * 8) * 0.1;
+      ctx.fillStyle = `rgb(${180 + urgency * 100}, ${30}, ${30})`;
+      ctx.fillRect(0, 0, W, H);
+      
+      // Screen shake from urgency
+      if (roomState.timer < 3) {
+        ctx.save();
+        ctx.translate((Math.random()-0.5) * 3 * scale, (Math.random()-0.5) * 3 * scale);
+      }
+    } else {
+      // Peaceful meadow
+      ctx.fillStyle = '#90ee90';
+      ctx.fillRect(0, 0, W, H);
+      // Sky
+      const grad = ctx.createLinearGradient(0, 0, 0, H * 0.5);
+      grad.addColorStop(0, '#87CEEB');
+      grad.addColorStop(1, '#90ee90');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H * 0.6);
+      
+      // Simple flowers
+      for (let i = 0; i < 8; i++) {
+        const fx = W * 0.1 + (i / 8) * W * 0.8;
+        const fy = H * 0.65 + Math.sin(i * 2) * 20 * scale;
+        wobblyCircle(fx, fy, 5 * scale, '#ff69b4', '#ff69b4');
+        wobblyLine(fx, fy + 5 * scale, fx, fy + 20 * scale, '#228B22', 1.5);
+      }
+      
+      // Door
+      wobblyRect(centerX - 25 * scale, centerY - 50 * scale, 50 * scale, 80 * scale, '#8B4513', '#a0522d', 2);
+      drawText('🚪', centerX, centerY, 20);
+    }
+    
+    if (!roomState.expired) {
+      // Timer display
+      const mins = '00';
+      const secs = String(Math.max(0, Math.ceil(roomState.timer))).padStart(2, '0');
+      
+      ctx.save();
+      ctx.font = `bold ${64 * scale}px 'Courier New', monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(`${mins}:${secs}`, centerX, centerY - 60 * scale);
+      ctx.restore();
+      
+      // Defuse button
+      drawSketchButton(centerX - 70 * scale, centerY + 40 * scale, 110 * scale, 45 * scale, 'DEFUSE', '#fff', '#cc0000');
+      
+      // Escape button
+      drawSketchButton(centerX + 70 * scale, centerY + 40 * scale, 110 * scale, 45 * scale, 'ESCAPE', '#fff', '#0044cc');
+      
+      // Hint
+      if (hintLevel >= 3 && roomState.timer < 3) {
+        ctx.save();
+        ctx.globalAlpha = 0.4;
+        drawText('♪', centerX + 80 * scale, centerY - 80 * scale, 12, '#ffd700');
+        ctx.restore();
+      }
+      
+      if (roomState.timer < 3) ctx.restore();
+    }
+    
+    // Stick figure
+    stickFigure.x = centerX;
+    stickFigure.y = roomState.expired ? centerY + 40 * scale : centerY + 80 * scale;
+    drawStickFigure(stickFigure.x, stickFigure.y, 0.7, stickFigure.eyeState);
+    
+    // Room label
+    drawText('Room 3: Timer Panic', centerX, 20 * scale, 12, roomState.expired ? '#333' : '#faa');
+  }
+};
+
+// --- ROOM 3: Fake Ad ---
+rooms[3] = {
+  init() {
+    roomState.showAd = false;
+    roomState.adTimer = 0;
+    roomState.xTaps = 0;
+    stickFigure.x = centerX;
+    stickFigure.y = centerY;
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'normal';
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 2;
+    roomState.adTimer += deltaTime;
+    
+    if (roomState.adTimer > 1 && !roomState.showAd) {
+      roomState.showAd = true;
+      sfxDing();
+    }
+    
+    for (const ev of inputEvents) {
+      if (showingDeath || !roomState.showAd) continue;
+      
+      if (ev.type === 'tap') {
+        const popW = 280 * scale;
+        const popH = 220 * scale;
+        const popX = centerX;
+        const popY = centerY;
+        
+        // CLAIM NOW button
+        const claimX = popX;
+        const claimY = popY + 40 * scale;
+        if (hitTest(ev.x, ev.y, claimX, claimY, 160 * scale, 40 * scale)) {
+          sfxExplosion();
+          die('💀 You\'ve subscribed to 47 newsletters.');
+          return;
+        }
+        
+        // Fake X (obvious, bottom right of popup)
+        const fakeXx = popX + popW/2 - 20 * scale;
+        const fakeXy = popY + popH/2 - 20 * scale;
+        if (hitTest(ev.x, ev.y, fakeXx, fakeXy, 30 * scale, 30 * scale)) {
+          roomState.xTaps = (roomState.xTaps || 0) + 1;
+          if (roomState.xTaps === 1) {
+            die('💀 That X was a lie. Like all the Xs before it.');
+          } else {
+            die('💀 The Xs are multiplying.');
+          }
+          return;
+        }
+        
+        // Real X (subtle, offset from the fake one)
+        const realXx = popX + popW/2 - 50 * scale;
+        const realXy = popY + popH/2 - 20 * scale;
+        if (hitTest(ev.x, ev.y, realXx, realXy, 18 * scale, 18 * scale)) {
+          sfxWin();
+          spawnParticles(ev.x, ev.y, 12, '#44ff44');
+          fadeToRoom(4);
+          return;
+        }
+        
+        // Tap anywhere else on the popup — swipe death
+        if (hitTest(ev.x, ev.y, popX, popY, popW, popH)) {
+          die('💀 Nice try. This ad has a no-swipe policy.');
+          return;
+        }
+      }
+    }
+  },
+  draw() {
+    drawSketchBackground();
+    drawText('Room 4: Fake Ad', centerX, 25 * scale, 12, '#999');
+    
+    // Brief room glimpse
+    wobblyRect(centerX - 30 * scale, centerY + 60 * scale, 60 * scale, 80 * scale, '#228B22', 'rgba(34,139,34,0.3)');
+    drawText('EXIT', centerX, centerY + 100 * scale, 10, '#228B22');
+    
+    drawStickFigure(stickFigure.x, stickFigure.y - 40 * scale, 0.6, stickFigure.eyeState);
+    
+    if (roomState.showAd) {
+      // Fake ad popup — clean, high-fidelity style
+      const popW = 280 * scale;
+      const popH = 220 * scale;
+      const popX = centerX - popW/2;
+      const popY = centerY - popH/2;
+      
+      // Shadow
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.3)';
+      ctx.shadowBlur = 20 * scale;
+      ctx.shadowOffsetY = 5 * scale;
+      ctx.fillStyle = '#fff';
+      roundRect(popX, popY, popW, popH, 12 * scale);
+      ctx.fill();
+      ctx.restore();
+      
+      // Border
+      ctx.save();
+      ctx.strokeStyle = '#e0e0e0';
+      ctx.lineWidth = 1;
+      roundRect(popX, popY, popW, popH, 12 * scale);
+      ctx.stroke();
+      ctx.restore();
+      
+      // Confetti emojis
+      drawCleanText('🎉 CONGRATULATIONS!!! 🎉', centerX, popY + 30 * scale, 16, '#ff4444', 'center', '700');
+      drawCleanText('You are the 1,000,000th', centerX, popY + 60 * scale, 13, '#333');
+      drawCleanText('player! Tap to claim your', centerX, popY + 80 * scale, 13, '#333');
+      drawCleanText('FREE PRIZE!', centerX, popY + 100 * scale, 15, '#ff8800', 'center', '700');
+      
+      // CLAIM NOW button
+      drawCleanButton(centerX, popY + 140 * scale, 160 * scale, 40 * scale, 'CLAIM NOW!!!', '#ff4444');
+      
+      // Fake X (obvious)
+      const fakeXx = popX + popW - 20 * scale;
+      const fakeXy = popY + popH - 20 * scale;
+      ctx.save();
+      ctx.font = `bold ${18 * scale}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#999';
+      ctx.fillText('✕', fakeXx, fakeXy);
+      ctx.restore();
+      
+      // Real X (subtle, slightly different shade)
+      const realXx = popX + popW - 50 * scale;
+      const realXy = popY + popH - 20 * scale;
+      const realXalpha = 0.15 + hintLevel * 0.1;
+      ctx.save();
+      ctx.globalAlpha = Math.min(0.8, realXalpha);
+      ctx.font = `${11 * scale}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#bbb';
+      ctx.fillText('×', realXx, realXy);
+      ctx.restore();
+      
+      // Hint: pulse on real X
+      if (hintLevel >= 3) {
+        ctx.save();
+        ctx.globalAlpha = 0.2 + Math.sin(gameTime * 4) * 0.15;
+        ctx.beginPath();
+        ctx.arc(realXx, realXy, 10 * scale, 0, Math.PI * 2);
+        ctx.fillStyle = '#44ff44';
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+};
+
+// --- ROOM 4: Color Blind ---
+rooms[4] = {
+  init() {
+    roomState.waitTimer = 0;
+    stickFigure.x = centerX;
+    stickFigure.y = centerY + 100 * scale;
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'confused';
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 2;
+    roomState.waitTimer += deltaTime;
+    
+    for (const ev of inputEvents) {
+      if (showingDeath) continue;
+      
+      if (ev.type === 'tap') {
+        const btnW = 80 * scale;
+        const btnH = 55 * scale;
+        const btnY = centerY + 20 * scale;
+        
+        // Left button (labeled RED, colored GREEN) — CORRECT
+        const leftX = centerX - 100 * scale;
+        if (hitTest(ev.x, ev.y, leftX, btnY, btnW, btnH)) {
+          sfxWin();
+          spawnParticles(ev.x, ev.y, 15, '#44ff44');
+          fadeToRoom(5);
+          return;
+        }
+        
+        // Middle button (labeled GREEN, colored RED)
+        const midX = centerX;
+        if (hitTest(ev.x, ev.y, midX, btnY, btnW, btnH)) {
+          sfxExplosion();
+          die('💀 You read the label. The label lied.');
+          return;
+        }
+        
+        // Right button (labeled BLUE, colored BLUE)
+        const rightX = centerX + 100 * scale;
+        if (hitTest(ev.x, ev.y, rightX, btnY, btnW, btnH)) {
+          sfxSadTrombone();
+          die('💀 Nobody asked you to press blue. But points for confidence.');
+          return;
+        }
+      }
+    }
+    
+    // Die from indecision
+    if (roomState.waitTimer > 10 && !showingDeath) {
+      die('💀 Indecision is also a choice. A bad one.');
+      roomState.waitTimer = 0;
+    }
+  },
+  draw() {
+    drawSketchBackground();
+    drawText('Room 5: Color Blind', centerX, 25 * scale, 12, '#999');
+    
+    // Prompt
+    const promptY = centerY - 80 * scale;
+    const hintFlash = hintLevel >= 3 && Math.sin(gameTime * 6) > 0.7;
+    drawText('Press the GREEN button.', centerX, promptY, 22, hintFlash ? '#22aa22' : '#222');
+    
+    const btnW = 80 * scale;
+    const btnH = 55 * scale;
+    const btnY = centerY + 20 * scale;
+    
+    // Left: labeled RED, colored GREEN
+    const leftX = centerX - 100 * scale;
+    ctx.save();
+    ctx.fillStyle = '#22aa22';
+    roundRect(leftX - btnW/2, btnY - btnH/2, btnW, btnH, 8 * scale);
+    ctx.fill();
+    ctx.strokeStyle = '#1a8a1a';
+    ctx.lineWidth = 2 * scale;
+    roundRect(leftX - btnW/2, btnY - btnH/2, btnW, btnH, 8 * scale);
+    ctx.stroke();
+    drawCleanText('RED', leftX, btnY, 16, '#fff', 'center', '700');
+    ctx.restore();
+    
+    // Middle: labeled GREEN, colored RED
+    const midX = centerX;
+    ctx.save();
+    ctx.fillStyle = '#cc3333';
+    roundRect(midX - btnW/2, btnY - btnH/2, btnW, btnH, 8 * scale);
+    ctx.fill();
+    ctx.strokeStyle = '#aa2222';
+    ctx.lineWidth = 2 * scale;
+    roundRect(midX - btnW/2, btnY - btnH/2, btnW, btnH, 8 * scale);
+    ctx.stroke();
+    drawCleanText('GREEN', midX, btnY, 16, '#fff', 'center', '700');
+    ctx.restore();
+    
+    // Right: labeled BLUE, colored BLUE
+    const rightX = centerX + 100 * scale;
+    ctx.save();
+    ctx.fillStyle = '#3366cc';
+    roundRect(rightX - btnW/2, btnY - btnH/2, btnW, btnH, 8 * scale);
+    ctx.fill();
+    ctx.strokeStyle = '#2255aa';
+    ctx.lineWidth = 2 * scale;
+    roundRect(rightX - btnW/2, btnY - btnH/2, btnW, btnH, 8 * scale);
+    ctx.stroke();
+    drawCleanText('BLUE', rightX, btnY, 16, '#fff', 'center', '700');
+    ctx.restore();
+    
+    drawStickFigure(stickFigure.x, stickFigure.y, 0.7, stickFigure.eyeState);
+  }
+};
+
+// --- ROOM 5: System Alert ---
+rooms[5] = {
+  init() {
+    roomState.dialogX = 0;
+    roomState.dialogY = 0;
+    roomState.dragging = false;
+    roomState.dismissed = false;
+    roomState.secondDialog = false;
+    roomState.dragTotalDist = 0;
+    stickFigure.x = centerX;
+    stickFigure.y = centerY + 100 * scale;
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'normal';
+    startRoomAmbient(5);
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 2;
+    
+    for (const ev of inputEvents) {
+      if (showingDeath) continue;
+      
+      if (roomState.dismissed) {
+        // Tap exit door
+        if (ev.type === 'tap') {
+          const doorX = centerX;
+          const doorY = centerY;
+          if (hitTest(ev.x, ev.y, doorX, doorY, 70 * scale, 90 * scale)) {
+            sfxWin();
+            fadeToRoom(6);
+            return;
+          }
+        }
+        continue;
+      }
+      
+      const dw = 260 * scale;
+      const dh = 180 * scale;
+      const dx = centerX + (roomState.dialogX || 0);
+      const dy = centerY + (roomState.dialogY || 0);
+      
+      if (ev.type === 'tap') {
+        // Allow button
+        const allowX = dx + 50 * scale;
+        const allowY = dy + 50 * scale;
+        if (hitTest(ev.x, ev.y, allowX, allowY, 80 * scale, 35 * scale)) {
+          die('💀 Soul access: GRANTED. You had one of those, right?');
+          return;
+        }
+        
+        // Deny button
+        const denyX = dx - 50 * scale;
+        const denyY = dy + 50 * scale;
+        if (hitTest(ev.x, ev.y, denyX, denyY, 80 * scale, 35 * scale)) {
+          die('💀 Permission denied. Life also denied.');
+          return;
+        }
+        
+        // Check if tap is on dialog body (for dragging)
+        if (hitTest(ev.x, ev.y, dx, dy, dw, dh)) {
+          roomState.dragging = true;
+          // If tapping outside buttons but inside dialog
+          if (!hitTest(ev.x, ev.y, allowX, allowY, 80 * scale, 35 * scale) && 
+              !hitTest(ev.x, ev.y, denyX, denyY, 80 * scale, 35 * scale)) {
+            // this is fine, start drag
+          }
+        } else {
+          // Tap outside dialog
+          if (!roomState.secondDialog) {
+            roomState.secondDialog = true;
+            die('💀 You played yourself.');
+            return;
+          }
+        }
+      }
+      
+      if (ev.type === 'drag' && roomState.dragging) {
+        roomState.dialogX = (roomState.dialogX || 0) + ev.dx;
+        roomState.dialogY = (roomState.dialogY || 0) + ev.dy;
+        roomState.dragTotalDist = (roomState.dragTotalDist || 0) + Math.abs(ev.dx) + Math.abs(ev.dy);
+      }
+      
+      if (ev.type === 'release' && roomState.dragging) {
+        roomState.dragging = false;
+        // Check if dragged off screen
+        const offX = Math.abs(roomState.dialogX || 0);
+        const offY = Math.abs(roomState.dialogY || 0);
+        if (offX > W * 0.35 || offY > H * 0.35) {
+          roomState.dismissed = true;
+          sfxWin();
+          stopAllAmbient();
+          spawnParticles(centerX, centerY, 15, '#44ff44');
+        }
+      }
+    }
+  },
+  draw() {
+    drawSketchBackground();
+    drawText('Room 6: System Alert', centerX, 25 * scale, 12, '#999');
+    
+    // Room behind dialog
+    wobblyRect(centerX - 30 * scale, centerY - 40 * scale, 60 * scale, 80 * scale, '#228B22', 'rgba(34,139,34,0.3)');
+    drawText('EXIT', centerX, centerY, 10, '#228B22');
+    
+    drawStickFigure(stickFigure.x, stickFigure.y, 0.6, stickFigure.eyeState);
+    
+    if (!roomState.dismissed) {
+      // System dialog - pixel perfect
+      const dx = centerX + (roomState.dialogX || 0);
+      const dy = centerY + (roomState.dialogY || 0);
+      const dw = 260 * scale;
+      const dh = 180 * scale;
+      
+      // Wobble hint
+      const wobAmt = hintLevel >= 3 ? Math.sin(gameTime * 3) * 3 * scale : 0;
+      
+      // Shadow
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.25)';
+      ctx.shadowBlur = 15 * scale;
+      ctx.fillStyle = '#f8f8f8';
+      roundRect(dx - dw/2 + wobAmt, dy - dh/2, dw, dh, 14 * scale);
+      ctx.fill();
+      ctx.restore();
+      
+      // Dialog body
+      ctx.save();
+      ctx.fillStyle = '#f8f8f8';
+      roundRect(dx - dw/2 + wobAmt, dy - dh/2, dw, dh, 14 * scale);
+      ctx.fill();
+      ctx.restore();
+      
+      drawCleanText('"Trust Nothing" wants to', dx + wobAmt, dy - 55 * scale, 14, '#000', 'center', '600');
+      drawCleanText('access your soul.', dx + wobAmt, dy - 35 * scale, 14, '#000', 'center', '600');
+      drawCleanText('This app requires eternal', dx + wobAmt, dy - 5 * scale, 11, '#666');
+      drawCleanText('damnation permissions.', dx + wobAmt, dy + 12 * scale, 11, '#666');
+      
+      // Buttons
+      drawCleanButton(dx - 50 * scale + wobAmt, dy + 55 * scale, 90 * scale, 35 * scale, 'Deny', '#e0e0e0', '#333');
+      drawCleanButton(dx + 50 * scale + wobAmt, dy + 55 * scale, 90 * scale, 35 * scale, 'Allow', '#007AFF', '#fff');
+    }
+  }
+};
+
+// --- ROOM 6: The Helpful Arrow ---
+rooms[6] = {
+  init() {
+    roomState.playerPos = 0.5; // 0-1, 0=left, 1=right
+    roomState.fell = false;
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'normal';
+    startRoomAmbient(6);
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 2;
+    
+    for (const ev of inputEvents) {
+      if (showingDeath) continue;
+      
+      if (ev.type === 'tap') {
+        // Right button
+        const rBtnX = centerX + 60 * scale;
+        const rBtnY = H - 80 * scale;
+        if (hitTest(ev.x, ev.y, rBtnX, rBtnY, 60 * scale, 50 * scale)) {
+          roomState.playerPos = Math.min(1, (roomState.playerPos || 0.5) + 0.2);
+          sfxClick();
+          if (roomState.playerPos >= 0.8) {
+            die('💀 The arrow was not your friend.');
+            sfxTrollLaugh(); // Troll laugh when arrow betrays
+          }
+          return;
+        }
+        
+        // Left button
+        const lBtnX = centerX - 60 * scale;
+        const lBtnY = H - 80 * scale;
+        if (hitTest(ev.x, ev.y, lBtnX, lBtnY, 60 * scale, 50 * scale)) {
+          roomState.playerPos = Math.max(0, (roomState.playerPos || 0.5) - 0.2);
+          sfxClick();
+          if (roomState.playerPos <= 0.1) {
+            sfxWin();
+            spawnParticles(stickFigure.x, stickFigure.y, 15, '#44ff44');
+            fadeToRoom(7);
+            return;
+          }
+          return;
+        }
+        
+        // Tap the arrow itself
+        const arrowX = centerX + 30 * scale;
+        const arrowY = centerY - 40 * scale;
+        if (hitTest(ev.x, ev.y, arrowX, arrowY, 80 * scale, 60 * scale)) {
+          die('💀 Never touch a strange arrow.');
+          return;
+        }
+      }
+    }
+  },
+  draw() {
+    drawSketchBackground();
+    drawText('Room 7: The Helpful Arrow', centerX, 25 * scale, 12, '#999');
+    
+    const groundY = centerY + 60 * scale;
+    
+    // Platform
+    wobblyLine(50 * scale, groundY, W - 50 * scale, groundY, '#555', 3);
+    
+    // Dark pit on left
+    const pitFlicker = hintLevel >= 3 && Math.sin(gameTime * 5) > 0.8;
+    if (!pitFlicker) {
+      ctx.save();
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(50 * scale, groundY, 80 * scale, 80 * scale);
+      ctx.restore();
+      // Jagged edges
+      for (let i = 0; i < 5; i++) {
+        wobblyLine(50 * scale + i * 16 * scale, groundY, 55 * scale + i * 16 * scale, groundY + 15 * scale, '#333', 2);
+      }
+    } else {
+      // Reveal it's just paint
+      ctx.save();
+      ctx.fillStyle = '#ddd';
+      ctx.fillRect(50 * scale, groundY, 80 * scale, 80 * scale);
+      drawText('(paint)', 90 * scale, groundY + 40 * scale, 8, '#999');
+      ctx.restore();
+      // EXIT behind it
+      wobblyRect(60 * scale, groundY + 5 * scale, 50 * scale, 50 * scale, '#22aa22', 'rgba(34,221,34,0.5)');
+      drawText('EXIT', 85 * scale, groundY + 30 * scale, 8, '#fff');
+    }
+    
+    // Treasure chest on right
+    wobblyRect(W - 120 * scale, groundY - 40 * scale, 50 * scale, 40 * scale, '#DAA520', '#FFD700', 2);
+    drawText('✨', W - 95 * scale, groundY - 45 * scale, 16);
+    
+    // Bouncy arrow pointing right
+    const arrowBounce = Math.sin(gameTime * 4) * 10 * scale;
+    const arrowX = centerX + 30 * scale;
+    const arrowY = centerY - 40 * scale + arrowBounce;
+    ctx.save();
+    ctx.fillStyle = '#ffcc00';
+    ctx.beginPath();
+    ctx.moveTo(arrowX + 30 * scale, arrowY);
+    ctx.lineTo(arrowX, arrowY - 20 * scale);
+    ctx.lineTo(arrowX, arrowY - 8 * scale);
+    ctx.lineTo(arrowX - 30 * scale, arrowY - 8 * scale);
+    ctx.lineTo(arrowX - 30 * scale, arrowY + 8 * scale);
+    ctx.lineTo(arrowX, arrowY + 8 * scale);
+    ctx.lineTo(arrowX, arrowY + 20 * scale);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#cc9900';
+    ctx.lineWidth = 2 * scale;
+    ctx.stroke();
+    ctx.restore();
+    
+    // Player position
+    const ppos = roomState.playerPos || 0.5;
+    stickFigure.x = 100 * scale + ppos * (W - 200 * scale);
+    stickFigure.y = groundY - 25 * scale;
+    drawStickFigure(stickFigure.x, stickFigure.y, 0.8, stickFigure.eyeState);
+    
+    // Direction buttons
+    drawSketchButton(centerX - 60 * scale, H - 80 * scale, 60 * scale, 50 * scale, '←');
+    drawSketchButton(centerX + 60 * scale, H - 80 * scale, 60 * scale, 50 * scale, '→');
+  }
+};
+
+// --- ROOM 7: Loading Screen ---
+rooms[7] = {
+  init() {
+    roomState.progress = 38;
+    roomState.dragging = false;
+    roomState.tapCount = 0;
+    roomState.waitTime = 0;
+    roomState.tipIndex = 0;
+    roomState.tipTimer = 0;
+    stickFigure.visible = false;
+  },
+  update() {
+    roomState.waitTime += deltaTime;
+    roomState.tipTimer += deltaTime;
+    
+    if (roomState.tipTimer > 5) {
+      roomState.tipTimer = 0;
+      roomState.tipIndex = (roomState.tipIndex || 0) + 1;
+    }
+    
+    // Die from waiting too long
+    if (roomState.waitTime > 60 && !showingDeath && !roomState.dragging) {
+      die('💀 Patience is a virtue. But not here.');
+      roomState.waitTime = 0;
+    }
+    
+    for (const ev of inputEvents) {
+      if (showingDeath) continue;
+      
+      const barX = 50 * scale;
+      const barY = centerY;
+      const barW = W - 100 * scale;
+      const barH = 30 * scale;
+      
+      if (ev.type === 'tap') {
+        // Check if tapping on the progress bar area
+        const handleX = barX + (roomState.progress / 100) * barW;
+        if (hitTest(ev.x, ev.y, handleX, barY, 40 * scale, 50 * scale) ||
+            hitTest(ev.x, ev.y, centerX, barY, barW, barH + 30*scale)) {
+          roomState.dragging = true;
+        } else {
+          // Impatient tapping
+          roomState.tapCount = (roomState.tapCount || 0) + 1;
+          if (roomState.tapCount >= 5) {
+            die('💀 Tapping harder doesn\'t make it load faster. You know this.');
+            roomState.tapCount = 0;
+          }
+        }
+      }
+      
+      if (ev.type === 'drag' && roomState.dragging) {
+        const barX2 = 50 * scale;
+        const barW2 = W - 100 * scale;
+        const pct = Math.max(0, Math.min(100, ((ev.x - barX2) / barW2) * 100));
+        roomState.progress = pct;
+        
+        if (pct < 10) {
+          die('💀 You un-loaded the game. Impressive, actually.');
+          return;
+        }
+      }
+      
+      if (ev.type === 'release' && roomState.dragging) {
+        roomState.dragging = false;
+        if (roomState.progress >= 98) {
+          sfxWin();
+          spawnParticles(centerX, centerY, 20, '#44ff44');
+          fadeToRoom(8);
+          return;
+        }
+      }
+    }
+  },
+  draw() {
+    // Dark loading screen
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, W, H);
+    
+    // Loading text
+    drawCleanText('Loading Room 8...', centerX, centerY - 60 * scale, 18, '#ccc');
+    
+    // Progress bar background
+    const barX = 50 * scale;
+    const barY = centerY - 15 * scale;
+    const barW = W - 100 * scale;
+    const barH = 30 * scale;
+    
+    ctx.save();
+    ctx.fillStyle = '#333';
+    roundRect(barX, barY, barW, barH, 6 * scale);
+    ctx.fill();
+    
+    // Progress fill
+    const fillW = (roomState.progress / 100) * barW;
+    ctx.fillStyle = '#4CAF50';
+    roundRect(barX, barY, Math.max(0, fillW), barH, 6 * scale);
+    ctx.fill();
+    ctx.restore();
+    
+    // Handle glow hint
+    if (hintLevel >= 3) {
+      const handleX = barX + fillW;
+      ctx.save();
+      ctx.globalAlpha = 0.4 + Math.sin(gameTime * 3) * 0.2;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(handleX, barY + barH/2, 12 * scale, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    
+    // Percentage
+    drawCleanText(`${Math.floor(roomState.progress)}%`, centerX, centerY + 30 * scale, 14, '#888');
+    
+    // Tip
+    const tips = [
+      '💡 Tip: Trust nothing, not even loading screens.',
+      '💡 Tip: Have you tried dragging things?',
+      '💡 Tip: This tip is a hint.',
+      '💡 Tip: We\'re not sorry.',
+      '💡 Tip: The game is lying to you right now.'
+    ];
+    const tipIdx = (roomState.tipIndex || 0) % tips.length;
+    drawCleanText(tips[tipIdx], centerX, H - 60 * scale, 11, '#555');
+  }
+};
+
+// --- ROOM 8: Mirror Room ---
+rooms[8] = {
+  init() {
+    // Simple maze grid - 0=open, 1=wall, 2=spike, 3=exit
+    roomState.maze = [
+      [1,1,1,1,1,1,1],
+      [1,0,0,2,0,0,1],
+      [1,0,1,1,1,0,1],
+      [1,0,0,0,2,0,1],
+      [1,1,1,0,1,0,1],
+      [1,0,0,0,0,0,1],
+      [1,1,1,1,1,3,1],
+    ];
+    roomState.px = 1; // player grid position
+    roomState.py = 1;
+    roomState.titleFlash = 0;
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'confused';
+    startRoomAmbient(8);
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 2;
+    roomState.titleFlash = (roomState.titleFlash || 0) + deltaTime;
+    
+    for (const ev of inputEvents) {
+      if (showingDeath) continue;
+      
+      if (ev.type === 'tap') {
+        const btnSize = 55 * scale;
+        const btnCenterX = centerX;
+        const btnCenterY = H - 100 * scale;
+        
+        let dx = 0, dy = 0;
+        
+        // Up button (INVERTED: moves down)
+        if (hitTest(ev.x, ev.y, btnCenterX, btnCenterY - btnSize, btnSize, btnSize)) { dy = 1; }
+        // Down button (INVERTED: moves up)
+        if (hitTest(ev.x, ev.y, btnCenterX, btnCenterY + btnSize, btnSize, btnSize)) { dy = -1; }
+        // Left button (INVERTED: moves right)
+        if (hitTest(ev.x, ev.y, btnCenterX - btnSize, btnCenterY, btnSize, btnSize)) { dx = 1; }
+        // Right button (INVERTED: moves left)
+        if (hitTest(ev.x, ev.y, btnCenterX + btnSize, btnCenterY, btnSize, btnSize)) { dx = -1; }
+        
+        if (dx !== 0 || dy !== 0) {
+          sfxClick();
+          const nx = roomState.px + dx;
+          const ny = roomState.py + dy;
+          
+          if (nx < 0 || nx >= 7 || ny < 0 || ny >= 7) {
+            // Out of bounds
+            return;
+          }
+          
+          const cell = roomState.maze[ny][nx];
+          if (cell === 1) {
+            die('💀 The walls are not the exit. We checked.');
+            return;
+          }
+          if (cell === 2) {
+            die('💀 You went left. Wait, you went right. Wait — which way is left?');
+            return;
+          }
+          if (cell === 3) {
+            sfxWin();
+            spawnParticles(stickFigure.x, stickFigure.y, 20, '#44ff44');
+            fadeToRoom(9);
+            return;
+          }
+          
+          roomState.px = nx;
+          roomState.py = ny;
+        }
+      }
+    }
+  },
+  draw() {
+    drawSketchBackground();
+    
+    // Mirror aesthetic - subtle reflection
+    ctx.save();
+    ctx.globalAlpha = 0.05;
+    ctx.scale(1, -1);
+    ctx.translate(0, -H);
+    drawSketchBackground();
+    ctx.restore();
+    
+    // Title (mirrored)
+    const showNormal = hintLevel >= 3 && Math.sin(roomState.titleFlash * 3) > 0.9;
+    drawText(showNormal ? 'Room 9: Mirror' : 'Room 9: rorriM', centerX, 25 * scale, 12, '#999');
+    
+    // Draw maze
+    const cellSize = 35 * scale;
+    const mazeX = centerX - 3.5 * cellSize;
+    const mazeY = 60 * scale;
+    
+    for (let y = 0; y < 7; y++) {
+      for (let x = 0; x < 7; x++) {
+        const cx = mazeX + x * cellSize + cellSize/2;
+        const cy = mazeY + y * cellSize + cellSize/2;
+        const cell = roomState.maze[y][x];
+        
+        if (cell === 1) {
+          wobblyRect(mazeX + x * cellSize, mazeY + y * cellSize, cellSize, cellSize, '#666', '#888');
+        } else if (cell === 2) {
+          // Spikes
+          ctx.save();
+          ctx.fillStyle = 'rgba(255,0,0,0.3)';
+          ctx.fillRect(mazeX + x * cellSize, mazeY + y * cellSize, cellSize, cellSize);
+          drawText('▲', cx, cy, 14, '#cc3333');
+          ctx.restore();
+        } else if (cell === 3) {
+          wobblyRect(mazeX + x * cellSize, mazeY + y * cellSize, cellSize, cellSize, '#22aa22', 'rgba(34,170,34,0.3)');
+          drawText('EXIT', cx, cy, 7, '#22aa22');
+        }
+      }
+    }
+    
+    // Player in maze
+    const pCellX = mazeX + roomState.px * cellSize + cellSize/2;
+    const pCellY = mazeY + roomState.py * cellSize + cellSize/2;
+    stickFigure.x = pCellX;
+    stickFigure.y = pCellY;
+    drawStickFigure(pCellX, pCellY, 0.4, stickFigure.eyeState);
+    
+    // Direction buttons
+    const btnSize = 55 * scale;
+    const btnCenterX = centerX;
+    const btnCenterY = H - 100 * scale;
+    
+    drawSketchButton(btnCenterX, btnCenterY - btnSize, btnSize, btnSize, '↑');
+    drawSketchButton(btnCenterX, btnCenterY + btnSize, btnSize, btnSize, '↓');
+    drawSketchButton(btnCenterX - btnSize, btnCenterY, btnSize, btnSize, '←');
+    drawSketchButton(btnCenterX + btnSize, btnCenterY, btnSize, btnSize, '→');
+  }
+};
+
+// --- ROOM 9: Trust the Troll ---
+rooms[9] = {
+  init() {
+    roomState.glassTaps = 0;
+    roomState.glassBroken = false;
+    roomState.trollTaps = 0;
+    roomState.waitTimer = 0;
+    roomState.glassRepairTimer = 0;
+    stickFigure.x = centerX - 80 * scale;
+    stickFigure.y = centerY + 60 * scale;
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'normal';
+    startRoomAmbient(9);
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 2;
+    roomState.waitTimer += deltaTime;
+    
+    // Glass repair timer
+    if (roomState.glassBroken && !showingDeath) {
+      roomState.glassRepairTimer = (roomState.glassRepairTimer || 0) + deltaTime;
+      if (roomState.glassRepairTimer > 8) {
+        roomState.glassBroken = false;
+        roomState.glassTaps = 0;
+        roomState.glassRepairTimer = 0;
+      }
+    }
+    
+    // Die from waiting
+    if (roomState.waitTimer > 20 && !showingDeath) {
+      die('💀 Doing nothing worked once. The troll is not a timer.');
+      roomState.waitTimer = 0;
+    }
+    
+    for (const ev of inputEvents) {
+      if (showingDeath) continue;
+      
+      if (ev.type === 'tap') {
+        roomState.waitTimer = 0;
+        
+        // Troll area
+        const trollX = centerX + 60 * scale;
+        const trollY = centerY - 30 * scale;
+        if (hitTest(ev.x, ev.y, trollX, trollY, 80 * scale, 100 * scale)) {
+          roomState.trollTaps = (roomState.trollTaps || 0) + 1;
+          if (roomState.trollTaps >= 5) {
+            die('💀 Don\'t poke the troll.');
+            sfxTrollLaugh();
+          }
+          return;
+        }
+        
+        // Door behind troll
+        const doorX = W - 60 * scale;
+        const doorY = centerY;
+        if (hitTest(ev.x, ev.y, doorX, doorY, 50 * scale, 80 * scale)) {
+          die('💀 The troll didn\'t say the door was safe either.');
+          sfxTrollLaugh();
+          return;
+        }
+        
+        // Glass case / button area
+        const btnX = centerX - 30 * scale;
+        const btnY = centerY + 20 * scale;
+        
+        if (!roomState.glassBroken) {
+          // Tap glass
+          if (hitTest(ev.x, ev.y, btnX, btnY, 70 * scale, 70 * scale)) {
+            roomState.glassTaps = (roomState.glassTaps || 0) + 1;
+            sfxClick();
+            spawnParticles(ev.x, ev.y, 3, '#aaddff');
+            if (roomState.glassTaps >= 3) {
+              roomState.glassBroken = true;
+              roomState.glassRepairTimer = 0;
+              sfxExplosion();
+              spawnParticles(btnX, btnY, 15, '#ccddff');
+            }
+          }
+        } else {
+          // Tap the exposed button
+          if (hitTest(ev.x, ev.y, btnX, btnY, 50 * scale, 50 * scale)) {
+            sfxWin();
+            spawnParticles(ev.x, ev.y, 30, '#44ff44');
+            // WIN! Show chapter complete
+            roomState.won = true;
+            showChapterComplete();
+            return;
+          }
+        }
+      }
+      
+      // Drag troll attempt
+      if (ev.type === 'drag') {
+        const trollX = centerX + 60 * scale;
+        const trollY = centerY - 30 * scale;
+        if (hitTest(ev.startX, ev.startY, trollX, trollY, 80 * scale, 100 * scale)) {
+          die('💀 He\'s heavier than he looks. And angrier.');
+          sfxTrollLaugh();
+          return;
+        }
+      }
+    }
+  },
+  draw() {
+    drawSketchBackground();
+    drawText('Room 10: Trust the Troll', centerX, 25 * scale, 12, '#999');
+    
+    // Door behind troll (partially visible)
+    const doorX = W - 80 * scale;
+    const doorY = centerY - 40 * scale;
+    wobblyRect(doorX, doorY, 45 * scale, 80 * scale, '#8B4513', '#a0522d');
+    
+    // Troll
+    const trollX = centerX + 60 * scale;
+    const trollY = centerY - 30 * scale;
+    
+    // Troll body
+    wobblyCircle(trollX, trollY, 35 * scale, '#228B22', '#2d8f2d', 2.5);
+    // Troll face
+    // Eyes (mischievous)
+    ctx.save();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(trollX - 12*scale, trollY - 8*scale, 8*scale, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(trollX + 12*scale, trollY - 8*scale, 8*scale, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#222';
+    ctx.beginPath(); ctx.arc(trollX - 10*scale, trollY - 6*scale, 4*scale, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(trollX + 14*scale, trollY - 6*scale, 4*scale, 0, Math.PI*2); ctx.fill();
+    // Grin
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = 2.5*scale;
+    ctx.beginPath();
+    ctx.arc(trollX, trollY + 5*scale, 18*scale, 0.1, Math.PI - 0.1);
+    ctx.stroke();
+    ctx.restore();
+    
+    // Speech bubble
+    const bubbleX = centerX - 20 * scale;
+    const bubbleY = centerY - 130 * scale;
+    const bubbleW = 220 * scale;
+    const bubbleH = 80 * scale;
+    
+    ctx.save();
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = 2 * scale;
+    roundRect(bubbleX - bubbleW/2, bubbleY - bubbleH/2, bubbleW, bubbleH, 10 * scale);
+    ctx.fill();
+    roundRect(bubbleX - bubbleW/2, bubbleY - bubbleH/2, bubbleW, bubbleH, 10 * scale);
+    ctx.stroke();
+    // Tail
+    ctx.beginPath();
+    ctx.moveTo(bubbleX + 30*scale, bubbleY + bubbleH/2);
+    ctx.lineTo(trollX - 15*scale, trollY - 35*scale);
+    ctx.lineTo(bubbleX + 50*scale, bubbleY + bubbleH/2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    
+    // Speech text
+    drawText("DON'T press this", bubbleX, bubbleY - 20*scale, 11, '#222');
+    drawText("button. Seriously.", bubbleX, bubbleY - 5*scale, 11, '#222');
+    drawText("I'm warning you.", bubbleX, bubbleY + 10*scale, 11, '#222');
+    
+    // Hint asterisk
+    if (hintLevel >= 4) {
+      ctx.save();
+      ctx.globalAlpha = 0.5 + Math.sin(gameTime * 3) * 0.3;
+      drawText('*actually true', bubbleX + 60*scale, bubbleY + 30*scale, 7, '#cc3333');
+      ctx.restore();
+    }
+    
+    // Glass case + button
+    const btnX = centerX - 30 * scale;
+    const btnY = centerY + 20 * scale;
+    const caseSize = 60 * scale;
+    
+    if (!roomState.glassBroken) {
+      // Glass case
+      ctx.save();
+      ctx.fillStyle = 'rgba(200,220,255,0.3)';
+      ctx.strokeStyle = 'rgba(150,180,220,0.7)';
+      ctx.lineWidth = 2 * scale;
+      ctx.fillRect(btnX - caseSize/2, btnY - caseSize/2, caseSize, caseSize);
+      ctx.strokeRect(btnX - caseSize/2, btnY - caseSize/2, caseSize, caseSize);
+      ctx.restore();
+      
+      // Cracks
+      for (let i = 0; i < (roomState.glassTaps || 0); i++) {
+        const cx = btnX + (Math.random() - 0.5) * caseSize * 0.8;
+        const cy = btnY + (Math.random() - 0.5) * caseSize * 0.8;
+        wobblyLine(cx - 8*scale, cy - 8*scale, cx + 8*scale, cy + 8*scale, 'rgba(150,180,220,0.5)', 1);
+        wobblyLine(cx + 8*scale, cy - 8*scale, cx - 8*scale, cy + 8*scale, 'rgba(150,180,220,0.5)', 1);
+      }
+    }
+    
+    // Red button (always visible, under glass)
+    ctx.save();
+    ctx.fillStyle = '#cc0000';
+    ctx.beginPath();
+    ctx.arc(btnX, btnY, 18 * scale, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ff3333';
+    ctx.beginPath();
+    ctx.arc(btnX - 3*scale, btnY - 3*scale, 14 * scale, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#990000';
+    ctx.lineWidth = 2*scale;
+    ctx.beginPath();
+    ctx.arc(btnX, btnY, 18 * scale, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    
+    // Stick figure
+    drawStickFigure(stickFigure.x, stickFigure.y, 0.8, stickFigure.eyeState);
+  }
+};
+
+// ============================================================
+// CHAPTER COMPLETE SCREEN
+// ============================================================
+let chapterComplete = false;
+
+function showChapterComplete() {
+  chapterComplete = true;
+  stopAllAmbient();
+}
+
+function drawChapterComplete() {
+  if (!chapterComplete) return;
+  
+  drawSketchBackground();
+  
+  const t = gameTime;
+  
+  drawText('Chapter 1', centerX, centerY - 120 * scale, 28, '#222');
+  drawText('COMPLETE!', centerX, centerY - 80 * scale, 32, '#22aa22');
+  
+  drawText(`You died ${totalDeaths} times.`, centerX, centerY - 20 * scale, 18, '#666');
+  
+  if (totalDeaths > 30) {
+    drawText("That's... impressive, actually.", centerX, centerY + 15 * scale, 14, '#999');
+  } else if (totalDeaths > 15) {
+    drawText("Not bad. Not great. But not bad.", centerX, centerY + 15 * scale, 14, '#999');
+  } else {
+    drawText("Are you a wizard?", centerX, centerY + 15 * scale, 14, '#999');
+  }
+  
+  // Stick figure celebrating
+  drawStickFigure(centerX, centerY + 80 * scale, 1.2, 'happy');
+  
+  // Confetti particles
+  if (Math.random() < 0.2) {
+    const colors = ['#ff4444', '#44ff44', '#4444ff', '#ffff44', '#ff44ff'];
+    spawnParticles(Math.random() * W, -10, 1, colors[Math.floor(Math.random() * colors.length)], 2);
+  }
+  
+  drawText('Thanks for playing!', centerX, H - 80 * scale, 14, '#aaa');
+  drawText('Chapter 2 coming soon...', centerX, H - 55 * scale, 11, '#ccc');
+}
+
+// ============================================================
+// ROOM MANAGEMENT
+// ============================================================
+function initRoom(index) {
+  inputEvents = [];
+  particles = [];
+  stopAllAmbient();
+  if (rooms[index] && rooms[index].init) rooms[index].init();
+}
+
+function updateRoom() {
+  if (chapterComplete) {
+    stickFigure.breathPhase += deltaTime * 2;
+    inputEvents = [];
+    return;
+  }
+  if (rooms[currentRoom] && rooms[currentRoom].update) {
+    rooms[currentRoom].update();
+  }
+  inputEvents = [];
+}
+
+function drawRoom() {
+  if (chapterComplete) {
+    drawChapterComplete();
+    return;
+  }
+  if (rooms[currentRoom] && rooms[currentRoom].draw) {
+    rooms[currentRoom].draw();
+  }
+}
+
+// ============================================================
+// MAIN LOOP
+// ============================================================
+function gameLoop(timestamp) {
+  const now = timestamp / 1000;
+  deltaTime = Math.min(0.05, now - (lastTime || now));
+  lastTime = now;
+  gameTime += deltaTime;
+  
+  // Clear
+  ctx.clearRect(0, 0, W, H);
+  
+  // Apply shake
+  ctx.save();
+  applyShake();
+  
+  // Draw room
+  drawRoom();
+  
+  // Particles
+  updateParticles();
+  drawParticles();
+  
+  ctx.restore();
+  
+  // Death overlay (not shaken)
+  drawDeathOverlay();
+  
+  // Death counter (always visible)
+  drawDeathCounter();
+  
+  // Mute button (always visible)
+  drawMuteButton();
+  
+  // Transition overlay
+  updateTransition();
+  drawTransition();
+  
+  // Update room logic
+  updateRoom();
+  
+  requestAnimationFrame(gameLoop);
+}
+
+// ============================================================
+// START
+// ============================================================
+initRoom(0);
+requestAnimationFrame(gameLoop);
+
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "mobile-games-lab-jc"
+  },
+  "targets": {
+    "mobile-games-lab-jc": {
+      "hosting": {
+        "jc-deja-vu-game": [
+          "jc-deja-vu-game"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

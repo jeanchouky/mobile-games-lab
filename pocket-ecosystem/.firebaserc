@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "mobile-games-lab-jc"
+  },
+  "targets": {
+    "mobile-games-lab-jc": {
+      "hosting": {
+        "jc-pocket-ecosystem-game": [
+          "jc-pocket-ecosystem-game"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

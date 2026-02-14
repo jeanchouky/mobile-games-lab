@@ -1,0 +1,1523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Sound Thief</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #0a0e1a;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+}
+canvas {
+  display: block;
+  width: 100%; height: 100%;
+}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+'use strict';
+
+// ============================================================
+// SOUND THIEF — Mobile Web Game
+// Your microphone is your weapon
+// ============================================================
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+// --- GLOBALS ---
+let W, H, scale, centerX, centerY;
+let gameTime = 0, deltaTime = 0, lastTime = 0;
+let gameState = 'TITLE'; // TITLE, RECORDING, PLAYING, PAUSED, GAME_OVER
+let currentLevel = 0;
+let camera = { x: 0, y: 0, targetX: 0, targetY: 0 };
+let particles = [];
+let backgroundWaves = [];
+
+// Audio
+let audioCtx = null;
+let micStream = null;
+let micPermission = false;
+let analyser = null;
+let micDataArray = null;
+let soundInventory = []; // max 5 recorded sounds
+let recordingState = { active: false, timer: 0, maxDuration: 2.0, audioData: [], sampleRate: 0 };
+
+// Player
+let player = {
+  x: 100, y: 300, vx: 0, vy: 0,
+  w: 24, h: 24, radius: 12,
+  onGround: false, hp: 100, maxHp: 100,
+  jumpPower: -10, moveSpeed: 4, gravity: 0.5,
+  facing: 1 // 1 = right, -1 = left
+};
+
+// Game progress
+let resonance = 0; // currency
+let enemies = [];
+let platforms = [];
+let projectiles = [];
+let pickups = [];
+
+// Input
+let keys = {};
+let inputEvents = [];
+let touchControls = { left: false, right: false, jump: false, action: false };
+let gs_levelClearing = false;
+let gs_victory = false;
+
+// --- RESIZE ---
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  scale = Math.min(W / 400, H / 700);
+  centerX = W / 2;
+  centerY = H / 2;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ============================================================
+// AUDIO ENGINE
+// ============================================================
+
+function initAudio() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+// Request microphone access
+async function requestMic() {
+  if (micPermission) return true;
+  try {
+    initAudio();
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+      audio: { 
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false 
+      } 
+    });
+    micStream = stream;
+    
+    // Setup analyser for real-time visualization
+    const source = audioCtx.createMediaStreamSource(stream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    source.connect(analyser);
+    
+    micDataArray = new Uint8Array(analyser.frequencyBinCount);
+    micPermission = true;
+    return true;
+  } catch(e) {
+    console.error('Mic permission denied:', e);
+    micPermission = false;
+    return false;
+  }
+}
+
+// Start recording
+function startRecording() {
+  if (!micPermission) return;
+  recordingState.active = true;
+  recordingState.timer = 0;
+  recordingState.audioData = [];
+  recordingState.sampleRate = audioCtx.sampleRate;
+  
+  // Create a ScriptProcessorNode to capture audio data
+  const bufferSize = 4096;
+  const recorder = audioCtx.createScriptProcessor(bufferSize, 1, 1);
+  const source = audioCtx.createMediaStreamSource(micStream);
+  
+  recorder.onaudioprocess = (e) => {
+    if (!recordingState.active) return;
+    const inputData = e.inputBuffer.getChannelData(0);
+    recordingState.audioData.push(new Float32Array(inputData));
+  };
+  
+  source.connect(recorder);
+  recorder.connect(audioCtx.destination);
+  recordingState.recorder = recorder;
+  recordingState.source = source;
+}
+
+// Stop recording and analyze
+function stopRecording() {
+  if (!recordingState.active) return;
+  recordingState.active = false;
+  
+  // Disconnect recorder
+  if (recordingState.recorder) {
+    recordingState.source.disconnect();
+    recordingState.recorder.disconnect();
+  }
+  
+  // Merge audio chunks
+  const totalLength = recordingState.audioData.reduce((acc, arr) => acc + arr.length, 0);
+  const audioBuffer = new Float32Array(totalLength);
+  let offset = 0;
+  for (const chunk of recordingState.audioData) {
+    audioBuffer.set(chunk, offset);
+    offset += chunk.length;
+  }
+  
+  // Analyze the sound
+  const analysis = analyzeSound(audioBuffer, recordingState.sampleRate);
+  
+  // Add to inventory if there's space
+  if (soundInventory.length < 5) {
+    soundInventory.push({
+      id: Date.now(),
+      buffer: audioBuffer,
+      sampleRate: recordingState.sampleRate,
+      analysis: analysis,
+      waveform: generateWaveform(audioBuffer, 100),
+      cooldown: 0
+    });
+    playSfx('success');
+  } else {
+    playSfx('error');
+  }
+  
+  gameState = 'PLAYING';
+}
+
+// Analyze sound characteristics
+function analyzeSound(audioBuffer, sampleRate) {
+  // Calculate volume (RMS)
+  let sum = 0;
+  for (let i = 0; i < audioBuffer.length; i++) {
+    sum += audioBuffer[i] * audioBuffer[i];
+  }
+  const rms = Math.sqrt(sum / audioBuffer.length);
+  const volumeDb = 20 * Math.log10(rms + 0.0001);
+  const normalizedVolume = Math.max(0, Math.min(100, (volumeDb + 60) * 2));
+  
+  // FFT for frequency analysis
+  const fftSize = 2048;
+  const fft = new Float32Array(fftSize);
+  for (let i = 0; i < Math.min(fftSize, audioBuffer.length); i++) {
+    fft[i] = audioBuffer[i];
+  }
+  
+  // Simple dominant frequency detection (find peak in frequency domain)
+  const freqBins = fftSize / 2;
+  const spectrum = new Float32Array(freqBins);
+  for (let i = 0; i < freqBins; i++) {
+    const re = fft[i * 2] || 0;
+    const im = fft[i * 2 + 1] || 0;
+    spectrum[i] = Math.sqrt(re * re + im * im);
+  }
+  
+  let maxMag = 0;
+  let maxBin = 0;
+  for (let i = 1; i < freqBins; i++) {
+    if (spectrum[i] > maxMag) {
+      maxMag = spectrum[i];
+      maxBin = i;
+    }
+  }
+  
+  const dominantFreq = maxBin * sampleRate / fftSize;
+  
+  // Classify sound type based on frequency and volume
+  let type = 'impact';
+  let color = '#ff6b6b';
+  
+  if (dominantFreq > 2000) {
+    type = 'high';
+    color = '#4ecdc4';
+  } else if (dominantFreq > 800) {
+    type = 'mid';
+    color = '#ffe66d';
+  } else if (normalizedVolume > 60) {
+    type = 'loud';
+    color = '#ff6b6b';
+  } else {
+    type = 'low';
+    color = '#a8dadc';
+  }
+  
+  // Check for musical/harmonic content
+  const isHarmonic = checkHarmonic(spectrum);
+  if (isHarmonic) {
+    type = 'harmonic';
+    color = '#c77dff';
+  }
+  
+  return {
+    volume: Math.round(normalizedVolume),
+    frequency: Math.round(dominantFreq),
+    duration: audioBuffer.length / sampleRate,
+    type: type,
+    color: color,
+    power: Math.round(normalizedVolume * 0.8 + (dominantFreq / 3000) * 20)
+  };
+}
+
+// Check if sound is harmonic/musical
+function checkHarmonic(spectrum) {
+  // Very simplified: check if there are clear peaks (not just noise)
+  let peaks = 0;
+  const threshold = Math.max(...spectrum) * 0.3;
+  for (let i = 5; i < spectrum.length - 5; i++) {
+    if (spectrum[i] > threshold && 
+        spectrum[i] > spectrum[i-1] && 
+        spectrum[i] > spectrum[i+1]) {
+      peaks++;
+    }
+  }
+  return peaks >= 3 && peaks <= 8; // Musical sounds have a few clear harmonics
+}
+
+// Generate waveform visualization data
+function generateWaveform(audioBuffer, width) {
+  const waveform = [];
+  const step = Math.floor(audioBuffer.length / width);
+  for (let i = 0; i < width; i++) {
+    let sum = 0;
+    let count = 0;
+    for (let j = 0; j < step && i * step + j < audioBuffer.length; j++) {
+      sum += Math.abs(audioBuffer[i * step + j]);
+      count++;
+    }
+    waveform.push(count > 0 ? sum / count : 0);
+  }
+  return waveform;
+}
+
+// Play a recorded sound as weapon
+function playSound(soundObj) {
+  if (!audioCtx || soundObj.cooldown > 0) return;
+  
+  const buffer = audioCtx.createBuffer(1, soundObj.buffer.length, soundObj.sampleRate);
+  buffer.getChannelData(0).set(soundObj.buffer);
+  
+  const source = audioCtx.createBufferSource();
+  source.buffer = buffer;
+  
+  const gain = audioCtx.createGain();
+  gain.gain.value = 0.6;
+  
+  source.connect(gain);
+  gain.connect(audioCtx.destination);
+  source.start();
+  
+  // Create projectile
+  createSoundProjectile(soundObj);
+  
+  // Set cooldown
+  soundObj.cooldown = 1.0; // 1 second cooldown
+  
+  playSfx('shoot');
+}
+
+// Create projectile from sound
+function createSoundProjectile(soundObj) {
+  const analysis = soundObj.analysis;
+  projectiles.push({
+    x: player.x + player.w / 2,
+    y: player.y + player.h / 2,
+    vx: player.facing * 8,
+    vy: 0,
+    w: 16,
+    h: 16,
+    damage: analysis.power,
+    type: analysis.type,
+    color: analysis.color,
+    lifetime: 3.0,
+    waveform: soundObj.waveform
+  });
+}
+
+// Procedural SFX (fallback mode or UI sounds)
+function playSfx(type) {
+  if (!audioCtx) return;
+  const now = audioCtx.currentTime;
+  
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  
+  switch(type) {
+    case 'jump':
+      osc.frequency.setValueAtTime(400, now);
+      osc.frequency.exponentialRampToValueAtTime(600, now + 0.1);
+      gain.gain.setValueAtTime(0.1, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+      osc.type = 'square';
+      break;
+    case 'shoot':
+      osc.frequency.setValueAtTime(800, now);
+      osc.frequency.exponentialRampToValueAtTime(200, now + 0.15);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+      osc.type = 'sawtooth';
+      break;
+    case 'hit':
+      osc.frequency.setValueAtTime(100, now);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+      osc.type = 'square';
+      break;
+    case 'success':
+      osc.frequency.setValueAtTime(523, now);
+      osc.frequency.setValueAtTime(659, now + 0.1);
+      gain.gain.setValueAtTime(0.1, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+      osc.type = 'sine';
+      break;
+    case 'error':
+      osc.frequency.setValueAtTime(200, now);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+      osc.type = 'sawtooth';
+      break;
+    default:
+      osc.frequency.value = 440;
+      gain.gain.value = 0.1;
+  }
+  
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(now);
+  osc.stop(now + 0.3);
+}
+
+// ============================================================
+// BACKGROUND WAVEFORMS
+// ============================================================
+
+function initBackgroundWaves() {
+  backgroundWaves = [];
+  for (let i = 0; i < 12; i++) {
+    backgroundWaves.push({
+      y: i * (H / 12),
+      amplitude: 10 + Math.random() * 30,
+      frequency: 0.01 + Math.random() * 0.03,
+      phase: Math.random() * Math.PI * 2,
+      speed: 0.3 + Math.random() * 0.7,
+      opacity: 0.1 + Math.random() * 0.2
+    });
+  }
+}
+
+function drawBackgroundWaves() {
+  for (const wave of backgroundWaves) {
+    wave.phase += deltaTime * wave.speed;
+    
+    ctx.save();
+    ctx.strokeStyle = `rgba(100, 180, 255, ${wave.opacity})`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    
+    for (let x = -10; x <= W + 10; x += 4) {
+      const wx = x - camera.x * 0.3;
+      const y = wave.y + Math.sin(wx * wave.frequency + wave.phase) * wave.amplitude;
+      if (x === -10) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// PARTICLES
+// ============================================================
+
+function spawnParticles(x, y, count, color) {
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 6,
+      vy: (Math.random() - 0.5) * 6 - 2,
+      life: 1,
+      decay: 0.02 + Math.random() * 0.02,
+      size: 2 + Math.random() * 4,
+      color
+    });
+  }
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.2;
+    p.life -= p.decay;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    ctx.save();
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - camera.x, p.y - camera.y, p.size, p.size);
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// PLAYER
+// ============================================================
+
+function updatePlayer() {
+  // Horizontal movement
+  let moveX = 0;
+  if (keys['ArrowLeft'] || keys['a'] || touchControls.left) moveX = -1;
+  if (keys['ArrowRight'] || keys['d'] || touchControls.right) moveX = 1;
+  
+  player.vx = moveX * player.moveSpeed;
+  if (moveX !== 0) player.facing = moveX;
+  
+  // Jump
+  if ((keys[' '] || keys['ArrowUp'] || keys['w'] || touchControls.jump) && player.onGround) {
+    player.vy = player.jumpPower;
+    player.onGround = false;
+    playSfx('jump');
+  }
+  
+  // Gravity
+  if (!player.onGround) {
+    player.vy += player.gravity;
+  }
+  
+  // Update position
+  player.x += player.vx;
+  player.y += player.vy;
+  
+  // Collision with platforms
+  player.onGround = false;
+  for (const plat of platforms) {
+    if (player.vx > 0 && player.x + player.w > plat.x && player.x < plat.x && 
+        player.y + player.h > plat.y && player.y < plat.y + plat.h) {
+      player.x = plat.x - player.w;
+      player.vx = 0;
+    }
+    if (player.vx < 0 && player.x < plat.x + plat.w && player.x + player.w > plat.x + plat.w &&
+        player.y + player.h > plat.y && player.y < plat.y + plat.h) {
+      player.x = plat.x + plat.w;
+      player.vx = 0;
+    }
+    if (player.vy > 0 && player.y + player.h > plat.y && player.y < plat.y &&
+        player.x + player.w > plat.x && player.x < plat.x + plat.w) {
+      player.y = plat.y - player.h;
+      player.vy = 0;
+      player.onGround = true;
+    }
+    if (player.vy < 0 && player.y < plat.y + plat.h && player.y + player.h > plat.y + plat.h &&
+        player.x + player.w > plat.x && player.x < plat.x + plat.w) {
+      player.y = plat.y + plat.h;
+      player.vy = 0;
+    }
+  }
+  
+  // World bounds
+  if (player.y > H + 100) {
+    player.hp = 0; // Fall death
+  }
+  
+  // Camera follow
+  camera.targetX = player.x - W / 2 + player.w / 2;
+  camera.targetY = player.y - H / 2 + player.h / 2;
+  camera.x += (camera.targetX - camera.x) * 0.1;
+  camera.y += (camera.targetY - camera.y) * 0.1;
+  
+  // Update cooldowns
+  for (const sound of soundInventory) {
+    if (sound.cooldown > 0) {
+      sound.cooldown -= deltaTime;
+    }
+  }
+}
+
+function drawPlayer() {
+  const px = player.x - camera.x;
+  const py = player.y - camera.y;
+  
+  // Player as concentric circles (like in mockup)
+  ctx.save();
+  
+  // Outer glow
+  const grad = ctx.createRadialGradient(px + player.radius, py + player.radius, 0, 
+                                        px + player.radius, py + player.radius, player.radius * 1.5);
+  grad.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+  grad.addColorStop(0.5, 'rgba(100, 200, 255, 0.4)');
+  grad.addColorStop(1, 'rgba(100, 200, 255, 0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(px + player.radius, py + player.radius, player.radius * 1.5, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Core circles
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(px + player.radius, py + player.radius, player.radius, 0, Math.PI * 2);
+  ctx.stroke();
+  
+  ctx.strokeStyle = 'rgba(100, 200, 255, 0.8)';
+  ctx.beginPath();
+  ctx.arc(px + player.radius, py + player.radius, player.radius * 0.6, 0, Math.PI * 2);
+  ctx.stroke();
+  
+  ctx.restore();
+}
+
+// ============================================================
+// ENEMIES
+// ============================================================
+
+function createEnemy(x, y, type = 'silence') {
+  const enemy = {
+    x, y, vx: 0, vy: 0,
+    w: 30, h: 30,
+    hp: 30,
+    maxHp: 30,
+    type: type,
+    color: '#ff0080',
+    phase: Math.random() * Math.PI * 2,
+    weakness: 'loud' // weak to loud sounds
+  };
+  
+  if (type === 'echo') {
+    enemy.color = '#00ffff';
+    enemy.weakness = 'mid';
+  } else if (type === 'harmonic') {
+    enemy.color = '#c77dff';
+    enemy.weakness = 'harmonic';
+    enemy.hp = 50;
+    enemy.maxHp = 50;
+  } else if (type === 'noise') {
+    enemy.color = '#ffd700';
+    enemy.weakness = 'high';
+    enemy.hp = 40;
+    enemy.maxHp = 40;
+  }
+  
+  enemies.push(enemy);
+}
+
+function updateEnemies() {
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const e = enemies[i];
+    e.phase += deltaTime * 2;
+    
+    // Simple AI: move toward player
+    const dx = player.x - e.x;
+    const dist = Math.abs(dx);
+    if (dist > 20) {
+      e.vx = dx > 0 ? 1 : -1;
+    } else {
+      e.vx = 0;
+    }
+    
+    e.x += e.vx;
+    
+    // Collision with player
+    if (checkCollision(player, e)) {
+      player.hp -= 10;
+      spawnParticles(player.x, player.y, 5, '#ff6b6b');
+      playSfx('hit');
+      // Knockback
+      player.vx = (player.x - e.x) > 0 ? 3 : -3;
+    }
+    
+    // Check projectile hits
+    for (let j = projectiles.length - 1; j >= 0; j--) {
+      const proj = projectiles[j];
+      if (checkCollision(proj, e)) {
+        let damage = proj.damage;
+        // Bonus damage for hitting weakness
+        if (proj.type === e.weakness) {
+          damage *= 2;
+          spawnParticles(e.x, e.y, 10, '#ffd700');
+        }
+        e.hp -= damage;
+        spawnParticles(e.x, e.y, 5, proj.color);
+        playSfx('hit');
+        projectiles.splice(j, 1);
+        
+        if (e.hp <= 0) {
+          spawnParticles(e.x, e.y, 20, e.color);
+          resonance += 10;
+          enemies.splice(i, 1);
+        }
+        break;
+      }
+    }
+  }
+}
+
+function drawEnemies() {
+  for (const e of enemies) {
+    const ex = e.x - camera.x;
+    const ey = e.y - camera.y;
+    
+    // Enemy as pulsing circle
+    const pulse = Math.sin(e.phase) * 3;
+    
+    ctx.save();
+    ctx.strokeStyle = e.color;
+    ctx.lineWidth = 2;
+    ctx.fillStyle = e.color + '40';
+    ctx.beginPath();
+    ctx.arc(ex + e.w/2, ey + e.h/2, e.w/2 + pulse, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    
+    // HP bar
+    const barW = e.w;
+    const barH = 4;
+    const hpPct = e.hp / e.maxHp;
+    ctx.fillStyle = '#333';
+    ctx.fillRect(ex, ey - 10, barW, barH);
+    ctx.fillStyle = '#ff6b6b';
+    ctx.fillRect(ex, ey - 10, barW * hpPct, barH);
+    
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// PROJECTILES
+// ============================================================
+
+function updateProjectiles() {
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const proj = projectiles[i];
+    proj.x += proj.vx;
+    proj.y += proj.vy;
+    proj.lifetime -= deltaTime;
+    
+    if (proj.lifetime <= 0) {
+      projectiles.splice(i, 1);
+    }
+  }
+}
+
+function drawProjectiles() {
+  for (const proj of projectiles) {
+    const px = proj.x - camera.x;
+    const py = proj.y - camera.y;
+    
+    ctx.save();
+    
+    // Draw waveform representation
+    if (proj.waveform) {
+      ctx.strokeStyle = proj.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const waveWidth = proj.w * 2;
+      const waveHeight = proj.h;
+      for (let i = 0; i < proj.waveform.length; i++) {
+        const x = px - waveWidth/2 + (i / proj.waveform.length) * waveWidth;
+        const y = py + (proj.waveform[i] - 0.5) * waveHeight;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    
+    // Core circle
+    ctx.fillStyle = proj.color;
+    ctx.globalAlpha = 0.6;
+    ctx.beginPath();
+    ctx.arc(px, py, proj.w/2, 0, Math.PI * 2);
+    ctx.fill();
+    
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// PLATFORMS
+// ============================================================
+
+function drawPlatforms() {
+  for (const plat of platforms) {
+    const px = plat.x - camera.x;
+    const py = plat.y - camera.y;
+    
+    ctx.save();
+    ctx.fillStyle = '#556677';
+    ctx.fillRect(px, py, plat.w, plat.h);
+    ctx.strokeStyle = '#778899';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px, py, plat.w, plat.h);
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// LEVELS
+// ============================================================
+
+function loadLevel(levelIndex) {
+  enemies = [];
+  platforms = [];
+  projectiles = [];
+  pickups = [];
+  player.x = 100;
+  player.y = 200;
+  player.vx = 0;
+  player.vy = 0;
+  player.hp = player.maxHp;
+  camera.x = 0;
+  camera.y = 0;
+  
+  // Level 1: Tutorial
+  if (levelIndex === 0) {
+    platforms.push({ x: 0, y: 400, w: 800, h: 40 });
+    platforms.push({ x: 300, y: 300, w: 150, h: 20 });
+    platforms.push({ x: 550, y: 200, w: 150, h: 20 });
+    createEnemy(400, 360, 'silence');
+    createEnemy(600, 160, 'echo');
+  }
+  // Level 2: Echo Chamber
+  else if (levelIndex === 1) {
+    platforms.push({ x: 0, y: 450, w: 200, h: 40 });
+    platforms.push({ x: 300, y: 400, w: 200, h: 40 });
+    platforms.push({ x: 600, y: 350, w: 200, h: 40 });
+    platforms.push({ x: 900, y: 300, w: 200, h: 40 });
+    createEnemy(350, 360, 'echo');
+    createEnemy(650, 310, 'echo');
+    createEnemy(950, 260, 'silence');
+  }
+  // Level 3: Harmonic Gate
+  else if (levelIndex === 2) {
+    platforms.push({ x: 0, y: 500, w: 300, h: 40 });
+    platforms.push({ x: 400, y: 400, w: 100, h: 20 });
+    platforms.push({ x: 600, y: 300, w: 100, h: 20 });
+    platforms.push({ x: 800, y: 500, w: 300, h: 40 });
+    createEnemy(450, 360, 'harmonic');
+    createEnemy(850, 460, 'noise');
+  }
+  // Level 4: Noise Pit
+  else if (levelIndex === 3) {
+    platforms.push({ x: 0, y: 550, w: 150, h: 40 });
+    platforms.push({ x: 200, y: 450, w: 150, h: 20 });
+    platforms.push({ x: 400, y: 350, w: 150, h: 20 });
+    platforms.push({ x: 600, y: 450, w: 150, h: 20 });
+    platforms.push({ x: 800, y: 550, w: 150, h: 40 });
+    createEnemy(250, 410, 'noise');
+    createEnemy(450, 310, 'noise');
+    createEnemy(650, 410, 'silence');
+  }
+  // Level 5: Boss - Harmonic Guardian
+  else if (levelIndex === 4) {
+    platforms.push({ x: 0, y: 500, w: 1000, h: 40 });
+    // Boss enemy
+    const boss = {
+      x: 500, y: 300, vx: 0, vy: 0,
+      w: 60, h: 60,
+      hp: 200,
+      maxHp: 200,
+      type: 'boss',
+      color: '#c77dff',
+      phase: 0,
+      weakness: 'harmonic',
+      isBoss: true
+    };
+    enemies.push(boss);
+  }
+  
+  currentLevel = levelIndex;
+}
+
+// ============================================================
+// COLLISION
+// ============================================================
+
+function checkCollision(a, b) {
+  return a.x < b.x + b.w &&
+         a.x + (a.w || a.radius * 2) > b.x &&
+         a.y < b.y + b.h &&
+         a.y + (a.h || a.radius * 2) > b.y;
+}
+
+// ============================================================
+// UI
+// ============================================================
+
+function drawUI() {
+  // Top bar: HP and Resonance
+  ctx.save();
+  ctx.fillStyle = 'rgba(10, 14, 26, 0.8)';
+  ctx.fillRect(0, 0, W, 60);
+  
+  // HP bar
+  ctx.font = `bold 14px sans-serif`;
+  ctx.fillStyle = '#64b5f6';
+  ctx.fillText('HP:', 10, 25);
+  
+  const hpBarW = 150;
+  const hpPct = player.hp / player.maxHp;
+  ctx.fillStyle = '#333';
+  ctx.fillRect(50, 12, hpBarW, 20);
+  
+  const grad = ctx.createLinearGradient(50, 12, 50 + hpBarW * hpPct, 12);
+  grad.addColorStop(0, '#4caf50');
+  grad.addColorStop(1, '#81c784');
+  ctx.fillStyle = grad;
+  ctx.fillRect(50, 12, hpBarW * hpPct, 20);
+  
+  ctx.strokeStyle = '#64b5f6';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(50, 12, hpBarW, 20);
+  
+  ctx.fillStyle = '#fff';
+  ctx.fillText(`${Math.round(player.hp)}%`, 220, 25);
+  
+  // Resonance
+  ctx.fillStyle = '#ffd700';
+  ctx.fillText(`Resonance: ${resonance}`, W - 160, 25);
+  
+  // Level
+  ctx.fillStyle = '#64b5f6';
+  ctx.font = `12px sans-serif`;
+  ctx.fillText(`Level ${currentLevel + 1}`, 10, 50);
+  
+  ctx.restore();
+  
+  // Sound inventory at bottom
+  drawSoundInventory();
+  
+  // Touch controls (mobile)
+  if ('ontouchstart' in window) {
+    drawTouchControls();
+  }
+}
+
+function drawSoundInventory() {
+  const invY = H - 120;
+  const invH = 120;
+  
+  ctx.save();
+  ctx.fillStyle = 'rgba(10, 14, 26, 0.9)';
+  ctx.fillRect(0, invY, W, invH);
+  
+  // Title
+  ctx.font = `bold 12px sans-serif`;
+  ctx.fillStyle = '#64b5f6';
+  ctx.fillText('SOUND INVENTORY', 10, invY + 18);
+  
+  // Record button
+  const recBtn = {
+    x: W - 70,
+    y: invY + 10,
+    w: 60,
+    h: 30
+  };
+  
+  ctx.fillStyle = recordingState.active ? '#ff6b6b' : '#4caf50';
+  ctx.fillRect(recBtn.x, recBtn.y, recBtn.w, recBtn.h);
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(recBtn.x, recBtn.y, recBtn.w, recBtn.h);
+  
+  ctx.fillStyle = '#fff';
+  ctx.font = `10px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillText(recordingState.active ? 'STOP' : '🎤 REC', recBtn.x + recBtn.w/2, recBtn.y + recBtn.h/2 + 4);
+  ctx.textAlign = 'left';
+  
+  // Sound slots
+  const slotW = (W - 40) / 5;
+  const slotH = 70;
+  const slotY = invY + 40;
+  
+  for (let i = 0; i < 5; i++) {
+    const slotX = 10 + i * slotW;
+    const sound = soundInventory[i];
+    
+    // Slot background
+    ctx.strokeStyle = sound ? sound.analysis.color : '#444';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(slotX, slotY, slotW - 10, slotH);
+    
+    if (sound) {
+      // Waveform
+      ctx.save();
+      ctx.strokeStyle = sound.analysis.color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      const waveW = slotW - 20;
+      const waveH = 30;
+      for (let j = 0; j < sound.waveform.length; j++) {
+        const x = slotX + 5 + (j / sound.waveform.length) * waveW;
+        const y = slotY + 10 + waveH/2 + (sound.waveform[j] - 0.5) * waveH;
+        if (j === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.restore();
+      
+      // Stats
+      ctx.font = `9px sans-serif`;
+      ctx.fillStyle = '#ccc';
+      ctx.fillText(`${sound.analysis.volume}dB`, slotX + 5, slotY + 50);
+      ctx.fillText(`${(sound.analysis.frequency/1000).toFixed(1)}kHz`, slotX + 5, slotY + 62);
+      
+      // Cooldown overlay
+      if (sound.cooldown > 0) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        const cdHeight = slotH * (sound.cooldown / 1.0);
+        ctx.fillRect(slotX, slotY + slotH - cdHeight, slotW - 10, cdHeight);
+      }
+      
+      // Slot number
+      ctx.fillStyle = '#fff';
+      ctx.font = `bold 11px sans-serif`;
+      ctx.fillText(`${i + 1}`, slotX + 5, slotY + 15);
+    } else {
+      // Empty slot
+      ctx.fillStyle = '#666';
+      ctx.font = `10px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('EMPTY', slotX + (slotW - 10)/2, slotY + slotH/2 + 4);
+      ctx.textAlign = 'left';
+    }
+  }
+  
+  ctx.restore();
+}
+
+function drawTouchControls() {
+  const btnSize = 50;
+  const margin = 20;
+  
+  ctx.save();
+  ctx.globalAlpha = 0.4;
+  
+  // Left button
+  ctx.fillStyle = touchControls.left ? '#fff' : '#888';
+  ctx.beginPath();
+  ctx.arc(margin + btnSize/2, H - 180, btnSize/2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#000';
+  ctx.font = `20px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillText('←', margin + btnSize/2, H - 175);
+  
+  // Right button
+  ctx.fillStyle = touchControls.right ? '#fff' : '#888';
+  ctx.beginPath();
+  ctx.arc(margin + btnSize * 2, H - 180, btnSize/2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#000';
+  ctx.fillText('→', margin + btnSize * 2, H - 175);
+  
+  // Jump button
+  ctx.fillStyle = touchControls.jump ? '#fff' : '#888';
+  ctx.beginPath();
+  ctx.arc(W - margin - btnSize/2, H - 180, btnSize/2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#000';
+  ctx.fillText('↑', W - margin - btnSize/2, H - 175);
+  
+  ctx.restore();
+}
+
+// ============================================================
+// RECORDING UI
+// ============================================================
+
+function drawRecordingScreen() {
+  // Dark overlay
+  ctx.fillStyle = 'rgba(10, 14, 26, 0.95)';
+  ctx.fillRect(0, 0, W, H);
+  
+  // Title
+  ctx.font = `bold 28px sans-serif`;
+  ctx.fillStyle = '#64b5f6';
+  ctx.textAlign = 'center';
+  ctx.fillText('CAPTURE SOUND', centerX, 80);
+  
+  // Concentric circles animation
+  const numCircles = 5;
+  const baseRadius = 60;
+  const pulse = Math.sin(gameTime * 3) * 10;
+  
+  for (let i = 0; i < numCircles; i++) {
+    const radius = baseRadius + i * 30 + pulse;
+    const alpha = 1 - (i / numCircles);
+    
+    ctx.strokeStyle = `rgba(255, 107, 107, ${alpha * 0.6})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY - 40, radius, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  
+  // Microphone icon
+  ctx.fillStyle = '#ff6b6b';
+  ctx.font = `40px sans-serif`;
+  ctx.fillText('🎤', centerX, centerY - 30);
+  
+  // Live waveform if recording
+  if (recordingState.active && analyser && micDataArray) {
+    analyser.getByteTimeDomainData(micDataArray);
+    
+    const waveY = centerY + 60;
+    const waveW = W - 40;
+    const waveH = 80;
+    
+    ctx.save();
+    ctx.strokeStyle = '#4caf50';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(20, waveY, waveW, waveH);
+    
+    ctx.strokeStyle = '#4caf50';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    
+    const sliceWidth = waveW / micDataArray.length;
+    let x = 20;
+    
+    for (let i = 0; i < micDataArray.length; i++) {
+      const v = micDataArray[i] / 128.0;
+      const y = waveY + (v * waveH / 2);
+      
+      if (i === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+      
+      x += sliceWidth;
+    }
+    
+    ctx.stroke();
+    ctx.restore();
+    
+    // Timer
+    const timeLeft = recordingState.maxDuration - recordingState.timer;
+    ctx.font = `18px sans-serif`;
+    ctx.fillStyle = timeLeft < 0.5 ? '#ff6b6b' : '#ffd700';
+    ctx.fillText(`LISTENING... ${timeLeft.toFixed(1)}s`, centerX, waveY + waveH + 30);
+  } else {
+    // Instructions
+    ctx.font = `14px sans-serif`;
+    ctx.fillStyle = '#ccc';
+    ctx.fillText('Tap STOP when done recording', centerX, centerY + 80);
+    ctx.fillText('(or wait 2 seconds)', centerX, centerY + 100);
+  }
+  
+  // Stop button
+  ctx.fillStyle = '#ff6b6b';
+  ctx.fillRect(centerX - 60, H - 200, 120, 50);
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(centerX - 60, H - 200, 120, 50);
+  
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold 16px sans-serif`;
+  ctx.fillText('STOP', centerX, H - 170);
+  
+  // Cancel button
+  ctx.fillStyle = '#666';
+  ctx.fillRect(centerX - 60, H - 130, 120, 40);
+  ctx.strokeStyle = '#999';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(centerX - 60, H - 130, 120, 40);
+  
+  ctx.fillStyle = '#fff';
+  ctx.font = `14px sans-serif`;
+  ctx.fillText('CANCEL', centerX, H - 105);
+  
+  ctx.textAlign = 'left';
+}
+
+// ============================================================
+// TITLE SCREEN
+// ============================================================
+
+function drawTitleScreen() {
+  // Animated waveform background
+  drawBackgroundWaves();
+  
+  // Dark overlay
+  ctx.fillStyle = 'rgba(10, 14, 26, 0.7)';
+  ctx.fillRect(0, 0, W, H);
+  
+  // Title
+  ctx.save();
+  ctx.font = `bold ${48 * scale}px sans-serif`;
+  ctx.fillStyle = '#64b5f6';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('SOUND THIEF', centerX, centerY - 100);
+  
+  // Subtitle
+  ctx.font = `${16 * scale}px sans-serif`;
+  ctx.fillStyle = '#ccc';
+  ctx.fillText('Your microphone is your weapon', centerX, centerY - 50);
+  
+  // Start button
+  const btnW = 200;
+  const btnH = 60;
+  const btnY = centerY + 20;
+  
+  ctx.fillStyle = '#4caf50';
+  ctx.fillRect(centerX - btnW/2, btnY - btnH/2, btnW, btnH);
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(centerX - btnW/2, btnY - btnH/2, btnW, btnH);
+  
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${20 * scale}px sans-serif`;
+  ctx.fillText('START GAME', centerX, btnY);
+  
+  // Mic permission status
+  if (micPermission) {
+    ctx.fillStyle = '#4caf50';
+    ctx.font = `${12 * scale}px sans-serif`;
+    ctx.fillText('🎤 Microphone Ready', centerX, centerY + 80);
+  } else {
+    ctx.fillStyle = '#ff6b6b';
+    ctx.font = `${12 * scale}px sans-serif`;
+    ctx.fillText('⚠ Microphone access required', centerX, centerY + 80);
+    ctx.fillStyle = '#ccc';
+    ctx.font = `${10 * scale}px sans-serif`;
+    ctx.fillText('(Fallback mode: tap-to-shoot)', centerX, centerY + 100);
+  }
+  
+  ctx.restore();
+}
+
+// ============================================================
+// GAME OVER
+// ============================================================
+
+function drawGameOver() {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+  ctx.fillRect(0, 0, W, H);
+  
+  ctx.save();
+  ctx.font = `bold 36px sans-serif`;
+  ctx.fillStyle = gs_victory ? '#4caf50' : '#ff6b6b';
+  ctx.textAlign = 'center';
+  ctx.fillText(gs_victory ? 'YOU WIN!' : 'GAME OVER', centerX, centerY - 50);
+  
+  ctx.font = `18px sans-serif`;
+  ctx.fillStyle = '#ccc';
+  ctx.fillText(`Level ${currentLevel + 1} | Resonance: ${resonance}`, centerX, centerY);
+  
+  // Restart button
+  ctx.fillStyle = '#4caf50';
+  ctx.fillRect(centerX - 100, centerY + 40, 200, 50);
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(centerX - 100, centerY + 40, 200, 50);
+  
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold 16px sans-serif`;
+  ctx.fillText('RESTART', centerX, centerY + 70);
+  
+  ctx.restore();
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+
+window.addEventListener('keydown', (e) => {
+  keys[e.key] = true;
+  
+  // Number keys 1-5 to use sounds
+  if (gameState === 'PLAYING') {
+    const num = parseInt(e.key);
+    if (num >= 1 && num <= 5 && soundInventory[num - 1]) {
+      playSound(soundInventory[num - 1]);
+    }
+  }
+});
+
+window.addEventListener('keyup', (e) => {
+  keys[e.key] = false;
+});
+
+canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+canvas.addEventListener('mousedown', handleMouseDown);
+
+function handleTouchStart(e) {
+  e.preventDefault();
+  initAudio();
+  
+  for (let i = 0; i < e.touches.length; i++) {
+    const touch = e.touches[i];
+    handleInput(touch.clientX, touch.clientY, 'start');
+  }
+}
+
+function handleTouchMove(e) {
+  e.preventDefault();
+}
+
+function handleTouchEnd(e) {
+  e.preventDefault();
+  touchControls.left = false;
+  touchControls.right = false;
+  touchControls.jump = false;
+}
+
+function handleMouseDown(e) {
+  initAudio();
+  handleInput(e.clientX, e.clientY, 'start');
+}
+
+function handleInput(x, y, type) {
+  if (gameState === 'TITLE') {
+    // Start button
+    const btnW = 200;
+    const btnH = 60;
+    if (x > centerX - btnW/2 && x < centerX + btnW/2 &&
+        y > centerY + 20 - btnH/2 && y < centerY + 20 + btnH/2) {
+      startGame();
+    }
+  } else if (gameState === 'RECORDING') {
+    // Stop button
+    if (x > centerX - 60 && x < centerX + 60 &&
+        y > H - 200 && y < H - 150) {
+      stopRecording();
+    }
+    // Cancel button
+    if (x > centerX - 60 && x < centerX + 60 &&
+        y > H - 130 && y < H - 90) {
+      recordingState.active = false;
+      if (recordingState.recorder) {
+        recordingState.source.disconnect();
+        recordingState.recorder.disconnect();
+      }
+      gameState = 'PLAYING';
+    }
+  } else if (gameState === 'PLAYING') {
+    // Touch controls
+    const btnSize = 50;
+    const margin = 20;
+    
+    // Left
+    if (Math.hypot(x - (margin + btnSize/2), y - (H - 180)) < btnSize/2) {
+      touchControls.left = true;
+    }
+    // Right
+    if (Math.hypot(x - (margin + btnSize * 2), y - (H - 180)) < btnSize/2) {
+      touchControls.right = true;
+    }
+    // Jump
+    if (Math.hypot(x - (W - margin - btnSize/2), y - (H - 180)) < btnSize/2) {
+      touchControls.jump = true;
+    }
+    
+    // Record button
+    if (x > W - 70 && x < W - 10 && y > H - 110 && y < H - 80) {
+      if (recordingState.active) {
+        stopRecording();
+      } else {
+        startRecordingMode();
+      }
+    }
+    
+    // Sound inventory slots
+    const invY = H - 120;
+    const slotW = (W - 40) / 5;
+    const slotH = 70;
+    const slotY = invY + 40;
+    
+    if (y > slotY && y < slotY + slotH) {
+      const slotIndex = Math.floor((x - 10) / slotW);
+      if (slotIndex >= 0 && slotIndex < 5 && soundInventory[slotIndex]) {
+        playSound(soundInventory[slotIndex]);
+      }
+    }
+  } else if (gameState === 'GAME_OVER') {
+    // Restart button
+    if (x > centerX - 100 && x < centerX + 100 &&
+        y > centerY + 40 && y < centerY + 90) {
+      gs_victory = false;
+      gs_levelClearing = false;
+      resonance = 0;
+      soundInventory = [];
+      loadLevel(0);
+      gameState = 'PLAYING';
+    }
+  }
+}
+
+// ============================================================
+// GAME LOGIC
+// ============================================================
+
+async function startGame() {
+  // Request mic permission
+  const granted = await requestMic();
+  if (!granted) {
+    // Fallback mode: generate procedural sounds
+    console.log('Running in fallback mode without microphone');
+  }
+  
+  loadLevel(0);
+  gameState = 'PLAYING';
+}
+
+function startRecordingMode() {
+  if (!micPermission) {
+    // Fallback: create procedural sound
+    const proceduralSound = createProceduralSound();
+    soundInventory.push(proceduralSound);
+    playSfx('success');
+    return;
+  }
+  
+  gameState = 'RECORDING';
+  startRecording();
+}
+
+function createProceduralSound() {
+  // Generate a random procedural sound for fallback mode
+  const types = ['loud', 'mid', 'high', 'harmonic'];
+  const type = types[Math.floor(Math.random() * types.length)];
+  
+  const colors = { loud: '#ff6b6b', mid: '#ffe66d', high: '#4ecdc4', harmonic: '#c77dff' };
+  
+  const freq = type === 'high' ? 2000 + Math.random() * 1000 :
+               type === 'mid' ? 800 + Math.random() * 1200 :
+               type === 'harmonic' ? 440 + Math.random() * 660 :
+               200 + Math.random() * 400;
+  
+  const vol = 60 + Math.random() * 40;
+  
+  // Generate simple waveform
+  const waveform = [];
+  for (let i = 0; i < 100; i++) {
+    waveform.push(0.5 + Math.sin(i * 0.1) * 0.3 * Math.random());
+  }
+  
+  return {
+    id: Date.now(),
+    buffer: new Float32Array(8000), // dummy buffer
+    sampleRate: 44100,
+    analysis: {
+      volume: Math.round(vol),
+      frequency: Math.round(freq),
+      duration: 1.0,
+      type: type,
+      color: colors[type],
+      power: Math.round(vol * 0.8 + (freq / 3000) * 20)
+    },
+    waveform: waveform,
+    cooldown: 0
+  };
+}
+
+// ============================================================
+// MAIN LOOP
+// ============================================================
+
+function update() {
+  const now = performance.now() / 1000;
+  deltaTime = Math.min(0.1, now - lastTime);
+  lastTime = now;
+  gameTime += deltaTime;
+  
+  if (gameState === 'PLAYING') {
+    updatePlayer();
+    updateEnemies();
+    updateProjectiles();
+    updateParticles();
+    
+    // Check level completion
+    if (enemies.length === 0 && !gs_levelClearing) {
+      gs_levelClearing = true;
+      if (currentLevel < 4) {
+        setTimeout(() => {
+          loadLevel(currentLevel + 1);
+          gs_levelClearing = false;
+        }, 1500);
+      } else {
+        // Game won!
+        gameState = 'GAME_OVER';
+        gs_victory = true;
+        player.hp = player.maxHp;
+      }
+    }
+    
+    // Check game over
+    if (player.hp <= 0) {
+      gameState = 'GAME_OVER';
+    }
+  } else if (gameState === 'RECORDING') {
+    recordingState.timer += deltaTime;
+    if (recordingState.timer >= recordingState.maxDuration && recordingState.active) {
+      stopRecording();
+    }
+  }
+}
+
+function draw() {
+  // Clear
+  ctx.fillStyle = '#0a0e1a';
+  ctx.fillRect(0, 0, W, H);
+  
+  if (gameState === 'TITLE') {
+    drawTitleScreen();
+  } else if (gameState === 'RECORDING') {
+    drawRecordingScreen();
+  } else if (gameState === 'PLAYING') {
+    drawBackgroundWaves();
+    drawPlatforms();
+    drawPlayer();
+    drawEnemies();
+    drawProjectiles();
+    drawParticles();
+    drawUI();
+  } else if (gameState === 'GAME_OVER') {
+    drawGameOver();
+  }
+}
+
+function gameLoop() {
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+// ============================================================
+// START
+// ============================================================
+
+initBackgroundWaves();
+gameLoop();
+
+</script>
+</body>
+</html>

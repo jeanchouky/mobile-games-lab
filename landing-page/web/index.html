@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="A collection of 11 unique mobile-first HTML5 games. Play free in your browser.">
+<title>Mobile Games Lab — 11 Free HTML5 Games</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #0f0f1a;
+  --card: #1a1a2e;
+  --accent: #e94560;
+  --text: #eee;
+  --muted: #999;
+  --gold: #ffd700;
+}
+html { scroll-behavior: smooth; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  line-height: 1.6;
+}
+
+/* Header */
+header {
+  text-align: center;
+  padding: 60px 20px 40px;
+  background: linear-gradient(180deg, #16213e 0%, var(--bg) 100%);
+}
+header h1 {
+  font-size: clamp(2rem, 5vw, 3.5rem);
+  font-weight: 900;
+  background: linear-gradient(135deg, var(--accent), var(--gold));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 12px;
+}
+header p {
+  color: var(--muted);
+  font-size: clamp(1rem, 2.5vw, 1.2rem);
+  max-width: 600px;
+  margin: 0 auto;
+}
+.badge {
+  display: inline-block;
+  background: var(--accent);
+  color: #fff;
+  padding: 4px 14px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  margin-top: 16px;
+}
+
+/* Grid */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px 24px 80px;
+}
+
+/* Card */
+.card {
+  background: var(--card);
+  border-radius: 16px;
+  overflow: hidden;
+  transition: transform 0.2s, box-shadow 0.2s;
+  text-decoration: none;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+}
+.card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 12px 40px rgba(233, 69, 96, 0.2);
+}
+.card-thumb {
+  width: 100%;
+  aspect-ratio: 16/10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 4rem;
+  position: relative;
+  overflow: hidden;
+}
+.card-body {
+  padding: 20px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.card-body h2 {
+  font-size: 1.3rem;
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+.card-body p {
+  color: var(--muted);
+  font-size: 0.9rem;
+  flex: 1;
+}
+.tags {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.tag {
+  background: rgba(255,255,255,0.06);
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.play-btn {
+  display: inline-block;
+  margin-top: 16px;
+  padding: 10px 24px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  text-align: center;
+  transition: background 0.2s;
+}
+.play-btn:hover { background: #c73550; }
+
+/* Footer */
+footer {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+footer a { color: var(--accent); text-decoration: none; }
+
+/* Mobile */
+@media (max-width: 640px) {
+  .grid { grid-template-columns: 1fr; padding: 16px; gap: 16px; }
+  header { padding: 40px 16px 30px; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🎮 Mobile Games Lab</h1>
+  <p>11 unique mobile-first HTML5 games. No downloads, no ads, no tracking. Just play.</p>
+  <span class="badge">Free &amp; Open Source</span>
+</header>
+
+<div class="grid">
+
+  <a class="card" href="https://jc-trust-nothing-game.web.app" target="_blank">
+    <div class="card-thumb" style="background: linear-gradient(135deg, #1a1a2e, #16213e);">🤥</div>
+    <div class="card-body">
+      <h2>Trust Nothing</h2>
+      <p>A game that lies to you. Every button, every instruction, every rule might be a trick. Can you figure out what's real?</p>
+      <div class="tags"><span class="tag">Puzzle</span><span class="tag">Mind-bending</span><span class="tag">Meta</span></div>
+      <span class="play-btn">Play Now →</span>
+    </div>
+  </a>
+
+  <a class="card" href="https://jc-deja-vu-game.web.app" target="_blank">
+    <div class="card-thumb" style="background: linear-gradient(135deg, #f5ebd7, #d4c5a9);">⏰</div>
+    <div class="card-body">
+      <h2>Déjà Vu</h2>
+      <p>60-second time-loop puzzle. You wake up in a room. The clock reads 3:47. It always does. Find the way out before time runs out — again.</p>
+      <div class="tags"><span class="tag">Time Loop</span><span class="tag">Puzzle</span><span class="tag">Mystery</span></div>
+      <span class="play-btn">Play Now →</span>
+    </div>
+  </a>
+
+  <a class="card" href="https://jc-conspiracy-board-game.web.app" target="_blank">
+    <div class="card-thumb" style="background: linear-gradient(135deg, #8b7355, #6d5a45);">🔍</div>
+    <div class="card-body">
+      <h2>Conspiracy Board</h2>
+      <p>Pin clues to a corkboard and connect them with red string. Solve detective cases by finding the right connections.</p>
+      <div class="tags"><span class="tag">Detective</span><span class="tag">Puzzle</span><span class="tag">Touch</span></div>
+      <span class="play-btn">Play Now →</span>
+    </div>
+  </a>
+
+  <a class="card" href="https://jc-emoji-wars.web.app" target="_blank">
+    <div class="card-thumb" style="background: linear-gradient(135deg, #FFD700, #FFA500);">⚔️</div>
+    <div class="card-body">
+      <h2>Emoji Wars</h2>
+      <p>Build an army of emoji units and battle AI opponents in real-time strategy. Rock-paper-scissors combat with 24 unique units.</p>
+      <div class="tags"><span class="tag">RTS</span><span class="tag">Strategy</span><span class="tag">Emoji</span></div>
+      <span class="play-btn">Play Now →</span>
+    </div>
+  </a>
+
+  <a class="card" href="https://jc-haunted-phone-game.web.app" target="_blank">
+    <div class="card-thumb" style="background: linear-gradient(135deg, #1a0a2e, #000);">👻</div>
+    <div class="card-body">
+      <h2>Haunted Phone</h2>
+      <p>Your phone turns against you. Fake notifications, glitches, screen inversions. Survive as long as you can — and find the secret to stop it.</p>
+      <div class="tags"><span class="tag">Horror</span><span class="tag">Social</span><span class="tag">Survival</span></div>
+      <span class="play-btn">Play Now →</span>
+    </div>
+  </a>
+
+  <a class="card" href="https://jc-one-button-odyssey.web.app" target="_blank">
+    <div class="card-thumb" style="background: linear-gradient(135deg, #2a1a3a, #4a6741);">⚔️</div>
+    <div class="card-body">
+      <h2>One Button Odyssey</h2>
+      <p>An entire RPG controlled with a single tap. Time your attacks to the beat, block, dodge, and defeat bosses across three zones.</p>
+      <div class="tags"><span class="tag">RPG</span><span class="tag">Rhythm</span><span class="tag">One-Button</span></div>
+      <span class="play-btn">Play Now →</span>
+    </div>
+  </a>
+
+  <a class="card" href="https://jc-gravity-flip-game.web.app" target="_blank">
+    <div class="card-thumb" style="background: linear-gradient(135deg, #0a1628, #1a2a4a);">🔄</div>
+    <div class="card-body">
+      <h2>Gravity Flip</h2>
+      <p>Tap to flip gravity and navigate through obstacles. Fast-paced, polished platformer with procedurally generated levels.</p>
+      <div class="tags"><span class="tag">Platformer</span><span class="tag">Arcade</span><span class="tag">Polished</span></div>
+      <span class="play-btn">Play Now →</span>
+    </div>
+  </a>
+
+  <a class="card" href="https://jc-sound-thief-game.web.app" target="_blank">
+    <div class="card-thumb" style="background: linear-gradient(135deg, #0a0e1a, #1a2040);">🎤</div>
+    <div class="card-body">
+      <h2>Sound Thief</h2>
+      <p>Your microphone is your weapon. Record real sounds and use them as projectiles to defeat enemies in this unique platformer.</p>
+      <div class="tags"><span class="tag">Microphone</span><span class="tag">Platformer</span><span class="tag">Unique</span></div>
+      <span class="play-btn">Play Now →</span>
+    </div>
+  </a>
+
+  <a class="card" href="https://jc-pocket-ecosystem-game.web.app" target="_blank">
+    <div class="card-thumb" style="background: linear-gradient(135deg, #c8e6c9, #b3d9d9);">🌿</div>
+    <div class="card-body">
+      <h2>Pocket Ecosystem</h2>
+      <p>A living terrarium on your phone. Plants grow, creatures breed and hunt. Tap to plant seeds and feed wildlife. Watercolor art style.</p>
+      <div class="tags"><span class="tag">Simulation</span><span class="tag">Relaxing</span><span class="tag">Persistent</span></div>
+      <span class="play-btn">Play Now →</span>
+    </div>
+  </a>
+
+  <a class="card" href="https://jc-lie-detector-jc.web.app" target="_blank">
+    <div class="card-thumb" style="background: linear-gradient(135deg, #ff0099, #6633cc);">🎭</div>
+    <div class="card-body">
+      <h2>Lie Detector Party</h2>
+      <p>Pass-the-phone party game. Answer questions on the hot seat while a fake AI "analyzes" your face. Friends vote: truth or lie?</p>
+      <div class="tags"><span class="tag">Party</span><span class="tag">Multiplayer</span><span class="tag">Social</span></div>
+      <span class="play-btn">Play Now →</span>
+    </div>
+  </a>
+
+  <a class="card" href="https://jc-micro-nations-game.web.app" target="_blank">
+    <div class="card-thumb" style="background: linear-gradient(135deg, #1a3a52, #2B5F8F);">🏝️</div>
+    <div class="card-body">
+      <h2>Micro Nations</h2>
+      <p>God game where every citizen is visible. Assign jobs, resolve disputes, build structures, and grow your island civilization.</p>
+      <div class="tags"><span class="tag">God Game</span><span class="tag">Simulation</span><span class="tag">Strategy</span></div>
+      <span class="play-btn">Play Now →</span>
+    </div>
+  </a>
+
+</div>
+
+<footer>
+  <p>Built by <a href="https://github.com/jeanchouky">JeanChouky</a> • All games are single HTML files — no frameworks, no dependencies.</p>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,1227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Déjà Vu</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #f5ebd7;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: 'Courier New', 'Courier', monospace;
+}
+canvas {
+  display: block;
+  width: 100%; height: 100%;
+  image-rendering: auto;
+}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+'use strict';
+
+// ============================================================
+// DÉJÀ VU — 60-Second Time-Loop Puzzle Game
+// ============================================================
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+// --- GLOBALS ---
+let W, H, scale, centerX, centerY;
+let gameTime = 0, deltaTime = 0, lastTime = 0;
+let loopNumber = 1;
+let totalDeaths = 0;
+let loopTimer = 60;
+let gameState = 'title'; // title, playing, journal, gameover, victory
+let shakeAmount = 0, shakeDecay = 0.9;
+let particles = [];
+let inputEvents = [];
+let dragState = { active: false, startX: 0, startY: 0, x: 0, y: 0 };
+
+// --- GAME STATE ---
+let discoveries = []; // Array of discovered facts
+let currentHover = null;
+let objectStates = {
+  clockExamined: false,
+  drawerOpened: false,
+  mirrorExamined: false,
+  noteFound: false,
+  doorUnlocked: false,
+  windowExamined: false,
+  bedExamined: false
+};
+
+// Puzzle solution sequence
+let solutionStep = 0; // 0-5, each discovery advances
+const REQUIRED_DISCOVERIES = 5;
+
+// --- RESIZE ---
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  scale = Math.min(W / 400, H / 700);
+  centerX = W / 2;
+  centerY = H / 2;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ============================================================
+// AUDIO ENGINE (Web Audio API)
+// ============================================================
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playTone(freq, duration, type = 'sine', vol = 0.15) {
+  ensureAudio();
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + duration);
+}
+
+function playNoise(duration, vol = 0.1, filter = null) {
+  ensureAudio();
+  const bufSize = audioCtx.sampleRate * duration;
+  const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+  const src = audioCtx.createBufferSource();
+  const gain = audioCtx.createGain();
+  src.buffer = buf;
+  gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  src.connect(gain);
+  if (filter) {
+    const flt = audioCtx.createBiquadFilter();
+    flt.type = filter.type;
+    flt.frequency.value = filter.freq;
+    gain.connect(flt);
+    flt.connect(audioCtx.destination);
+  } else {
+    gain.connect(audioCtx.destination);
+  }
+  src.start();
+}
+
+// Sound effects
+function sfxClockTick() { playTone(800, 0.02, 'sine', 0.05); }
+function sfxDoorCreak() { playNoise(0.3, 0.08, { type: 'lowpass', freq: 300 }); }
+function sfxDeath() { 
+  playTone(220, 0.2, 'sawtooth', 0.15);
+  setTimeout(() => playTone(110, 0.4, 'sawtooth', 0.15), 200);
+  setTimeout(() => playNoise(0.3, 0.1), 100);
+}
+function sfxDiscovery() { 
+  playTone(880, 0.15, 'sine', 0.12);
+  setTimeout(() => playTone(1100, 0.15, 'sine', 0.10), 120);
+}
+function sfxPageFlip() { playNoise(0.15, 0.06, { type: 'highpass', freq: 1000 }); }
+function sfxClick() { playTone(1000, 0.03, 'sine', 0.08); }
+function sfxUnlock() {
+  playTone(523, 0.1, 'sine', 0.12);
+  setTimeout(() => playTone(659, 0.1, 'sine', 0.12), 100);
+  setTimeout(() => playTone(784, 0.2, 'sine', 0.12), 200);
+}
+function sfxTimeRunOut() {
+  playTone(440, 0.3, 'triangle', 0.15);
+  setTimeout(() => playTone(220, 0.5, 'triangle', 0.15), 300);
+}
+
+// Ambient clock ticking
+let tickInterval = null;
+function startClockTicking() {
+  if (tickInterval) return;
+  tickInterval = setInterval(() => {
+    if (gameState === 'playing') sfxClockTick();
+  }, 1000);
+}
+
+// ============================================================
+// DRAWING HELPERS — Hand-drawn aesthetic
+// ============================================================
+
+function wobble(amt = 1.5) { return (Math.random() - 0.5) * amt * scale; }
+
+function wobblyLine(x1, y1, x2, y2, color = '#282832', width = 2) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width * scale;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x1 + wobble(0.5), y1 + wobble(0.5));
+  const steps = Math.max(3, Math.floor(Math.hypot(x2 - x1, y2 - y1) / (15 * scale)));
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    ctx.lineTo(
+      x1 + (x2 - x1) * t + wobble(0.5),
+      y1 + (y2 - y1) * t + wobble(0.5)
+    );
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function wobblyRect(x, y, w, h, color = '#282832', fill = null, lineWidth = 2) {
+  if (fill) {
+    ctx.save();
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.moveTo(x + wobble(0.3), y + wobble(0.3));
+    ctx.lineTo(x + w + wobble(0.3), y + wobble(0.3));
+    ctx.lineTo(x + w + wobble(0.3), y + h + wobble(0.3));
+    ctx.lineTo(x + wobble(0.3), y + h + wobble(0.3));
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  wobblyLine(x, y, x + w, y, color, lineWidth);
+  wobblyLine(x + w, y, x + w, y + h, color, lineWidth);
+  wobblyLine(x + w, y + h, x, y + h, color, lineWidth);
+  wobblyLine(x, y + h, x, y, color, lineWidth);
+}
+
+function wobblyCircle(cx, cy, r, color = '#282832', fill = null, lineWidth = 2) {
+  ctx.save();
+  const pts = 24;
+  ctx.beginPath();
+  for (let i = 0; i <= pts; i++) {
+    const a = (i / pts) * Math.PI * 2;
+    const rr = r + wobble(1);
+    const px = cx + Math.cos(a) * rr;
+    const py = cy + Math.sin(a) * rr;
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth * scale;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawText(text, x, y, size = 16, color = '#282832', align = 'center') {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.font = `${size * scale}px 'Courier New', monospace`;
+  ctx.textAlign = align;
+  ctx.textBaseline = 'middle';
+  // Slight wobble for handwritten feel
+  ctx.fillText(text, x + wobble(0.2), y + wobble(0.2));
+  ctx.restore();
+}
+
+function drawHandwritten(text, x, y, size = 14, color = '#282832', align = 'left') {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.font = `italic ${size * scale}px 'Courier New', monospace`;
+  ctx.textAlign = align;
+  ctx.textBaseline = 'top';
+  // More wobble for handwriting
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], x + wobble(0.8), y + i * size * 1.3 * scale + wobble(0.8));
+  }
+  ctx.restore();
+}
+
+// Coffee stain
+function drawCoffeeStain(x, y, radius) {
+  ctx.save();
+  const grad = ctx.createRadialGradient(x, y, 0, x, y, radius * scale);
+  grad.addColorStop(0, 'rgba(101, 67, 33, 0.3)');
+  grad.addColorStop(0.5, 'rgba(101, 67, 33, 0.15)');
+  grad.addColorStop(1, 'rgba(101, 67, 33, 0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(x, y, radius * scale, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Ring mark
+  ctx.strokeStyle = 'rgba(101, 67, 33, 0.25)';
+  ctx.lineWidth = 1.5 * scale;
+  ctx.beginPath();
+  const ringRadius = radius * 0.7 * scale;
+  for (let i = 0; i <= 32; i++) {
+    const a = (i / 32) * Math.PI * 2;
+    const r = ringRadius + (Math.random() - 0.5) * 3 * scale;
+    const px = x + Math.cos(a) * r;
+    const py = y + Math.sin(a) * r;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Paper texture background
+function drawPaperBackground() {
+  ctx.fillStyle = '#f5ebd7';
+  ctx.fillRect(0, 0, W, H);
+  
+  // Subtle noise texture
+  ctx.save();
+  ctx.globalAlpha = 0.03;
+  for (let i = 0; i < 100; i++) {
+    ctx.fillStyle = Math.random() > 0.5 ? '#000' : '#fff';
+    ctx.fillRect(Math.random() * W, Math.random() * H, 1, 1);
+  }
+  ctx.restore();
+}
+
+// ============================================================
+// PARTICLES
+// ============================================================
+function spawnParticles(x, y, count, color = '#b40000') {
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 3 * scale,
+      vy: (Math.random() - 0.5) * 3 * scale - 2 * scale,
+      life: 1,
+      decay: 0.015 + Math.random() * 0.015,
+      size: (2 + Math.random() * 3) * scale,
+      color
+    });
+  }
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.12 * scale;
+    p.life -= p.decay;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    ctx.save();
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// SCREEN SHAKE
+// ============================================================
+function shake(amount = 10) {
+  shakeAmount = amount * scale;
+}
+
+function applyShake() {
+  if (shakeAmount > 0.5) {
+    const sx = (Math.random() - 0.5) * shakeAmount;
+    const sy = (Math.random() - 0.5) * shakeAmount;
+    ctx.translate(sx, sy);
+    shakeAmount *= shakeDecay;
+  } else {
+    shakeAmount = 0;
+  }
+}
+
+// ============================================================
+// INPUT HANDLING
+// ============================================================
+function getEventPos(e) {
+  if (e.touches) {
+    return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }
+  return { x: e.clientX, y: e.clientY };
+}
+
+function hitTest(px, py, x, y, w, h) {
+  return px >= x - w/2 && px <= x + w/2 && py >= y - h/2 && py <= y + h/2;
+}
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  ensureAudio();
+  const pos = getEventPos(e);
+  inputEvents.push({ type: 'tap', x: pos.x, y: pos.y });
+  dragState.active = true;
+  dragState.startX = pos.x;
+  dragState.startY = pos.y;
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  dragState.active = false;
+});
+
+canvas.addEventListener('mousedown', (e) => {
+  ensureAudio();
+  inputEvents.push({ type: 'tap', x: e.clientX, y: e.clientY });
+  dragState.active = true;
+  dragState.startX = e.clientX;
+  dragState.startY = e.clientY;
+});
+
+canvas.addEventListener('mouseup', (e) => {
+  dragState.active = false;
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  dragState.x = e.clientX;
+  dragState.y = e.clientY;
+});
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (e.touches.length > 0) {
+    dragState.x = e.touches[0].clientX;
+    dragState.y = e.touches[0].clientY;
+  }
+}, { passive: false });
+
+// ============================================================
+// DISCOVERY SYSTEM
+// ============================================================
+function addDiscovery(text, category = 'observation') {
+  // Check if already discovered
+  if (discoveries.some(d => d.text === text)) return;
+  
+  discoveries.push({
+    text,
+    category,
+    loop: loopNumber,
+    timestamp: Date.now()
+  });
+  
+  sfxDiscovery();
+  spawnParticles(centerX, centerY - 100 * scale, 10, '#44aa44');
+  
+  // Save to localStorage
+  localStorage.setItem('dejaVuDiscoveries', JSON.stringify(discoveries));
+}
+
+function loadDiscoveries() {
+  const saved = localStorage.getItem('dejaVuDiscoveries');
+  if (saved) {
+    discoveries = JSON.parse(saved);
+  }
+}
+
+// ============================================================
+// GAME STATES
+// ============================================================
+
+// --- TITLE SCREEN ---
+function updateTitle() {
+  for (const ev of inputEvents) {
+    if (ev.type === 'tap') {
+      // Tap anywhere to start
+      sfxClick();
+      gameState = 'playing';
+      loopTimer = 60;
+      startClockTicking();
+      return;
+    }
+  }
+}
+
+function drawTitle() {
+  drawPaperBackground();
+  
+  // Coffee stains
+  drawCoffeeStain(W * 0.2, H * 0.3, 40);
+  drawCoffeeStain(W * 0.75, H * 0.6, 35);
+  
+  // Title
+  const titleY = centerY - 120 * scale;
+  ctx.save();
+  ctx.font = `bold ${48 * scale}px 'Courier New', monospace`;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#282832';
+  ctx.fillText('DÉJÀ VU', centerX, titleY);
+  
+  // Shadow effect
+  ctx.globalAlpha = 0.3;
+  ctx.fillStyle = '#654321';
+  ctx.fillText('DÉJÀ VU', centerX + 3 * scale, titleY + 3 * scale);
+  ctx.restore();
+  
+  // Subtitle
+  drawText('You have 60 seconds.', centerX, titleY + 50 * scale, 16, '#646464');
+  drawText('You always have.', centerX, titleY + 75 * scale, 16, '#646464');
+  
+  // Clock hands overlapping (visual metaphor)
+  const clockCenterY = centerY + 30 * scale;
+  wobblyCircle(centerX, clockCenterY, 60 * scale, '#282832', null, 2);
+  
+  // Multiple overlapping hands
+  const numHands = 8;
+  for (let i = 0; i < numHands; i++) {
+    const angle = (i / numHands) * Math.PI * 2 - Math.PI / 2;
+    const handLen = 45 * scale;
+    const alpha = 0.2 + (i / numHands) * 0.3;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    wobblyLine(
+      centerX, clockCenterY,
+      centerX + Math.cos(angle) * handLen,
+      clockCenterY + Math.sin(angle) * handLen,
+      '#282832', 2.5
+    );
+    ctx.restore();
+  }
+  
+  // Current moment (red hand)
+  const currentAngle = (Date.now() / 1000) % 60 / 60 * Math.PI * 2 - Math.PI / 2;
+  wobblyLine(
+    centerX, clockCenterY,
+    centerX + Math.cos(currentAngle) * 50 * scale,
+    clockCenterY + Math.sin(currentAngle) * 50 * scale,
+    '#b40000', 3
+  );
+  
+  // Tap prompt
+  const pulse = Math.sin(gameTime * 3) * 0.2 + 0.8;
+  ctx.save();
+  ctx.globalAlpha = pulse;
+  drawText('TAP TO WAKE UP', centerX, H - 80 * scale, 18, '#282832');
+  ctx.restore();
+  
+  // Stats if replaying
+  if (loopNumber > 1 || totalDeaths > 0) {
+    drawText(`Loop ${loopNumber} | Deaths: ${totalDeaths}`, centerX, H - 50 * scale, 12, '#646464');
+    drawText(`Discoveries: ${discoveries.length}`, centerX, H - 30 * scale, 12, '#646464');
+  }
+}
+
+// --- PLAYING ---
+function updatePlaying() {
+  // Timer countdown
+  loopTimer -= deltaTime;
+  if (loopTimer <= 0) {
+    loopTimer = 0;
+    die('Time ran out. Again.');
+    return;
+  }
+  
+  // Urgency at low time
+  if (loopTimer < 10 && Math.floor(loopTimer) !== Math.floor(loopTimer + deltaTime)) {
+    shake(2);
+  }
+  
+  // Check hover
+  currentHover = null;
+  const mx = dragState.x || centerX;
+  const my = dragState.y || centerY;
+  
+  // Interactive objects
+  const roomY = centerY - 60 * scale;
+  
+  // Clock (top center)
+  const clockX = centerX;
+  const clockY = roomY - 80 * scale;
+  if (hitTest(mx, my, clockX, clockY, 70 * scale, 70 * scale)) {
+    currentHover = 'clock';
+  }
+  
+  // Drawer (left)
+  const drawerX = centerX - 120 * scale;
+  const drawerY = roomY + 40 * scale;
+  if (hitTest(mx, my, drawerX, drawerY, 60 * scale, 40 * scale)) {
+    currentHover = 'drawer';
+  }
+  
+  // Mirror (right)
+  const mirrorX = centerX + 120 * scale;
+  const mirrorY = roomY;
+  if (hitTest(mx, my, mirrorX, mirrorY, 50 * scale, 80 * scale)) {
+    currentHover = 'mirror';
+  }
+  
+  // Door (center bottom)
+  const doorX = centerX;
+  const doorY = roomY + 110 * scale;
+  if (hitTest(mx, my, doorX, doorY, 70 * scale, 100 * scale)) {
+    currentHover = 'door';
+  }
+  
+  // Window (top right)
+  const windowX = centerX + 130 * scale;
+  const windowY = roomY - 80 * scale;
+  if (hitTest(mx, my, windowX, windowY, 50 * scale, 50 * scale)) {
+    currentHover = 'window';
+  }
+  
+  // Bed (bottom left)
+  const bedX = centerX - 110 * scale;
+  const bedY = roomY + 100 * scale;
+  if (hitTest(mx, my, bedX, bedY, 60 * scale, 40 * scale)) {
+    currentHover = 'bed';
+  }
+  
+  // Hidden note (only visible if hinted)
+  const noteX = centerX - 60 * scale;
+  const noteY = roomY + 130 * scale;
+  const noteVisible = totalDeaths >= 3 || objectStates.noteFound;
+  if (noteVisible && hitTest(mx, my, noteX, noteY, 30 * scale, 20 * scale)) {
+    currentHover = 'note';
+  }
+  
+  // Journal button (top right corner)
+  const journalBtnX = W - 50 * scale;
+  const journalBtnY = 40 * scale;
+  if (hitTest(mx, my, journalBtnX, journalBtnY, 80 * scale, 30 * scale)) {
+    currentHover = 'journal';
+  }
+  
+  // Handle taps
+  for (const ev of inputEvents) {
+    if (ev.type === 'tap') {
+      sfxClick();
+      
+      // Journal button
+      if (currentHover === 'journal') {
+        gameState = 'journal';
+        sfxPageFlip();
+        return;
+      }
+      
+      // Clock
+      if (currentHover === 'clock') {
+        if (!objectStates.clockExamined) {
+          addDiscovery('The clock stopped at 3:47. Always 3:47.', 'observation');
+          objectStates.clockExamined = true;
+          solutionStep = Math.max(solutionStep, 1);
+        } else {
+          addDiscovery('Tapping the clock changes nothing.', 'observation');
+        }
+      }
+      
+      // Drawer
+      if (currentHover === 'drawer') {
+        if (!objectStates.drawerOpened) {
+          // Needs clock time as combination
+          if (objectStates.clockExamined) {
+            sfxUnlock();
+            addDiscovery('Used 3:47 to unlock the drawer. Found a KEY.', 'key');
+            objectStates.drawerOpened = true;
+            solutionStep = Math.max(solutionStep, 2);
+            spawnParticles(drawerX, drawerY, 15, '#ffd700');
+          } else {
+            addDiscovery('The drawer is locked. Needs a 4-digit code.', 'observation');
+          }
+        } else {
+          addDiscovery('Drawer is empty now. The key is with me.', 'observation');
+        }
+      }
+      
+      // Mirror
+      if (currentHover === 'mirror') {
+        if (!objectStates.mirrorExamined) {
+          addDiscovery('My reflection blinks when I don\'t. WRONG.', 'warning');
+          objectStates.mirrorExamined = true;
+          solutionStep = Math.max(solutionStep, 3);
+        } else {
+          // Looking too long = death
+          shake(15);
+          die('The reflection smiled. You shouldn\'t have looked again.');
+          return;
+        }
+      }
+      
+      // Door
+      if (currentHover === 'door') {
+        if (!objectStates.doorUnlocked) {
+          if (objectStates.drawerOpened) {
+            sfxUnlock();
+            addDiscovery('The key fits! The door is UNLOCKED.', 'key');
+            objectStates.doorUnlocked = true;
+            solutionStep = Math.max(solutionStep, 4);
+            spawnParticles(doorX, doorY, 20, '#44ff44');
+          } else {
+            addDiscovery('The door is locked. Needs a key.', 'observation');
+          }
+        } else {
+          // Door unlocked but need final discovery
+          if (objectStates.noteFound && objectStates.windowExamined) {
+            // VICTORY!
+            sfxUnlock();
+            gameState = 'victory';
+            return;
+          } else {
+            addDiscovery('Door is unlocked but something feels wrong...', 'warning');
+          }
+        }
+      }
+      
+      // Window
+      if (currentHover === 'window') {
+        if (!objectStates.windowExamined) {
+          const hour = new Date().getHours();
+          if (hour >= 6 && hour < 12) {
+            addDiscovery('Morning light. The window shows... a brick wall?', 'observation');
+          } else if (hour >= 12 && hour < 18) {
+            addDiscovery('Afternoon sun. But the window is painted.', 'observation');
+          } else if (hour >= 18 && hour < 22) {
+            addDiscovery('Evening glow. The window is FAKE.', 'observation');
+          } else {
+            addDiscovery('Night outside. Or is it? The window isn\'t real.', 'observation');
+          }
+          objectStates.windowExamined = true;
+          solutionStep = Math.max(solutionStep, 5);
+        } else {
+          addDiscovery('Still fake. Still a lie.', 'observation');
+        }
+      }
+      
+      // Bed
+      if (currentHover === 'bed') {
+        if (!objectStates.bedExamined) {
+          addDiscovery('The bed I wake in. Sheets smell like coffee.', 'observation');
+          objectStates.bedExamined = true;
+        } else {
+          // Going back to bed = loop reset
+          addDiscovery('Going back to sleep feels like giving up.', 'observation');
+          die('You closed your eyes. It starts again.');
+          return;
+        }
+      }
+      
+      // Hidden note
+      if (currentHover === 'note' && noteVisible) {
+        if (!objectStates.noteFound) {
+          addDiscovery('Found a note: "Don\'t trust the mirror. Trust the time."', 'key');
+          objectStates.noteFound = true;
+          solutionStep = Math.max(solutionStep, 5);
+          spawnParticles(noteX, noteY, 12, '#44ff44');
+        } else {
+          addDiscovery('The note is fading. Like everything else.', 'observation');
+        }
+      }
+    }
+  }
+}
+
+function drawPlaying() {
+  drawPaperBackground();
+  
+  // Coffee stains
+  drawCoffeeStain(W * 0.15, H * 0.25, 30);
+  drawCoffeeStain(W * 0.8, H * 0.7, 25);
+  
+  const roomY = centerY - 60 * scale;
+  
+  // Room outline (walls)
+  const roomW = 280 * scale;
+  const roomH = 240 * scale;
+  const roomX = centerX - roomW/2;
+  const roomYStart = roomY - 120 * scale;
+  
+  wobblyRect(roomX, roomYStart, roomW, roomH, '#282832', null, 2.5);
+  
+  // Floor line
+  wobblyLine(roomX, roomYStart + roomH - 40*scale, roomX + roomW, roomYStart + roomH - 40*scale, '#282832', 2);
+  
+  // Clock (top center)
+  const clockX = centerX;
+  const clockY = roomY - 80 * scale;
+  wobblyCircle(clockX, clockY, 30 * scale, currentHover === 'clock' ? '#b40000' : '#282832', null, currentHover === 'clock' ? 3 : 2);
+  // Clock hands stuck at 3:47
+  wobblyLine(clockX, clockY, clockX + 20 * scale, clockY, '#282832', 2); // hour
+  wobblyLine(clockX, clockY, clockX - 5 * scale, clockY - 25 * scale, '#282832', 1.5); // minute
+  drawText('3:47', clockX, clockY + 50 * scale, 10, '#646464');
+  
+  // Drawer (left)
+  const drawerX = centerX - 120 * scale;
+  const drawerY = roomY + 40 * scale;
+  wobblyRect(drawerX - 25*scale, drawerY - 15*scale, 50*scale, 30*scale, 
+    currentHover === 'drawer' ? '#b40000' : '#282832',
+    objectStates.drawerOpened ? '#ddd' : '#aaa', 
+    currentHover === 'drawer' ? 3 : 2);
+  wobblyCircle(drawerX, drawerY, 3*scale, '#282832', '#282832', 1);
+  if (objectStates.drawerOpened) {
+    drawText('(open)', drawerX, drawerY + 25*scale, 8, '#44aa44');
+  }
+  
+  // Mirror (right)
+  const mirrorX = centerX + 120 * scale;
+  const mirrorY = roomY;
+  wobblyRect(mirrorX - 20*scale, mirrorY - 35*scale, 40*scale, 70*scale,
+    currentHover === 'mirror' ? '#b40000' : '#282832',
+    'rgba(200,220,240,0.3)',
+    currentHover === 'mirror' ? 3 : 2);
+  // Crosshatch reflection
+  for (let i = 0; i < 5; i++) {
+    const ly = mirrorY - 30*scale + i * 15*scale;
+    wobblyLine(mirrorX - 15*scale, ly, mirrorX + 15*scale, ly, 'rgba(40,40,50,0.2)', 0.5);
+  }
+  
+  // Door (center bottom)
+  const doorX = centerX;
+  const doorY = roomY + 110 * scale;
+  wobblyRect(doorX - 30*scale, doorY - 45*scale, 60*scale, 90*scale,
+    currentHover === 'door' ? '#b40000' : '#8B4513',
+    '#a0522d',
+    currentHover === 'door' ? 3 : 2.5);
+  wobblyCircle(doorX + 20*scale, doorY, 4*scale, '#DAA520', objectStates.doorUnlocked ? '#44ff44' : '#DAA520', 1.5);
+  if (objectStates.doorUnlocked) {
+    drawText('UNLOCKED', doorX, doorY + 55*scale, 9, '#44aa44');
+  }
+  
+  // Window (top right)
+  const windowX = centerX + 130 * scale;
+  const windowY = roomY - 80 * scale;
+  wobblyRect(windowX - 20*scale, windowY - 20*scale, 40*scale, 40*scale,
+    currentHover === 'window' ? '#b40000' : '#282832',
+    objectStates.windowExamined ? 'rgba(100,50,30,0.5)' : 'rgba(135,206,235,0.3)',
+    currentHover === 'window' ? 3 : 2);
+  // Window panes
+  wobblyLine(windowX, windowY - 20*scale, windowX, windowY + 20*scale, '#282832', 1);
+  wobblyLine(windowX - 20*scale, windowY, windowX + 20*scale, windowY, '#282832', 1);
+  
+  // Bed (bottom left)
+  const bedX = centerX - 110 * scale;
+  const bedY = roomY + 100 * scale;
+  wobblyRect(bedX - 25*scale, bedY - 15*scale, 50*scale, 30*scale,
+    currentHover === 'bed' ? '#b40000' : '#654321',
+    '#8B7355',
+    currentHover === 'bed' ? 3 : 2);
+  drawText('BED', bedX, bedY, 8, '#ddd');
+  
+  // Hidden note (only visible after deaths)
+  const noteX = centerX - 60 * scale;
+  const noteY = roomY + 130 * scale;
+  const noteVisible = totalDeaths >= 3 || objectStates.noteFound;
+  if (noteVisible) {
+    const noteAlpha = objectStates.noteFound ? 1 : 0.3 + totalDeaths * 0.1;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, noteAlpha);
+    wobblyRect(noteX - 12*scale, noteY - 8*scale, 24*scale, 16*scale,
+      currentHover === 'note' ? '#b40000' : '#fffd96',
+      '#fffd96',
+      currentHover === 'note' ? 2.5 : 1.5);
+    drawText('?', noteX, noteY, 10, '#282832');
+    ctx.restore();
+  }
+  
+  // UI Elements
+  // Timer (bottom center)
+  const timerY = H - 60 * scale;
+  const urgency = loopTimer < 10;
+  const timerColor = urgency ? '#b40000' : '#282832';
+  const timerSize = urgency ? 28 : 24;
+  drawText(`${Math.ceil(loopTimer)}s`, centerX, timerY, timerSize, timerColor);
+  
+  // Loop counter (top left)
+  drawText(`Loop ${loopNumber}`, 60 * scale, 30 * scale, 12, '#646464', 'left');
+  
+  // Death counter (top left, second line)
+  drawText(`💀 ${totalDeaths}`, 60 * scale, 50 * scale, 11, '#646464', 'left');
+  
+  // Journal button (top right)
+  const journalBtnX = W - 50 * scale;
+  const journalBtnY = 40 * scale;
+  wobblyRect(journalBtnX - 35*scale, journalBtnY - 12*scale, 70*scale, 24*scale,
+    currentHover === 'journal' ? '#b40000' : '#282832',
+    '#f5ebd7',
+    currentHover === 'journal' ? 2.5 : 1.5);
+  drawText('JOURNAL', journalBtnX, journalBtnY, 10, '#282832');
+  
+  // Discoveries badge
+  if (discoveries.length > 0) {
+    wobblyCircle(journalBtnX + 30*scale, journalBtnY - 8*scale, 8*scale, '#b40000', '#b40000', 1);
+    ctx.save();
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${8 * scale}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText(discoveries.length, journalBtnX + 30*scale, journalBtnY - 8*scale + 1*scale);
+    ctx.restore();
+  }
+  
+  // Hover tooltip
+  if (currentHover && currentHover !== 'journal') {
+    const tooltips = {
+      clock: 'Examine clock',
+      drawer: objectStates.drawerOpened ? 'Empty drawer' : 'Locked drawer',
+      mirror: 'Look in mirror',
+      door: objectStates.doorUnlocked ? 'Unlocked door' : 'Locked door',
+      window: 'Look outside',
+      bed: 'Your bed',
+      note: 'Hidden note'
+    };
+    const tooltip = tooltips[currentHover] || '';
+    const ttX = dragState.x || centerX;
+    const ttY = (dragState.y || centerY) - 40 * scale;
+    
+    // Tooltip background
+    ctx.save();
+    const ttW = ctx.measureText(tooltip).width + 16 * scale;
+    ctx.fillStyle = 'rgba(40, 40, 50, 0.9)';
+    ctx.fillRect(ttX - ttW/2, ttY - 12*scale, ttW, 20*scale);
+    ctx.fillStyle = '#fff';
+    ctx.font = `${10 * scale}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText(tooltip, ttX, ttY);
+    ctx.restore();
+  }
+  
+  // Progressive hints based on deaths
+  if (totalDeaths >= 5 && solutionStep < 2) {
+    const hintAlpha = 0.3 + Math.sin(gameTime * 2) * 0.2;
+    ctx.save();
+    ctx.globalAlpha = hintAlpha;
+    drawText('↑ Try the clock time on the drawer', centerX, H - 100*scale, 10, '#44aa44');
+    ctx.restore();
+  }
+  
+  if (totalDeaths >= 8 && !objectStates.noteFound) {
+    const hintAlpha = 0.4 + Math.sin(gameTime * 2) * 0.2;
+    ctx.save();
+    ctx.globalAlpha = hintAlpha;
+    drawText('↙ Something hidden below...', centerX, roomY + 90*scale, 9, '#44aa44');
+    ctx.restore();
+  }
+}
+
+// --- JOURNAL VIEW ---
+let journalScroll = 0;
+function updateJournal() {
+  for (const ev of inputEvents) {
+    if (ev.type === 'tap') {
+      // Close button
+      const closeX = W - 40 * scale;
+      const closeY = 40 * scale;
+      if (hitTest(ev.x, ev.y, closeX, closeY, 50 * scale, 30 * scale)) {
+        sfxPageFlip();
+        gameState = 'playing';
+        return;
+      }
+    }
+  }
+}
+
+function drawJournal() {
+  drawPaperBackground();
+  
+  // Spiral binding (left edge)
+  for (let i = 0; i < 15; i++) {
+    const y = 40 * scale + i * 40 * scale;
+    wobblyCircle(25 * scale, y, 8 * scale, '#646464', null, 1.5);
+  }
+  
+  // Coffee stain
+  drawCoffeeStain(W * 0.7, H * 0.3, 50);
+  
+  // Title
+  drawText(`LOOP ${loopNumber} JOURNAL`, centerX, 50 * scale, 20, '#282832');
+  drawText(`${totalDeaths} deaths | ${discoveries.length} discoveries`, centerX, 80 * scale, 11, '#646464');
+  
+  // Discoveries
+  let y = 120 * scale;
+  if (discoveries.length === 0) {
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    drawHandwritten('No discoveries yet.\nExplore the room.', 60 * scale, y, 14, '#646464', 'left');
+    ctx.restore();
+  } else {
+    for (let i = 0; i < discoveries.length; i++) {
+      const d = discoveries[i];
+      const color = d.category === 'warning' ? '#b40000' : 
+                    d.category === 'key' ? '#44aa44' : '#282832';
+      
+      // Entry number
+      ctx.save();
+      ctx.fillStyle = '#646464';
+      ctx.font = `${10 * scale}px monospace`;
+      ctx.textAlign = 'left';
+      ctx.fillText(`#${i+1}`, 55 * scale, y);
+      ctx.restore();
+      
+      // Entry text (handwritten)
+      drawHandwritten(d.text, 80 * scale, y - 5 * scale, 12, color, 'left');
+      
+      // Loop number (faded)
+      ctx.save();
+      ctx.globalAlpha = 0.4;
+      ctx.fillStyle = '#646464';
+      ctx.font = `italic ${9 * scale}px monospace`;
+      ctx.textAlign = 'right';
+      ctx.fillText(`Loop ${d.loop}`, W - 40 * scale, y + 5*scale);
+      ctx.restore();
+      
+      // Separator line
+      if (i < discoveries.length - 1) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(100, 100, 100, 0.2)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(60 * scale, y + 25*scale);
+        ctx.lineTo(W - 40 * scale, y + 25*scale);
+        ctx.stroke();
+        ctx.restore();
+      }
+      
+      y += 50 * scale;
+    }
+  }
+  
+  // Close button
+  const closeX = W - 40 * scale;
+  const closeY = 40 * scale;
+  wobblyRect(closeX - 25*scale, closeY - 12*scale, 50*scale, 24*scale, '#282832', '#f5ebd7', 2);
+  drawText('CLOSE', closeX, closeY, 10, '#282832');
+  
+  // Hint about solution
+  if (discoveries.length >= REQUIRED_DISCOVERIES) {
+    const hintY = H - 50 * scale;
+    ctx.save();
+    ctx.globalAlpha = 0.6 + Math.sin(gameTime * 3) * 0.3;
+    drawText('You know enough. Try the door.', centerX, hintY, 12, '#44aa44');
+    ctx.restore();
+  }
+}
+
+// --- VICTORY ---
+function updateVictory() {
+  for (const ev of inputEvents) {
+    if (ev.type === 'tap') {
+      // Reset game
+      localStorage.removeItem('dejaVuDiscoveries');
+      discoveries = [];
+      loopNumber = 1;
+      totalDeaths = 0;
+      objectStates = {
+        clockExamined: false,
+        drawerOpened: false,
+        mirrorExamined: false,
+        noteFound: false,
+        doorUnlocked: false,
+        windowExamined: false,
+        bedExamined: false
+      };
+      solutionStep = 0;
+      gameState = 'title';
+    }
+  }
+}
+
+function drawVictory() {
+  drawPaperBackground();
+  
+  drawCoffeeStain(centerX, centerY, 80);
+  
+  ctx.save();
+  ctx.font = `bold ${40 * scale}px monospace`;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#44aa44';
+  ctx.fillText('ESCAPED', centerX, centerY - 80 * scale);
+  ctx.restore();
+  
+  drawText('You broke the loop.', centerX, centerY - 30 * scale, 18, '#282832');
+  drawText(`It took ${loopNumber} loops and ${totalDeaths} deaths.`, centerX, centerY + 10 * scale, 14, '#646464');
+  drawText(`You made ${discoveries.length} discoveries.`, centerX, centerY + 35 * scale, 14, '#646464');
+  
+  drawText('But the clock still reads 3:47.', centerX, centerY + 80 * scale, 13, '#b40000');
+  
+  const pulse = Math.sin(gameTime * 2) * 0.3 + 0.7;
+  ctx.save();
+  ctx.globalAlpha = pulse;
+  drawText('TAP TO WAKE UP AGAIN', centerX, H - 60 * scale, 16, '#282832');
+  ctx.restore();
+  
+  // Final coffee stain
+  drawCoffeeStain(centerX + 80*scale, H - 100*scale, 40);
+}
+
+// ============================================================
+// DEATH & RESET
+// ============================================================
+let deathMessage = '';
+let deathTimer = 0;
+let showingDeath = false;
+
+function die(message) {
+  if (showingDeath) return;
+  showingDeath = true;
+  deathMessage = message;
+  deathTimer = 0;
+  totalDeaths++;
+  sfxDeath();
+  shake(15);
+  spawnParticles(centerX, centerY, 20, '#b40000');
+  
+  // Save death count
+  localStorage.setItem('dejaVuDeaths', totalDeaths);
+  
+  setTimeout(() => {
+    resetLoop();
+  }, 2500);
+}
+
+function resetLoop() {
+  loopNumber++;
+  loopTimer = 60;
+  showingDeath = false;
+  deathTimer = 0;
+  objectStates = {
+    clockExamined: false,
+    drawerOpened: false,
+    mirrorExamined: false,
+    noteFound: false,
+    doorUnlocked: false,
+    windowExamined: false,
+    bedExamined: false
+  };
+  gameState = 'playing';
+  
+  // Save loop count
+  localStorage.setItem('dejaVuLoop', loopNumber);
+}
+
+function drawDeathOverlay() {
+  if (!showingDeath) return;
+  
+  deathTimer += deltaTime;
+  const alpha = Math.min(1, deathTimer * 2);
+  
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  
+  // Dark overlay
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+  ctx.fillRect(0, 0, W, H);
+  
+  // Death message
+  ctx.globalAlpha = Math.min(1, deathTimer * 3 - 0.5);
+  drawText('💀', centerX, centerY - 50 * scale, 40, '#b40000');
+  
+  // Word wrap death message
+  ctx.font = `${16 * scale}px monospace`;
+  const words = deathMessage.split(' ');
+  let lines = [];
+  let line = '';
+  for (const word of words) {
+    const test = line + word + ' ';
+    if (ctx.measureText(test).width > W * 0.8) {
+      lines.push(line.trim());
+      line = word + ' ';
+    } else {
+      line = test;
+    }
+  }
+  lines.push(line.trim());
+  
+  const lineHeight = 22 * scale;
+  const startY = centerY;
+  for (let i = 0; i < lines.length; i++) {
+    drawText(lines[i], centerX, startY + i * lineHeight, 14, '#ff6b6b');
+  }
+  
+  // Loop restarting message
+  if (deathTimer > 1.5) {
+    ctx.globalAlpha = Math.min(1, (deathTimer - 1.5) * 2);
+    drawText('Waking up...', centerX, centerY + 80 * scale, 12, '#646464');
+  }
+  
+  ctx.restore();
+}
+
+// ============================================================
+// MAIN LOOP
+// ============================================================
+function gameLoop(timestamp) {
+  deltaTime = Math.min(0.1, (timestamp - lastTime) / 1000);
+  lastTime = timestamp;
+  gameTime += deltaTime;
+  
+  // Update based on state
+  if (gameState === 'title') {
+    updateTitle();
+  } else if (gameState === 'playing') {
+    updatePlaying();
+  } else if (gameState === 'journal') {
+    updateJournal();
+  } else if (gameState === 'victory') {
+    updateVictory();
+  }
+  
+  // Update particles
+  updateParticles();
+  
+  // Clear input events
+  inputEvents = [];
+  
+  // Draw
+  ctx.save();
+  applyShake();
+  
+  if (gameState === 'title') {
+    drawTitle();
+  } else if (gameState === 'playing') {
+    drawPlaying();
+  } else if (gameState === 'journal') {
+    drawJournal();
+  } else if (gameState === 'victory') {
+    drawVictory();
+  }
+  
+  // Particles always on top
+  drawParticles();
+  
+  // Death overlay
+  drawDeathOverlay();
+  
+  ctx.restore();
+  
+  requestAnimationFrame(gameLoop);
+}
+
+// ============================================================
+// INIT
+// ============================================================
+function init() {
+  // Load saved progress
+  const savedLoop = localStorage.getItem('dejaVuLoop');
+  const savedDeaths = localStorage.getItem('dejaVuDeaths');
+  
+  if (savedLoop) loopNumber = parseInt(savedLoop);
+  if (savedDeaths) totalDeaths = parseInt(savedDeaths);
+  
+  loadDiscoveries();
+  
+  // Start game loop
+  requestAnimationFrame(gameLoop);
+}
+
+init();
+</script>
+</body>
+</html>
