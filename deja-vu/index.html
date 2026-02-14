@@ -11,7 +11,7 @@
 html, body {
   width: 100%; height: 100%;
   overflow: hidden;
-  background: #f5ebd7;
+  background: #1a1a1a;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
@@ -20,7 +20,6 @@ html, body {
 canvas {
   display: block;
   width: 100%; height: 100%;
-  image-rendering: auto;
 }
 </style>
 </head>
@@ -29,41 +28,56 @@ canvas {
 <script>
 'use strict';
 
-// ============================================================
-// DÉJÀ VU — 60-Second Time-Loop Puzzle Game
-// ============================================================
-
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
 // --- GLOBALS ---
 let W, H, scale, centerX, centerY;
 let gameTime = 0, deltaTime = 0, lastTime = 0;
-let loopNumber = 1;
-let totalDeaths = 0;
-let loopTimer = 60;
-let gameState = 'title'; // title, playing, journal, gameover, victory
-let shakeAmount = 0, shakeDecay = 0.9;
+let loopNumber = 1, totalDeaths = 0, loopTimer = 60;
+let gameState = 'title'; // title, waking, playing, journal, dying, victory
+let shakeAmount = 0;
 let particles = [];
+let dustMotes = [];
 let inputEvents = [];
-let dragState = { active: false, startX: 0, startY: 0, x: 0, y: 0 };
+let mouseX = 0, mouseY = 0;
 
-// --- GAME STATE ---
-let discoveries = []; // Array of discovered facts
+// Waking transition
+let wakeProgress = 0; // 0 = black, 1 = fully awake
+let wakePhase = 0;
+
+// Discovery notification
+let notifText = '';
+let notifTimer = 0;
+let notifCategory = '';
+
+// Death
+let deathMsg = '';
+let deathTimer = 0;
+let glitchLines = [];
+
+// Ambient flicker
+let flickerAmount = 0;
+
+// Game state
+let discoveries = [];
+let objectStates = {};
+let solutionStep = 0;
 let currentHover = null;
-let objectStates = {
-  clockExamined: false,
-  drawerOpened: false,
-  mirrorExamined: false,
-  noteFound: false,
-  doorUnlocked: false,
-  windowExamined: false,
-  bedExamined: false
-};
+let interactCooldown = 0;
 
-// Puzzle solution sequence
-let solutionStep = 0; // 0-5, each discovery advances
+// Object pulse animations
+let objectPulse = {};
+
 const REQUIRED_DISCOVERIES = 5;
+
+function resetObjectStates() {
+  objectStates = {
+    clockExamined: false, drawerOpened: false, mirrorExamined: false,
+    noteFound: false, doorUnlocked: false, windowExamined: false, bedExamined: false
+  };
+}
+resetObjectStates();
 
 // --- RESIZE ---
 function resize() {
@@ -78,12 +92,13 @@ function resize() {
   scale = Math.min(W / 400, H / 700);
   centerX = W / 2;
   centerY = H / 2;
+  initDustMotes();
 }
 window.addEventListener('resize', resize);
 resize();
 
 // ============================================================
-// AUDIO ENGINE (Web Audio API)
+// AUDIO ENGINE
 // ============================================================
 let audioCtx = null;
 function ensureAudio() {
@@ -91,224 +106,233 @@ function ensureAudio() {
   if (audioCtx.state === 'suspended') audioCtx.resume();
 }
 
-function playTone(freq, duration, type = 'sine', vol = 0.15) {
+function playTone(freq, duration, type = 'sine', vol = 0.12) {
   ensureAudio();
+  const t = audioCtx.currentTime;
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
   osc.type = type;
-  osc.frequency.value = freq;
-  gain.gain.setValueAtTime(vol, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
-  osc.connect(gain);
-  gain.connect(audioCtx.destination);
-  osc.start();
-  osc.stop(audioCtx.currentTime + duration);
+  osc.frequency.setValueAtTime(freq, t);
+  gain.gain.setValueAtTime(vol, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start(t);
+  osc.stop(t + duration);
 }
 
-function playNoise(duration, vol = 0.1, filter = null) {
+function playNoise(duration, vol = 0.08, filterOpts = null) {
   ensureAudio();
+  const t = audioCtx.currentTime;
   const bufSize = audioCtx.sampleRate * duration;
   const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
   const data = buf.getChannelData(0);
   for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
   const src = audioCtx.createBufferSource();
-  const gain = audioCtx.createGain();
   src.buffer = buf;
-  gain.gain.setValueAtTime(vol, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(vol, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
   src.connect(gain);
-  if (filter) {
+  if (filterOpts) {
     const flt = audioCtx.createBiquadFilter();
-    flt.type = filter.type;
-    flt.frequency.value = filter.freq;
-    gain.connect(flt);
-    flt.connect(audioCtx.destination);
+    flt.type = filterOpts.type;
+    flt.frequency.value = filterOpts.freq;
+    if (filterOpts.q) flt.Q.value = filterOpts.q;
+    gain.connect(flt).connect(audioCtx.destination);
   } else {
     gain.connect(audioCtx.destination);
   }
-  src.start();
+  src.start(t);
 }
 
-// Sound effects
-function sfxClockTick() { playTone(800, 0.02, 'sine', 0.05); }
-function sfxDoorCreak() { playNoise(0.3, 0.08, { type: 'lowpass', freq: 300 }); }
-function sfxDeath() { 
-  playTone(220, 0.2, 'sawtooth', 0.15);
-  setTimeout(() => playTone(110, 0.4, 'sawtooth', 0.15), 200);
-  setTimeout(() => playNoise(0.3, 0.1), 100);
+// Ambient drone
+let droneOsc = null, droneGain = null;
+function startDrone() {
+  ensureAudio();
+  if (droneOsc) return;
+  const t = audioCtx.currentTime;
+  droneOsc = audioCtx.createOscillator();
+  const droneOsc2 = audioCtx.createOscillator();
+  droneGain = audioCtx.createGain();
+  const flt = audioCtx.createBiquadFilter();
+  droneOsc.type = 'sine';
+  droneOsc.frequency.value = 55;
+  droneOsc2.type = 'sine';
+  droneOsc2.frequency.value = 55.5; // slight detune for beating
+  flt.type = 'lowpass';
+  flt.frequency.value = 200;
+  droneGain.gain.value = 0;
+  droneGain.gain.linearRampToValueAtTime(0.04, t + 2);
+  droneOsc.connect(droneGain);
+  droneOsc2.connect(droneGain);
+  droneGain.connect(flt).connect(audioCtx.destination);
+  droneOsc.start(t);
+  droneOsc2.start(t);
 }
-function sfxDiscovery() { 
-  playTone(880, 0.15, 'sine', 0.12);
-  setTimeout(() => playTone(1100, 0.15, 'sine', 0.10), 120);
+
+function sfxTick() { playTone(900, 0.015, 'sine', 0.03); }
+function sfxClick() { playTone(1200, 0.025, 'sine', 0.06); }
+function sfxDiscovery() {
+  playTone(523, 0.12, 'sine', 0.1);
+  setTimeout(() => playTone(659, 0.12, 'sine', 0.08), 100);
+  setTimeout(() => playTone(784, 0.18, 'sine', 0.08), 200);
 }
-function sfxPageFlip() { playNoise(0.15, 0.06, { type: 'highpass', freq: 1000 }); }
-function sfxClick() { playTone(1000, 0.03, 'sine', 0.08); }
 function sfxUnlock() {
-  playTone(523, 0.1, 'sine', 0.12);
-  setTimeout(() => playTone(659, 0.1, 'sine', 0.12), 100);
-  setTimeout(() => playTone(784, 0.2, 'sine', 0.12), 200);
+  playTone(392, 0.08, 'triangle', 0.1);
+  setTimeout(() => playTone(523, 0.08, 'triangle', 0.1), 80);
+  setTimeout(() => playTone(659, 0.08, 'triangle', 0.1), 160);
+  setTimeout(() => playTone(784, 0.2, 'triangle', 0.12), 240);
 }
-function sfxTimeRunOut() {
-  playTone(440, 0.3, 'triangle', 0.15);
-  setTimeout(() => playTone(220, 0.5, 'triangle', 0.15), 300);
+function sfxDeath() {
+  playTone(200, 0.3, 'sawtooth', 0.12);
+  setTimeout(() => playTone(100, 0.5, 'sawtooth', 0.1), 150);
+  playNoise(0.4, 0.1, { type: 'lowpass', freq: 400 });
 }
+function sfxPageFlip() { playNoise(0.12, 0.05, { type: 'highpass', freq: 2000 }); }
+function sfxWakeUp() {
+  // Reverse reverb-like whoosh
+  playNoise(0.8, 0.06, { type: 'bandpass', freq: 800, q: 2 });
+  setTimeout(() => playTone(440, 0.3, 'sine', 0.04), 400);
+}
+function sfxHeartbeat() {
+  playTone(60, 0.08, 'sine', 0.15);
+  setTimeout(() => playTone(55, 0.1, 'sine', 0.12), 120);
+}
+function sfxGlitch() {
+  playNoise(0.05, 0.15, { type: 'highpass', freq: 3000 });
+}
+function sfxCreak() { playNoise(0.25, 0.06, { type: 'lowpass', freq: 300 }); }
 
-// Ambient clock ticking
-let tickInterval = null;
-function startClockTicking() {
-  if (tickInterval) return;
-  tickInterval = setInterval(() => {
-    if (gameState === 'playing') sfxClockTick();
-  }, 1000);
+// Clock tick timer
+let lastTickSec = -1;
+function tickClock() {
+  const sec = Math.floor(loopTimer);
+  if (sec !== lastTickSec && sec >= 0) {
+    lastTickSec = sec;
+    sfxTick();
+    if (loopTimer <= 10) sfxHeartbeat();
+  }
 }
 
 // ============================================================
-// DRAWING HELPERS — Hand-drawn aesthetic
+// DRAWING HELPERS
 // ============================================================
+function wobble(amt = 1) { return (Math.random() - 0.5) * amt * scale; }
 
-function wobble(amt = 1.5) { return (Math.random() - 0.5) * amt * scale; }
-
-function wobblyLine(x1, y1, x2, y2, color = '#282832', width = 2) {
+function wobblyLine(x1, y1, x2, y2, color = '#3a3a3a', width = 1.5) {
   ctx.save();
   ctx.strokeStyle = color;
   ctx.lineWidth = width * scale;
   ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
   ctx.beginPath();
-  ctx.moveTo(x1 + wobble(0.5), y1 + wobble(0.5));
-  const steps = Math.max(3, Math.floor(Math.hypot(x2 - x1, y2 - y1) / (15 * scale)));
+  ctx.moveTo(x1 + wobble(0.3), y1 + wobble(0.3));
+  const steps = Math.max(2, Math.floor(Math.hypot(x2-x1, y2-y1) / (20 * scale)));
   for (let i = 1; i <= steps; i++) {
     const t = i / steps;
-    ctx.lineTo(
-      x1 + (x2 - x1) * t + wobble(0.5),
-      y1 + (y2 - y1) * t + wobble(0.5)
-    );
+    ctx.lineTo(x1 + (x2-x1)*t + wobble(0.4), y1 + (y2-y1)*t + wobble(0.4));
   }
   ctx.stroke();
   ctx.restore();
 }
 
-function wobblyRect(x, y, w, h, color = '#282832', fill = null, lineWidth = 2) {
+function wobblyRect(x, y, w, h, stroke = '#3a3a3a', fill = null, lw = 1.5) {
   if (fill) {
     ctx.save();
     ctx.fillStyle = fill;
     ctx.beginPath();
-    ctx.moveTo(x + wobble(0.3), y + wobble(0.3));
-    ctx.lineTo(x + w + wobble(0.3), y + wobble(0.3));
-    ctx.lineTo(x + w + wobble(0.3), y + h + wobble(0.3));
-    ctx.lineTo(x + wobble(0.3), y + h + wobble(0.3));
+    ctx.moveTo(x + wobble(0.2), y + wobble(0.2));
+    ctx.lineTo(x + w + wobble(0.2), y + wobble(0.2));
+    ctx.lineTo(x + w + wobble(0.2), y + h + wobble(0.2));
+    ctx.lineTo(x + wobble(0.2), y + h + wobble(0.2));
     ctx.closePath();
     ctx.fill();
     ctx.restore();
   }
-  wobblyLine(x, y, x + w, y, color, lineWidth);
-  wobblyLine(x + w, y, x + w, y + h, color, lineWidth);
-  wobblyLine(x + w, y + h, x, y + h, color, lineWidth);
-  wobblyLine(x, y + h, x, y, color, lineWidth);
+  wobblyLine(x, y, x+w, y, stroke, lw);
+  wobblyLine(x+w, y, x+w, y+h, stroke, lw);
+  wobblyLine(x+w, y+h, x, y+h, stroke, lw);
+  wobblyLine(x, y+h, x, y, stroke, lw);
 }
 
-function wobblyCircle(cx, cy, r, color = '#282832', fill = null, lineWidth = 2) {
+function wobblyCircle(cx, cy, r, stroke = '#3a3a3a', fill = null, lw = 1.5) {
   ctx.save();
-  const pts = 24;
+  const pts = 20;
   ctx.beginPath();
   for (let i = 0; i <= pts; i++) {
     const a = (i / pts) * Math.PI * 2;
-    const rr = r + wobble(1);
+    const rr = r + wobble(0.8);
     const px = cx + Math.cos(a) * rr;
     const py = cy + Math.sin(a) * rr;
     if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
   }
   ctx.closePath();
   if (fill) { ctx.fillStyle = fill; ctx.fill(); }
-  ctx.strokeStyle = color;
-  ctx.lineWidth = lineWidth * scale;
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = lw * scale;
   ctx.lineCap = 'round';
   ctx.stroke();
   ctx.restore();
 }
 
-function drawText(text, x, y, size = 16, color = '#282832', align = 'center') {
+function drawText(text, x, y, size = 16, color = '#3a3a3a', align = 'center') {
   ctx.save();
   ctx.fillStyle = color;
   ctx.font = `${size * scale}px 'Courier New', monospace`;
   ctx.textAlign = align;
   ctx.textBaseline = 'middle';
-  // Slight wobble for handwritten feel
-  ctx.fillText(text, x + wobble(0.2), y + wobble(0.2));
+  ctx.fillText(text, x, y);
   ctx.restore();
 }
 
-function drawHandwritten(text, x, y, size = 14, color = '#282832', align = 'left') {
+function drawTextBold(text, x, y, size = 16, color = '#3a3a3a', align = 'center') {
   ctx.save();
   ctx.fillStyle = color;
-  ctx.font = `italic ${size * scale}px 'Courier New', monospace`;
+  ctx.font = `bold ${size * scale}px 'Courier New', monospace`;
   ctx.textAlign = align;
-  ctx.textBaseline = 'top';
-  // More wobble for handwriting
-  const lines = text.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], x + wobble(0.8), y + i * size * 1.3 * scale + wobble(0.8));
-  }
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, x, y);
   ctx.restore();
 }
 
-// Coffee stain
-function drawCoffeeStain(x, y, radius) {
+function measureText(text, size) {
   ctx.save();
-  const grad = ctx.createRadialGradient(x, y, 0, x, y, radius * scale);
-  grad.addColorStop(0, 'rgba(101, 67, 33, 0.3)');
-  grad.addColorStop(0.5, 'rgba(101, 67, 33, 0.15)');
-  grad.addColorStop(1, 'rgba(101, 67, 33, 0)');
-  ctx.fillStyle = grad;
-  ctx.beginPath();
-  ctx.arc(x, y, radius * scale, 0, Math.PI * 2);
-  ctx.fill();
-  
-  // Ring mark
-  ctx.strokeStyle = 'rgba(101, 67, 33, 0.25)';
-  ctx.lineWidth = 1.5 * scale;
-  ctx.beginPath();
-  const ringRadius = radius * 0.7 * scale;
-  for (let i = 0; i <= 32; i++) {
-    const a = (i / 32) * Math.PI * 2;
-    const r = ringRadius + (Math.random() - 0.5) * 3 * scale;
-    const px = x + Math.cos(a) * r;
-    const py = y + Math.sin(a) * r;
-    if (i === 0) ctx.moveTo(px, py);
-    else ctx.lineTo(px, py);
-  }
-  ctx.stroke();
+  ctx.font = `${size * scale}px 'Courier New', monospace`;
+  const m = ctx.measureText(text).width;
   ctx.restore();
-}
-
-// Paper texture background
-function drawPaperBackground() {
-  ctx.fillStyle = '#f5ebd7';
-  ctx.fillRect(0, 0, W, H);
-  
-  // Subtle noise texture
-  ctx.save();
-  ctx.globalAlpha = 0.03;
-  for (let i = 0; i < 100; i++) {
-    ctx.fillStyle = Math.random() > 0.5 ? '#000' : '#fff';
-    ctx.fillRect(Math.random() * W, Math.random() * H, 1, 1);
-  }
-  ctx.restore();
+  return m;
 }
 
 // ============================================================
-// PARTICLES
+// PARTICLES & DUST
 // ============================================================
-function spawnParticles(x, y, count, color = '#b40000') {
+function spawnParticles(x, y, count, color = '#c44', opts = {}) {
   for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = (1 + Math.random() * 3) * scale * (opts.speed || 1);
     particles.push({
       x, y,
-      vx: (Math.random() - 0.5) * 3 * scale,
-      vy: (Math.random() - 0.5) * 3 * scale - 2 * scale,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - (opts.rise ? 2 * scale : 0),
       life: 1,
-      decay: 0.015 + Math.random() * 0.015,
-      size: (2 + Math.random() * 3) * scale,
-      color
+      decay: 0.01 + Math.random() * 0.02,
+      size: (1.5 + Math.random() * 2.5) * scale * (opts.size || 1),
+      color,
+      shape: opts.shape || 'square',
+      gravity: opts.gravity !== undefined ? opts.gravity : 0.08
+    });
+  }
+}
+
+function initDustMotes() {
+  dustMotes = [];
+  for (let i = 0; i < 30; i++) {
+    dustMotes.push({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      size: (0.5 + Math.random() * 1.5) * scale,
+      speed: 0.1 + Math.random() * 0.3,
+      phase: Math.random() * Math.PI * 2,
+      alpha: 0.1 + Math.random() * 0.15
     });
   }
 }
@@ -318,7 +342,8 @@ function updateParticles() {
     const p = particles[i];
     p.x += p.vx;
     p.y += p.vy;
-    p.vy += 0.12 * scale;
+    p.vy += p.gravity * scale;
+    p.vx *= 0.98;
     p.life -= p.decay;
     if (p.life <= 0) particles.splice(i, 1);
   }
@@ -327,598 +352,817 @@ function updateParticles() {
 function drawParticles() {
   for (const p of particles) {
     ctx.save();
-    ctx.globalAlpha = p.life;
+    ctx.globalAlpha = p.life * 0.8;
     ctx.fillStyle = p.color;
-    ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+    if (p.shape === 'circle') {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+    }
     ctx.restore();
   }
+}
+
+function drawDustMotes() {
+  for (const d of dustMotes) {
+    d.x += Math.sin(gameTime * 0.5 + d.phase) * d.speed * 0.3;
+    d.y -= d.speed * 0.15;
+    if (d.y < -10) { d.y = H + 10; d.x = Math.random() * W; }
+    
+    ctx.save();
+    ctx.globalAlpha = d.alpha * (0.5 + Math.sin(gameTime + d.phase) * 0.5);
+    ctx.fillStyle = '#c4a97d';
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, d.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// ATMOSPHERE
+// ============================================================
+function drawPaperBg() {
+  // Warm parchment
+  ctx.fillStyle = '#f0e4cc';
+  ctx.fillRect(0, 0, W, H);
+  
+  // Subtle grain
+  ctx.save();
+  ctx.globalAlpha = 0.04;
+  for (let i = 0; i < 200; i++) {
+    ctx.fillStyle = Math.random() > 0.5 ? '#000' : '#fff';
+    const x = Math.random() * W, y = Math.random() * H;
+    ctx.fillRect(x, y, Math.random() * 2, Math.random() * 2);
+  }
+  ctx.restore();
+}
+
+function drawVignette(alpha = 0.4) {
+  const grad = ctx.createRadialGradient(centerX, centerY, Math.min(W,H) * 0.2, centerX, centerY, Math.max(W,H) * 0.7);
+  grad.addColorStop(0, 'rgba(0,0,0,0)');
+  grad.addColorStop(1, `rgba(0,0,0,${alpha})`);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawCoffeeStain(x, y, r) {
+  ctx.save();
+  const grad = ctx.createRadialGradient(x, y, 0, x, y, r * scale);
+  grad.addColorStop(0, 'rgba(101,67,33,0.2)');
+  grad.addColorStop(0.6, 'rgba(101,67,33,0.1)');
+  grad.addColorStop(1, 'rgba(101,67,33,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(x, y, r * scale, 0, Math.PI * 2);
+  ctx.fill();
+  // Ring
+  ctx.strokeStyle = 'rgba(101,67,33,0.2)';
+  ctx.lineWidth = 1.5 * scale;
+  ctx.beginPath();
+  for (let i = 0; i <= 24; i++) {
+    const a = (i/24) * Math.PI * 2;
+    const rr = r * 0.7 * scale + (Math.random()-0.5) * 2 * scale;
+    const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr;
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+  ctx.restore();
 }
 
 // ============================================================
 // SCREEN SHAKE
 // ============================================================
-function shake(amount = 10) {
-  shakeAmount = amount * scale;
-}
-
+function shake(amt = 8) { shakeAmount = Math.max(shakeAmount, amt * scale); }
 function applyShake() {
   if (shakeAmount > 0.5) {
-    const sx = (Math.random() - 0.5) * shakeAmount;
-    const sy = (Math.random() - 0.5) * shakeAmount;
-    ctx.translate(sx, sy);
-    shakeAmount *= shakeDecay;
-  } else {
-    shakeAmount = 0;
-  }
+    ctx.translate((Math.random()-0.5) * shakeAmount, (Math.random()-0.5) * shakeAmount);
+    shakeAmount *= 0.88;
+  } else shakeAmount = 0;
 }
 
 // ============================================================
-// INPUT HANDLING
+// INPUT
 // ============================================================
-function getEventPos(e) {
-  if (e.touches) {
-    return { x: e.touches[0].clientX, y: e.touches[0].clientY };
-  }
-  return { x: e.clientX, y: e.clientY };
-}
-
 function hitTest(px, py, x, y, w, h) {
   return px >= x - w/2 && px <= x + w/2 && py >= y - h/2 && py <= y + h/2;
 }
 
 canvas.addEventListener('touchstart', (e) => {
-  e.preventDefault();
-  ensureAudio();
-  const pos = getEventPos(e);
-  inputEvents.push({ type: 'tap', x: pos.x, y: pos.y });
-  dragState.active = true;
-  dragState.startX = pos.x;
-  dragState.startY = pos.y;
+  e.preventDefault(); ensureAudio();
+  const t = e.touches[0];
+  inputEvents.push({ type: 'tap', x: t.clientX, y: t.clientY });
+  mouseX = t.clientX; mouseY = t.clientY;
 }, { passive: false });
-
-canvas.addEventListener('touchend', (e) => {
+canvas.addEventListener('touchmove', (e) => {
   e.preventDefault();
-  dragState.active = false;
-});
-
+  if (e.touches[0]) { mouseX = e.touches[0].clientX; mouseY = e.touches[0].clientY; }
+}, { passive: false });
+canvas.addEventListener('touchend', (e) => { e.preventDefault(); }, { passive: false });
 canvas.addEventListener('mousedown', (e) => {
   ensureAudio();
   inputEvents.push({ type: 'tap', x: e.clientX, y: e.clientY });
-  dragState.active = true;
-  dragState.startX = e.clientX;
-  dragState.startY = e.clientY;
 });
+canvas.addEventListener('mousemove', (e) => { mouseX = e.clientX; mouseY = e.clientY; });
 
-canvas.addEventListener('mouseup', (e) => {
-  dragState.active = false;
-});
-
-canvas.addEventListener('mousemove', (e) => {
-  dragState.x = e.clientX;
-  dragState.y = e.clientY;
-});
-
-canvas.addEventListener('touchmove', (e) => {
-  e.preventDefault();
-  if (e.touches.length > 0) {
-    dragState.x = e.touches[0].clientX;
-    dragState.y = e.touches[0].clientY;
-  }
-}, { passive: false });
+// ============================================================
+// OBJECT LAYOUT (responsive)
+// ============================================================
+function getObjects() {
+  const rY = centerY - 40 * scale;
+  const rW = 260 * scale, rH = 220 * scale;
+  const rX = centerX - rW/2, rYS = rY - 100 * scale;
+  
+  return {
+    room: { x: rX, y: rYS, w: rW, h: rH },
+    clock: { x: centerX, y: rY - 75 * scale, w: 65 * scale, h: 65 * scale },
+    drawer: { x: centerX - 100 * scale, y: rY + 35 * scale, w: 55 * scale, h: 35 * scale },
+    mirror: { x: centerX + 105 * scale, y: rY - 5 * scale, w: 45 * scale, h: 75 * scale },
+    door: { x: centerX, y: rY + 95 * scale, w: 60 * scale, h: 85 * scale },
+    window: { x: centerX + 110 * scale, y: rY - 75 * scale, w: 45 * scale, h: 45 * scale },
+    bed: { x: centerX - 95 * scale, y: rY + 90 * scale, w: 55 * scale, h: 35 * scale },
+    note: { x: centerX - 50 * scale, y: rY + 115 * scale, w: 25 * scale, h: 18 * scale },
+    journal: { x: W - 50 * scale, y: 35 * scale, w: 75 * scale, h: 28 * scale }
+  };
+}
 
 // ============================================================
 // DISCOVERY SYSTEM
 // ============================================================
 function addDiscovery(text, category = 'observation') {
-  // Check if already discovered
   if (discoveries.some(d => d.text === text)) return;
-  
-  discoveries.push({
-    text,
-    category,
-    loop: loopNumber,
-    timestamp: Date.now()
-  });
-  
+  discoveries.push({ text, category, loop: loopNumber });
   sfxDiscovery();
-  spawnParticles(centerX, centerY - 100 * scale, 10, '#44aa44');
-  
-  // Save to localStorage
+  notifText = text;
+  notifCategory = category;
+  notifTimer = 3;
+  spawnParticles(centerX, centerY - 80 * scale, 12,
+    category === 'key' ? '#4a4' : category === 'warning' ? '#c44' : '#88a',
+    { rise: true, size: 0.8, speed: 0.7 });
   localStorage.setItem('dejaVuDiscoveries', JSON.stringify(discoveries));
 }
 
-function loadDiscoveries() {
-  const saved = localStorage.getItem('dejaVuDiscoveries');
-  if (saved) {
-    discoveries = JSON.parse(saved);
-  }
+function loadSave() {
+  try {
+    const d = localStorage.getItem('dejaVuDiscoveries');
+    if (d) discoveries = JSON.parse(d);
+    const l = localStorage.getItem('dejaVuLoop');
+    if (l) loopNumber = parseInt(l);
+    const dd = localStorage.getItem('dejaVuDeaths');
+    if (dd) totalDeaths = parseInt(dd);
+  } catch(e) {}
 }
 
 // ============================================================
-// GAME STATES
+// TITLE SCREEN
 // ============================================================
-
-// --- TITLE SCREEN ---
 function updateTitle() {
   for (const ev of inputEvents) {
     if (ev.type === 'tap') {
-      // Tap anywhere to start
       sfxClick();
-      gameState = 'playing';
-      loopTimer = 60;
-      startClockTicking();
-      return;
+      startWaking();
     }
   }
 }
 
 function drawTitle() {
-  drawPaperBackground();
+  drawPaperBg();
+  drawCoffeeStain(W * 0.2, H * 0.35, 40);
+  drawCoffeeStain(W * 0.8, H * 0.55, 30);
   
-  // Coffee stains
-  drawCoffeeStain(W * 0.2, H * 0.3, 40);
-  drawCoffeeStain(W * 0.75, H * 0.6, 35);
+  const ty = centerY - 100 * scale;
   
-  // Title
-  const titleY = centerY - 120 * scale;
+  // Title with shadow
   ctx.save();
-  ctx.font = `bold ${48 * scale}px 'Courier New', monospace`;
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#282832';
-  ctx.fillText('DÉJÀ VU', centerX, titleY);
-  
-  // Shadow effect
-  ctx.globalAlpha = 0.3;
-  ctx.fillStyle = '#654321';
-  ctx.fillText('DÉJÀ VU', centerX + 3 * scale, titleY + 3 * scale);
+  ctx.globalAlpha = 0.15;
+  drawTextBold('DÉJÀ VU', centerX + 3*scale, ty + 3*scale, 44, '#654321');
   ctx.restore();
+  drawTextBold('DÉJÀ VU', centerX, ty, 44, '#2a2a2a');
   
   // Subtitle
-  drawText('You have 60 seconds.', centerX, titleY + 50 * scale, 16, '#646464');
-  drawText('You always have.', centerX, titleY + 75 * scale, 16, '#646464');
+  drawText('You have 60 seconds.', centerX, ty + 55*scale, 14, '#777');
+  drawText('You always have.', centerX, ty + 78*scale, 14, '#777');
   
-  // Clock hands overlapping (visual metaphor)
-  const clockCenterY = centerY + 30 * scale;
-  wobblyCircle(centerX, clockCenterY, 60 * scale, '#282832', null, 2);
-  
-  // Multiple overlapping hands
-  const numHands = 8;
-  for (let i = 0; i < numHands; i++) {
-    const angle = (i / numHands) * Math.PI * 2 - Math.PI / 2;
-    const handLen = 45 * scale;
-    const alpha = 0.2 + (i / numHands) * 0.3;
-    ctx.save();
-    ctx.globalAlpha = alpha;
+  // Animated clock
+  const cY = centerY + 40 * scale;
+  wobblyCircle(centerX, cY, 55*scale, '#3a3a3a', null, 2);
+  // Tick marks
+  for (let i = 0; i < 12; i++) {
+    const a = (i/12) * Math.PI * 2 - Math.PI/2;
+    const inner = 45 * scale, outer = 50 * scale;
     wobblyLine(
-      centerX, clockCenterY,
-      centerX + Math.cos(angle) * handLen,
-      clockCenterY + Math.sin(angle) * handLen,
-      '#282832', 2.5
+      centerX + Math.cos(a) * inner, cY + Math.sin(a) * inner,
+      centerX + Math.cos(a) * outer, cY + Math.sin(a) * outer,
+      '#3a3a3a', 1.5
     );
+  }
+  // Ghost hands (past loops)
+  for (let i = 0; i < 6; i++) {
+    const a = (i/6) * Math.PI * 2 - Math.PI/2 + gameTime * 0.1;
+    ctx.save();
+    ctx.globalAlpha = 0.12;
+    wobblyLine(centerX, cY, centerX + Math.cos(a) * 38*scale, cY + Math.sin(a) * 38*scale, '#3a3a3a', 2);
     ctx.restore();
   }
+  // Current second hand (red)
+  const sa = ((Date.now() / 1000) % 60 / 60) * Math.PI * 2 - Math.PI/2;
+  wobblyLine(centerX, cY, centerX + Math.cos(sa) * 42*scale, cY + Math.sin(sa) * 42*scale, '#b33', 2.5);
+  // Center dot
+  wobblyCircle(centerX, cY, 3*scale, '#b33', '#b33', 1);
   
-  // Current moment (red hand)
-  const currentAngle = (Date.now() / 1000) % 60 / 60 * Math.PI * 2 - Math.PI / 2;
-  wobblyLine(
-    centerX, clockCenterY,
-    centerX + Math.cos(currentAngle) * 50 * scale,
-    clockCenterY + Math.sin(currentAngle) * 50 * scale,
-    '#b40000', 3
-  );
-  
-  // Tap prompt
-  const pulse = Math.sin(gameTime * 3) * 0.2 + 0.8;
+  // Pulse prompt
+  const pulse = 0.4 + Math.sin(gameTime * 2.5) * 0.3;
   ctx.save();
   ctx.globalAlpha = pulse;
-  drawText('TAP TO WAKE UP', centerX, H - 80 * scale, 18, '#282832');
+  drawText('TAP TO WAKE UP', centerX, H - 70*scale, 16, '#2a2a2a');
   ctx.restore();
   
-  // Stats if replaying
+  // Stats
   if (loopNumber > 1 || totalDeaths > 0) {
-    drawText(`Loop ${loopNumber} | Deaths: ${totalDeaths}`, centerX, H - 50 * scale, 12, '#646464');
-    drawText(`Discoveries: ${discoveries.length}`, centerX, H - 30 * scale, 12, '#646464');
+    drawText(`Loop ${loopNumber} · Deaths: ${totalDeaths} · Discoveries: ${discoveries.length}`, centerX, H - 40*scale, 10, '#999');
+  }
+  
+  drawVignette(0.25);
+}
+
+// ============================================================
+// WAKING TRANSITION
+// ============================================================
+function startWaking() {
+  gameState = 'waking';
+  wakeProgress = 0;
+  wakePhase = 0;
+  sfxWakeUp();
+  startDrone();
+}
+
+function updateWaking() {
+  wakeProgress += deltaTime * 0.5; // 2 seconds to wake
+  
+  if (wakeProgress < 0.3) {
+    wakePhase = 0; // Black
+  } else if (wakeProgress < 0.7) {
+    wakePhase = 1; // Blurry/bright
+  } else {
+    wakePhase = 2; // Clearing
+  }
+  
+  if (wakeProgress >= 1) {
+    gameState = 'playing';
+    loopTimer = 60;
+    lastTickSec = -1;
+  }
+  
+  // Allow skip
+  for (const ev of inputEvents) {
+    if (ev.type === 'tap' && wakeProgress > 0.3) {
+      gameState = 'playing';
+      loopTimer = 60;
+      lastTickSec = -1;
+    }
   }
 }
 
-// --- PLAYING ---
+function drawWaking() {
+  const t = wakeProgress;
+  
+  if (t < 0.3) {
+    // Black with faint text
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(0, 0, W, H);
+    ctx.save();
+    ctx.globalAlpha = t * 2;
+    drawText('...', centerX, centerY, 20, '#666');
+    ctx.restore();
+  } else if (t < 0.7) {
+    // Bright blur fading to room
+    const p = (t - 0.3) / 0.4;
+    drawPaperBg();
+    // Overexposed white fading out
+    ctx.save();
+    ctx.fillStyle = `rgba(255,255,255,${1 - p})`;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+    // Blurry text
+    ctx.save();
+    ctx.globalAlpha = p * 0.5;
+    drawText('You wake up.', centerX, centerY - 20*scale, 18, '#2a2a2a');
+    if (loopNumber > 1) {
+      drawText('Again.', centerX, centerY + 15*scale, 16, '#b33');
+    }
+    ctx.restore();
+  } else {
+    const p = (t - 0.7) / 0.3;
+    drawPaperBg();
+    ctx.save();
+    ctx.globalAlpha = p;
+    drawPlayingRoom();
+    ctx.restore();
+    // Text fading
+    ctx.save();
+    ctx.globalAlpha = 1 - p;
+    drawText('You wake up.', centerX, centerY - 20*scale, 18, '#2a2a2a');
+    if (loopNumber > 1) drawText('Again.', centerX, centerY + 15*scale, 16, '#b33');
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// PLAYING STATE
+// ============================================================
 function updatePlaying() {
-  // Timer countdown
   loopTimer -= deltaTime;
+  tickClock();
+  interactCooldown -= deltaTime;
+  
   if (loopTimer <= 0) {
     loopTimer = 0;
+    sfxDeath();
     die('Time ran out. Again.');
     return;
   }
   
-  // Urgency at low time
-  if (loopTimer < 10 && Math.floor(loopTimer) !== Math.floor(loopTimer + deltaTime)) {
-    shake(2);
+  // Urgency shake
+  if (loopTimer < 10 && loopTimer > 0) {
+    if (Math.random() < deltaTime * 2) shake(1.5);
+    flickerAmount = Math.max(0, (10 - loopTimer) / 10 * 0.15);
+  } else {
+    flickerAmount *= 0.95;
   }
   
-  // Check hover
+  // Notification timer
+  if (notifTimer > 0) notifTimer -= deltaTime;
+  
+  // Determine hover
   currentHover = null;
-  const mx = dragState.x || centerX;
-  const my = dragState.y || centerY;
-  
-  // Interactive objects
-  const roomY = centerY - 60 * scale;
-  
-  // Clock (top center)
-  const clockX = centerX;
-  const clockY = roomY - 80 * scale;
-  if (hitTest(mx, my, clockX, clockY, 70 * scale, 70 * scale)) {
-    currentHover = 'clock';
-  }
-  
-  // Drawer (left)
-  const drawerX = centerX - 120 * scale;
-  const drawerY = roomY + 40 * scale;
-  if (hitTest(mx, my, drawerX, drawerY, 60 * scale, 40 * scale)) {
-    currentHover = 'drawer';
-  }
-  
-  // Mirror (right)
-  const mirrorX = centerX + 120 * scale;
-  const mirrorY = roomY;
-  if (hitTest(mx, my, mirrorX, mirrorY, 50 * scale, 80 * scale)) {
-    currentHover = 'mirror';
-  }
-  
-  // Door (center bottom)
-  const doorX = centerX;
-  const doorY = roomY + 110 * scale;
-  if (hitTest(mx, my, doorX, doorY, 70 * scale, 100 * scale)) {
-    currentHover = 'door';
-  }
-  
-  // Window (top right)
-  const windowX = centerX + 130 * scale;
-  const windowY = roomY - 80 * scale;
-  if (hitTest(mx, my, windowX, windowY, 50 * scale, 50 * scale)) {
-    currentHover = 'window';
-  }
-  
-  // Bed (bottom left)
-  const bedX = centerX - 110 * scale;
-  const bedY = roomY + 100 * scale;
-  if (hitTest(mx, my, bedX, bedY, 60 * scale, 40 * scale)) {
-    currentHover = 'bed';
-  }
-  
-  // Hidden note (only visible if hinted)
-  const noteX = centerX - 60 * scale;
-  const noteY = roomY + 130 * scale;
-  const noteVisible = totalDeaths >= 3 || objectStates.noteFound;
-  if (noteVisible && hitTest(mx, my, noteX, noteY, 30 * scale, 20 * scale)) {
-    currentHover = 'note';
-  }
-  
-  // Journal button (top right corner)
-  const journalBtnX = W - 50 * scale;
-  const journalBtnY = 40 * scale;
-  if (hitTest(mx, my, journalBtnX, journalBtnY, 80 * scale, 30 * scale)) {
-    currentHover = 'journal';
+  const objs = getObjects();
+  for (const [name, o] of Object.entries(objs)) {
+    if (name === 'room') continue;
+    if (name === 'note') {
+      const noteVisible = totalDeaths >= 3 || objectStates.noteFound;
+      if (!noteVisible) continue;
+    }
+    if (hitTest(mouseX, mouseY, o.x, o.y, o.w, o.h)) {
+      currentHover = name;
+    }
   }
   
   // Handle taps
   for (const ev of inputEvents) {
-    if (ev.type === 'tap') {
-      sfxClick();
-      
-      // Journal button
-      if (currentHover === 'journal') {
-        gameState = 'journal';
-        sfxPageFlip();
+    if (ev.type !== 'tap' || interactCooldown > 0) continue;
+    
+    // Re-check hover at tap position
+    let tapped = null;
+    for (const [name, o] of Object.entries(objs)) {
+      if (name === 'room') continue;
+      if (name === 'note' && !(totalDeaths >= 3 || objectStates.noteFound)) continue;
+      if (hitTest(ev.x, ev.y, o.x, o.y, o.w, o.h)) tapped = name;
+    }
+    
+    if (!tapped) continue;
+    sfxClick();
+    interactCooldown = 0.3;
+    objectPulse[tapped] = 1;
+    
+    if (tapped === 'journal') {
+      sfxPageFlip();
+      gameState = 'journal';
+      return;
+    }
+    
+    if (tapped === 'clock') {
+      if (!objectStates.clockExamined) {
+        addDiscovery('The clock stopped at 3:47. Always 3:47.', 'observation');
+        objectStates.clockExamined = true;
+        solutionStep = Math.max(solutionStep, 1);
+      } else {
+        addDiscovery('Tapping the clock changes nothing.', 'observation');
+      }
+    }
+    
+    if (tapped === 'drawer') {
+      if (!objectStates.drawerOpened) {
+        if (objectStates.clockExamined) {
+          sfxUnlock();
+          addDiscovery('Used 3:47 to open the drawer. Found a KEY.', 'key');
+          objectStates.drawerOpened = true;
+          solutionStep = Math.max(solutionStep, 2);
+          shake(4);
+          spawnParticles(objs.drawer.x, objs.drawer.y, 15, '#da2', { size: 0.8 });
+        } else {
+          addDiscovery('The drawer is locked. Needs a code.', 'observation');
+          shake(2);
+        }
+      } else {
+        addDiscovery('Drawer is empty. Key is with me.', 'observation');
+      }
+    }
+    
+    if (tapped === 'mirror') {
+      if (!objectStates.mirrorExamined) {
+        addDiscovery('My reflection blinks when I don\'t.', 'warning');
+        objectStates.mirrorExamined = true;
+        solutionStep = Math.max(solutionStep, 3);
+        shake(6);
+      } else {
+        shake(15);
+        die('The reflection smiled. You shouldn\'t have looked again.');
         return;
       }
-      
-      // Clock
-      if (currentHover === 'clock') {
-        if (!objectStates.clockExamined) {
-          addDiscovery('The clock stopped at 3:47. Always 3:47.', 'observation');
-          objectStates.clockExamined = true;
-          solutionStep = Math.max(solutionStep, 1);
+    }
+    
+    if (tapped === 'door') {
+      if (!objectStates.doorUnlocked) {
+        if (objectStates.drawerOpened) {
+          sfxUnlock();
+          addDiscovery('The key fits! Door UNLOCKED.', 'key');
+          objectStates.doorUnlocked = true;
+          solutionStep = Math.max(solutionStep, 4);
+          shake(5);
+          spawnParticles(objs.door.x, objs.door.y, 20, '#4a4', { rise: true });
         } else {
-          addDiscovery('Tapping the clock changes nothing.', 'observation');
+          addDiscovery('The door is locked. Needs a key.', 'observation');
+          sfxCreak();
+          shake(2);
         }
-      }
-      
-      // Drawer
-      if (currentHover === 'drawer') {
-        if (!objectStates.drawerOpened) {
-          // Needs clock time as combination
-          if (objectStates.clockExamined) {
-            sfxUnlock();
-            addDiscovery('Used 3:47 to unlock the drawer. Found a KEY.', 'key');
-            objectStates.drawerOpened = true;
-            solutionStep = Math.max(solutionStep, 2);
-            spawnParticles(drawerX, drawerY, 15, '#ffd700');
-          } else {
-            addDiscovery('The drawer is locked. Needs a 4-digit code.', 'observation');
-          }
-        } else {
-          addDiscovery('Drawer is empty now. The key is with me.', 'observation');
-        }
-      }
-      
-      // Mirror
-      if (currentHover === 'mirror') {
-        if (!objectStates.mirrorExamined) {
-          addDiscovery('My reflection blinks when I don\'t. WRONG.', 'warning');
-          objectStates.mirrorExamined = true;
-          solutionStep = Math.max(solutionStep, 3);
-        } else {
-          // Looking too long = death
-          shake(15);
-          die('The reflection smiled. You shouldn\'t have looked again.');
+      } else {
+        if (objectStates.noteFound && objectStates.windowExamined) {
+          gameState = 'victory';
+          sfxUnlock();
+          spawnParticles(centerX, centerY, 40, '#da2', { speed: 1.5, size: 1.2 });
           return;
+        } else {
+          addDiscovery('Door is open but... something\'s missing.', 'warning');
         }
       }
-      
-      // Door
-      if (currentHover === 'door') {
-        if (!objectStates.doorUnlocked) {
-          if (objectStates.drawerOpened) {
-            sfxUnlock();
-            addDiscovery('The key fits! The door is UNLOCKED.', 'key');
-            objectStates.doorUnlocked = true;
-            solutionStep = Math.max(solutionStep, 4);
-            spawnParticles(doorX, doorY, 20, '#44ff44');
-          } else {
-            addDiscovery('The door is locked. Needs a key.', 'observation');
-          }
-        } else {
-          // Door unlocked but need final discovery
-          if (objectStates.noteFound && objectStates.windowExamined) {
-            // VICTORY!
-            sfxUnlock();
-            gameState = 'victory';
-            return;
-          } else {
-            addDiscovery('Door is unlocked but something feels wrong...', 'warning');
-          }
-        }
+    }
+    
+    if (tapped === 'window') {
+      if (!objectStates.windowExamined) {
+        addDiscovery('The window is painted on. It\'s not real.', 'observation');
+        objectStates.windowExamined = true;
+        solutionStep = Math.max(solutionStep, 5);
+      } else {
+        addDiscovery('Still fake. Still a lie.', 'observation');
       }
-      
-      // Window
-      if (currentHover === 'window') {
-        if (!objectStates.windowExamined) {
-          const hour = new Date().getHours();
-          if (hour >= 6 && hour < 12) {
-            addDiscovery('Morning light. The window shows... a brick wall?', 'observation');
-          } else if (hour >= 12 && hour < 18) {
-            addDiscovery('Afternoon sun. But the window is painted.', 'observation');
-          } else if (hour >= 18 && hour < 22) {
-            addDiscovery('Evening glow. The window is FAKE.', 'observation');
-          } else {
-            addDiscovery('Night outside. Or is it? The window isn\'t real.', 'observation');
-          }
-          objectStates.windowExamined = true;
-          solutionStep = Math.max(solutionStep, 5);
-        } else {
-          addDiscovery('Still fake. Still a lie.', 'observation');
-        }
+    }
+    
+    if (tapped === 'bed') {
+      if (!objectStates.bedExamined) {
+        addDiscovery('The bed I wake in. Sheets smell like dread.', 'observation');
+        objectStates.bedExamined = true;
+      } else {
+        die('You closed your eyes. It starts again.');
+        return;
       }
-      
-      // Bed
-      if (currentHover === 'bed') {
-        if (!objectStates.bedExamined) {
-          addDiscovery('The bed I wake in. Sheets smell like coffee.', 'observation');
-          objectStates.bedExamined = true;
-        } else {
-          // Going back to bed = loop reset
-          addDiscovery('Going back to sleep feels like giving up.', 'observation');
-          die('You closed your eyes. It starts again.');
-          return;
-        }
-      }
-      
-      // Hidden note
-      if (currentHover === 'note' && noteVisible) {
-        if (!objectStates.noteFound) {
-          addDiscovery('Found a note: "Don\'t trust the mirror. Trust the time."', 'key');
-          objectStates.noteFound = true;
-          solutionStep = Math.max(solutionStep, 5);
-          spawnParticles(noteX, noteY, 12, '#44ff44');
-        } else {
-          addDiscovery('The note is fading. Like everything else.', 'observation');
-        }
+    }
+    
+    if (tapped === 'note') {
+      if (!objectStates.noteFound) {
+        addDiscovery('"Don\'t trust the mirror. Trust the time."', 'key');
+        objectStates.noteFound = true;
+        solutionStep = Math.max(solutionStep, 5);
+        shake(3);
+        spawnParticles(objs.note.x, objs.note.y, 10, '#4a4', { size: 0.6 });
+      } else {
+        addDiscovery('The note is fading. Like everything.', 'observation');
       }
     }
   }
 }
 
-function drawPlaying() {
-  drawPaperBackground();
+function drawPlayingRoom() {
+  const objs = getObjects();
+  const room = objs.room;
   
-  // Coffee stains
-  drawCoffeeStain(W * 0.15, H * 0.25, 30);
-  drawCoffeeStain(W * 0.8, H * 0.7, 25);
+  // Shadow under room
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.05)';
+  ctx.fillRect(room.x + 4*scale, room.y + 4*scale, room.w, room.h);
+  ctx.restore();
   
-  const roomY = centerY - 60 * scale;
-  
-  // Room outline (walls)
-  const roomW = 280 * scale;
-  const roomH = 240 * scale;
-  const roomX = centerX - roomW/2;
-  const roomYStart = roomY - 120 * scale;
-  
-  wobblyRect(roomX, roomYStart, roomW, roomH, '#282832', null, 2.5);
+  // Room walls
+  wobblyRect(room.x, room.y, room.w, room.h, '#3a3a3a', null, 2.5);
   
   // Floor line
-  wobblyLine(roomX, roomYStart + roomH - 40*scale, roomX + roomW, roomYStart + roomH - 40*scale, '#282832', 2);
+  const floorY = room.y + room.h - 35 * scale;
+  wobblyLine(room.x, floorY, room.x + room.w, floorY, '#3a3a3a', 1.5);
   
-  // Clock (top center)
-  const clockX = centerX;
-  const clockY = roomY - 80 * scale;
-  wobblyCircle(clockX, clockY, 30 * scale, currentHover === 'clock' ? '#b40000' : '#282832', null, currentHover === 'clock' ? 3 : 2);
-  // Clock hands stuck at 3:47
-  wobblyLine(clockX, clockY, clockX + 20 * scale, clockY, '#282832', 2); // hour
-  wobblyLine(clockX, clockY, clockX - 5 * scale, clockY - 25 * scale, '#282832', 1.5); // minute
-  drawText('3:47', clockX, clockY + 50 * scale, 10, '#646464');
+  // Floor boards
+  for (let i = 1; i < 5; i++) {
+    const fx = room.x + (room.w / 5) * i;
+    wobblyLine(fx, floorY, fx, room.y + room.h, 'rgba(58,58,58,0.3)', 0.8);
+  }
   
-  // Drawer (left)
-  const drawerX = centerX - 120 * scale;
-  const drawerY = roomY + 40 * scale;
-  wobblyRect(drawerX - 25*scale, drawerY - 15*scale, 50*scale, 30*scale, 
-    currentHover === 'drawer' ? '#b40000' : '#282832',
-    objectStates.drawerOpened ? '#ddd' : '#aaa', 
-    currentHover === 'drawer' ? 3 : 2);
-  wobblyCircle(drawerX, drawerY, 3*scale, '#282832', '#282832', 1);
+  // --- CLOCK ---
+  const c = objs.clock;
+  const cGlow = objectPulse.clock || 0;
+  if (cGlow > 0) objectPulse.clock *= 0.92;
+  const cHover = currentHover === 'clock';
+  const cColor = cHover ? '#b33' : '#3a3a3a';
+  
+  if (cGlow > 0.1) {
+    ctx.save();
+    ctx.shadowColor = '#fff';
+    ctx.shadowBlur = cGlow * 20;
+    ctx.restore();
+  }
+  wobblyCircle(c.x, c.y, 28*scale, cColor, 'rgba(255,252,240,0.5)', cHover ? 2.5 : 1.8);
+  // Hour marks
+  for (let i = 0; i < 12; i++) {
+    const a = (i/12) * Math.PI * 2 - Math.PI/2;
+    const r1 = 22*scale, r2 = 25*scale;
+    ctx.save();
+    ctx.strokeStyle = cColor;
+    ctx.lineWidth = (i % 3 === 0 ? 1.5 : 0.8) * scale;
+    ctx.beginPath();
+    ctx.moveTo(c.x + Math.cos(a)*r1, c.y + Math.sin(a)*r1);
+    ctx.lineTo(c.x + Math.cos(a)*r2, c.y + Math.sin(a)*r2);
+    ctx.stroke();
+    ctx.restore();
+  }
+  // Hands stuck at 3:47
+  // Hour hand at ~3:47 = angle 3.783/12 * 360
+  const hourA = (3 + 47/60) / 12 * Math.PI * 2 - Math.PI/2;
+  wobblyLine(c.x, c.y, c.x + Math.cos(hourA)*15*scale, c.y + Math.sin(hourA)*15*scale, cColor, 2.2);
+  // Minute hand at 47/60
+  const minA = 47/60 * Math.PI * 2 - Math.PI/2;
+  wobblyLine(c.x, c.y, c.x + Math.cos(minA)*22*scale, c.y + Math.sin(minA)*22*scale, cColor, 1.5);
+  // Center dot
+  ctx.fillStyle = cColor;
+  ctx.beginPath();
+  ctx.arc(c.x, c.y, 2*scale, 0, Math.PI*2);
+  ctx.fill();
+  
+  if (objectStates.clockExamined) {
+    drawText('3:47', c.x, c.y + 38*scale, 8, '#999');
+  }
+  
+  // --- WINDOW ---
+  const w = objs.window;
+  const wHover = currentHover === 'window';
+  const wColor = wHover ? '#b33' : '#3a3a3a';
+  const wFill = objectStates.windowExamined ? 'rgba(139,90,43,0.3)' : 'rgba(160,200,230,0.25)';
+  wobblyRect(w.x - w.w/2, w.y - w.h/2, w.w, w.h, wColor, wFill, wHover ? 2.5 : 1.5);
+  // Panes
+  wobblyLine(w.x, w.y - w.h/2, w.x, w.y + w.h/2, wColor, 0.8);
+  wobblyLine(w.x - w.w/2, w.y, w.x + w.w/2, w.y, wColor, 0.8);
+  if (objectStates.windowExamined) {
+    drawText('FAKE', w.x, w.y, 7, '#b33');
+  }
+  
+  // --- MIRROR ---
+  const m = objs.mirror;
+  const mHover = currentHover === 'mirror';
+  const mColor = mHover ? '#b33' : '#3a3a3a';
+  wobblyRect(m.x - m.w/2, m.y - m.h/2, m.w, m.h, mColor, 'rgba(190,210,225,0.25)', mHover ? 2.5 : 1.5);
+  // Reflection lines
+  for (let i = 0; i < 4; i++) {
+    const ly = m.y - m.h/2 + 8*scale + i * 15*scale;
+    ctx.save();
+    ctx.globalAlpha = 0.15;
+    wobblyLine(m.x - m.w/2 + 5*scale, ly, m.x + m.w/2 - 5*scale, ly, '#3a3a3a', 0.5);
+    ctx.restore();
+  }
+  if (objectStates.mirrorExamined) {
+    // Creepy eye
+    ctx.save();
+    ctx.globalAlpha = 0.3 + Math.sin(gameTime * 3) * 0.1;
+    ctx.fillStyle = '#b33';
+    ctx.beginPath();
+    ctx.arc(m.x, m.y - 5*scale, 3*scale, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+  
+  // --- DRAWER ---
+  const d = objs.drawer;
+  const dHover = currentHover === 'drawer';
+  const dColor = dHover ? '#b33' : '#3a3a3a';
+  const dFill = objectStates.drawerOpened ? '#ddd' : '#aaa';
+  wobblyRect(d.x - d.w/2, d.y - d.h/2, d.w, d.h, dColor, dFill, dHover ? 2.5 : 1.5);
+  // Knob
+  wobblyCircle(d.x, d.y, 3*scale, dColor, dColor, 1);
   if (objectStates.drawerOpened) {
-    drawText('(open)', drawerX, drawerY + 25*scale, 8, '#44aa44');
+    drawText('✓', d.x, d.y - 22*scale, 10, '#4a4');
   }
   
-  // Mirror (right)
-  const mirrorX = centerX + 120 * scale;
-  const mirrorY = roomY;
-  wobblyRect(mirrorX - 20*scale, mirrorY - 35*scale, 40*scale, 70*scale,
-    currentHover === 'mirror' ? '#b40000' : '#282832',
-    'rgba(200,220,240,0.3)',
-    currentHover === 'mirror' ? 3 : 2);
-  // Crosshatch reflection
-  for (let i = 0; i < 5; i++) {
-    const ly = mirrorY - 30*scale + i * 15*scale;
-    wobblyLine(mirrorX - 15*scale, ly, mirrorX + 15*scale, ly, 'rgba(40,40,50,0.2)', 0.5);
+  // --- BED ---
+  const b = objs.bed;
+  const bHover = currentHover === 'bed';
+  const bColor = bHover ? '#b33' : '#654321';
+  wobblyRect(b.x - b.w/2, b.y - b.h/2, b.w, b.h, bColor, '#8B7355', bHover ? 2.5 : 1.5);
+  // Pillow
+  wobblyRect(b.x - b.w/2 + 3*scale, b.y - b.h/2 + 3*scale, b.w * 0.35, b.h * 0.6, bColor, '#c4a97d', 0.8);
+  // Blanket lines
+  for (let i = 0; i < 3; i++) {
+    const lx = b.x - b.w/2 + b.w * 0.4 + i * 10*scale;
+    wobblyLine(lx, b.y - b.h/2 + 5*scale, lx, b.y + b.h/2 - 5*scale, 'rgba(100,67,33,0.3)', 0.5);
   }
   
-  // Door (center bottom)
-  const doorX = centerX;
-  const doorY = roomY + 110 * scale;
-  wobblyRect(doorX - 30*scale, doorY - 45*scale, 60*scale, 90*scale,
-    currentHover === 'door' ? '#b40000' : '#8B4513',
-    '#a0522d',
-    currentHover === 'door' ? 3 : 2.5);
-  wobblyCircle(doorX + 20*scale, doorY, 4*scale, '#DAA520', objectStates.doorUnlocked ? '#44ff44' : '#DAA520', 1.5);
+  // --- DOOR ---
+  const dr = objs.door;
+  const drHover = currentHover === 'door';
+  const drColor = drHover ? '#b33' : '#8B4513';
+  wobblyRect(dr.x - dr.w/2, dr.y - dr.h/2, dr.w, dr.h, drColor, '#a0522d', drHover ? 3 : 2);
+  // Wood grain
+  for (let i = 0; i < 3; i++) {
+    const lx = dr.x - dr.w/2 + 10*scale + i * 15*scale;
+    ctx.save(); ctx.globalAlpha = 0.2;
+    wobblyLine(lx, dr.y - dr.h/2 + 5*scale, lx, dr.y + dr.h/2 - 5*scale, '#654321', 0.5);
+    ctx.restore();
+  }
+  // Knob
+  const knobColor = objectStates.doorUnlocked ? '#4a4' : '#DAA520';
+  wobblyCircle(dr.x + 18*scale, dr.y, 4*scale, knobColor, knobColor, 1.5);
   if (objectStates.doorUnlocked) {
-    drawText('UNLOCKED', doorX, doorY + 55*scale, 9, '#44aa44');
+    // Door slightly ajar - gap
+    ctx.save();
+    ctx.fillStyle = '#222';
+    ctx.fillRect(dr.x - dr.w/2 - 2*scale, dr.y - dr.h/2, 4*scale, dr.h);
+    ctx.restore();
+    drawText('OPEN', dr.x, dr.y + dr.h/2 + 12*scale, 8, '#4a4');
   }
   
-  // Window (top right)
-  const windowX = centerX + 130 * scale;
-  const windowY = roomY - 80 * scale;
-  wobblyRect(windowX - 20*scale, windowY - 20*scale, 40*scale, 40*scale,
-    currentHover === 'window' ? '#b40000' : '#282832',
-    objectStates.windowExamined ? 'rgba(100,50,30,0.5)' : 'rgba(135,206,235,0.3)',
-    currentHover === 'window' ? 3 : 2);
-  // Window panes
-  wobblyLine(windowX, windowY - 20*scale, windowX, windowY + 20*scale, '#282832', 1);
-  wobblyLine(windowX - 20*scale, windowY, windowX + 20*scale, windowY, '#282832', 1);
-  
-  // Bed (bottom left)
-  const bedX = centerX - 110 * scale;
-  const bedY = roomY + 100 * scale;
-  wobblyRect(bedX - 25*scale, bedY - 15*scale, 50*scale, 30*scale,
-    currentHover === 'bed' ? '#b40000' : '#654321',
-    '#8B7355',
-    currentHover === 'bed' ? 3 : 2);
-  drawText('BED', bedX, bedY, 8, '#ddd');
-  
-  // Hidden note (only visible after deaths)
-  const noteX = centerX - 60 * scale;
-  const noteY = roomY + 130 * scale;
+  // --- NOTE (hidden) ---
   const noteVisible = totalDeaths >= 3 || objectStates.noteFound;
   if (noteVisible) {
-    const noteAlpha = objectStates.noteFound ? 1 : 0.3 + totalDeaths * 0.1;
+    const n = objs.note;
+    const nAlpha = objectStates.noteFound ? 0.9 : Math.min(0.6, 0.2 + totalDeaths * 0.08);
     ctx.save();
-    ctx.globalAlpha = Math.min(1, noteAlpha);
-    wobblyRect(noteX - 12*scale, noteY - 8*scale, 24*scale, 16*scale,
-      currentHover === 'note' ? '#b40000' : '#fffd96',
-      '#fffd96',
-      currentHover === 'note' ? 2.5 : 1.5);
-    drawText('?', noteX, noteY, 10, '#282832');
-    ctx.restore();
-  }
-  
-  // UI Elements
-  // Timer (bottom center)
-  const timerY = H - 60 * scale;
-  const urgency = loopTimer < 10;
-  const timerColor = urgency ? '#b40000' : '#282832';
-  const timerSize = urgency ? 28 : 24;
-  drawText(`${Math.ceil(loopTimer)}s`, centerX, timerY, timerSize, timerColor);
-  
-  // Loop counter (top left)
-  drawText(`Loop ${loopNumber}`, 60 * scale, 30 * scale, 12, '#646464', 'left');
-  
-  // Death counter (top left, second line)
-  drawText(`💀 ${totalDeaths}`, 60 * scale, 50 * scale, 11, '#646464', 'left');
-  
-  // Journal button (top right)
-  const journalBtnX = W - 50 * scale;
-  const journalBtnY = 40 * scale;
-  wobblyRect(journalBtnX - 35*scale, journalBtnY - 12*scale, 70*scale, 24*scale,
-    currentHover === 'journal' ? '#b40000' : '#282832',
-    '#f5ebd7',
-    currentHover === 'journal' ? 2.5 : 1.5);
-  drawText('JOURNAL', journalBtnX, journalBtnY, 10, '#282832');
-  
-  // Discoveries badge
-  if (discoveries.length > 0) {
-    wobblyCircle(journalBtnX + 30*scale, journalBtnY - 8*scale, 8*scale, '#b40000', '#b40000', 1);
-    ctx.save();
-    ctx.fillStyle = '#fff';
-    ctx.font = `bold ${8 * scale}px monospace`;
-    ctx.textAlign = 'center';
-    ctx.fillText(discoveries.length, journalBtnX + 30*scale, journalBtnY - 8*scale + 1*scale);
-    ctx.restore();
-  }
-  
-  // Hover tooltip
-  if (currentHover && currentHover !== 'journal') {
-    const tooltips = {
-      clock: 'Examine clock',
-      drawer: objectStates.drawerOpened ? 'Empty drawer' : 'Locked drawer',
-      mirror: 'Look in mirror',
-      door: objectStates.doorUnlocked ? 'Unlocked door' : 'Locked door',
-      window: 'Look outside',
-      bed: 'Your bed',
-      note: 'Hidden note'
-    };
-    const tooltip = tooltips[currentHover] || '';
-    const ttX = dragState.x || centerX;
-    const ttY = (dragState.y || centerY) - 40 * scale;
-    
-    // Tooltip background
-    ctx.save();
-    const ttW = ctx.measureText(tooltip).width + 16 * scale;
-    ctx.fillStyle = 'rgba(40, 40, 50, 0.9)';
-    ctx.fillRect(ttX - ttW/2, ttY - 12*scale, ttW, 20*scale);
-    ctx.fillStyle = '#fff';
-    ctx.font = `${10 * scale}px monospace`;
-    ctx.textAlign = 'center';
-    ctx.fillText(tooltip, ttX, ttY);
-    ctx.restore();
-  }
-  
-  // Progressive hints based on deaths
-  if (totalDeaths >= 5 && solutionStep < 2) {
-    const hintAlpha = 0.3 + Math.sin(gameTime * 2) * 0.2;
-    ctx.save();
-    ctx.globalAlpha = hintAlpha;
-    drawText('↑ Try the clock time on the drawer', centerX, H - 100*scale, 10, '#44aa44');
-    ctx.restore();
-  }
-  
-  if (totalDeaths >= 8 && !objectStates.noteFound) {
-    const hintAlpha = 0.4 + Math.sin(gameTime * 2) * 0.2;
-    ctx.save();
-    ctx.globalAlpha = hintAlpha;
-    drawText('↙ Something hidden below...', centerX, roomY + 90*scale, 9, '#44aa44');
+    ctx.globalAlpha = nAlpha;
+    const nHover = currentHover === 'note';
+    wobblyRect(n.x - n.w/2, n.y - n.h/2, n.w, n.h,
+      nHover ? '#b33' : '#c4a97d', '#fffd96', nHover ? 2 : 1);
+    drawText('?', n.x, n.y, 9, '#654321');
     ctx.restore();
   }
 }
 
-// --- JOURNAL VIEW ---
-let journalScroll = 0;
+function drawPlaying() {
+  drawPaperBg();
+  drawCoffeeStain(W * 0.12, H * 0.25, 25);
+  drawCoffeeStain(W * 0.85, H * 0.65, 20);
+  
+  drawPlayingRoom();
+  
+  // --- UI ---
+  // Timer
+  const timerY = H - 50 * scale;
+  const urgent = loopTimer < 10;
+  const timerColor = urgent ? '#b33' : '#3a3a3a';
+  const timerSz = urgent ? 26 + Math.sin(gameTime * 6) * 2 : 22;
+  drawTextBold(`${Math.ceil(loopTimer)}`, centerX, timerY, timerSz, timerColor);
+  
+  // Timer bar
+  const barW = 200 * scale, barH = 4 * scale;
+  const barX = centerX - barW/2, barY = timerY + 18*scale;
+  ctx.fillStyle = 'rgba(0,0,0,0.1)';
+  ctx.fillRect(barX, barY, barW, barH);
+  const frac = Math.max(0, loopTimer / 60);
+  const barColor = urgent ? '#b33' : frac > 0.5 ? '#6a6' : '#da5';
+  ctx.fillStyle = barColor;
+  ctx.fillRect(barX, barY, barW * frac, barH);
+  
+  // Loop counter
+  drawText(`Loop ${loopNumber}`, 55*scale, 25*scale, 11, '#888', 'left');
+  drawText(`💀 ${totalDeaths}`, 55*scale, 43*scale, 10, '#888', 'left');
+  
+  // Journal button
+  const jb = getObjects().journal;
+  const jHover = currentHover === 'journal';
+  wobblyRect(jb.x - jb.w/2, jb.y - jb.h/2, jb.w, jb.h,
+    jHover ? '#b33' : '#3a3a3a', '#f0e4cc', jHover ? 2 : 1.2);
+  drawText('JOURNAL', jb.x, jb.y, 9, '#3a3a3a');
+  // Badge
+  if (discoveries.length > 0) {
+    const bx = jb.x + jb.w/2 - 5*scale, by = jb.y - jb.h/2 + 2*scale;
+    ctx.save();
+    ctx.fillStyle = '#b33';
+    ctx.beginPath(); ctx.arc(bx, by, 7*scale, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${7*scale}px monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(discoveries.length, bx, by + 0.5*scale);
+    ctx.restore();
+  }
+  
+  // Tooltip
+  if (currentHover && currentHover !== 'journal') {
+    const tips = {
+      clock: 'Examine the clock',
+      drawer: objectStates.drawerOpened ? 'Empty drawer' : 'Locked drawer',
+      mirror: objectStates.mirrorExamined ? '⚠ Don\'t look again' : 'Look in mirror',
+      door: objectStates.doorUnlocked ? 'Try to leave' : 'Locked door',
+      window: 'Look outside',
+      bed: objectStates.bedExamined ? 'Go back to sleep?' : 'Your bed',
+      note: 'A hidden note'
+    };
+    const tip = tips[currentHover];
+    if (tip) {
+      const tw = measureText(tip, 10) + 16*scale;
+      const tx = Math.min(W - tw/2 - 5, Math.max(tw/2 + 5, mouseX));
+      const ty = mouseY - 35 * scale;
+      
+      ctx.save();
+      ctx.fillStyle = 'rgba(42,42,42,0.85)';
+      const r = 4 * scale;
+      ctx.beginPath();
+      ctx.moveTo(tx - tw/2 + r, ty - 11*scale);
+      ctx.lineTo(tx + tw/2 - r, ty - 11*scale);
+      ctx.quadraticCurveTo(tx + tw/2, ty - 11*scale, tx + tw/2, ty - 11*scale + r);
+      ctx.lineTo(tx + tw/2, ty + 5*scale - r);
+      ctx.quadraticCurveTo(tx + tw/2, ty + 5*scale, tx + tw/2 - r, ty + 5*scale);
+      ctx.lineTo(tx - tw/2 + r, ty + 5*scale);
+      ctx.quadraticCurveTo(tx - tw/2, ty + 5*scale, tx - tw/2, ty + 5*scale - r);
+      ctx.lineTo(tx - tw/2, ty - 11*scale + r);
+      ctx.quadraticCurveTo(tx - tw/2, ty - 11*scale, tx - tw/2 + r, ty - 11*scale);
+      ctx.fill();
+      // Arrow
+      ctx.beginPath();
+      ctx.moveTo(tx - 5*scale, ty + 5*scale);
+      ctx.lineTo(tx, ty + 11*scale);
+      ctx.lineTo(tx + 5*scale, ty + 5*scale);
+      ctx.fill();
+      ctx.restore();
+      
+      drawText(tip, tx, ty - 3*scale, 10, '#eee');
+    }
+  }
+  
+  // Hints based on deaths
+  if (totalDeaths >= 5 && solutionStep < 2 && !objectStates.clockExamined) {
+    ctx.save();
+    ctx.globalAlpha = 0.3 + Math.sin(gameTime * 2) * 0.15;
+    drawText('Try examining the clock first...', centerX, H - 85*scale, 9, '#4a4');
+    ctx.restore();
+  }
+  if (totalDeaths >= 3 && objectStates.clockExamined && !objectStates.drawerOpened) {
+    ctx.save();
+    ctx.globalAlpha = 0.3 + Math.sin(gameTime * 2) * 0.15;
+    drawText('The clock time... and the drawer?', centerX, H - 85*scale, 9, '#4a4');
+    ctx.restore();
+  }
+  
+  // Discovery notification
+  if (notifTimer > 0) {
+    const nAlpha = notifTimer > 2.5 ? (3 - notifTimer) * 2 : notifTimer > 0.5 ? 1 : notifTimer * 2;
+    ctx.save();
+    ctx.globalAlpha = nAlpha * 0.95;
+    
+    const nY = 80 * scale;
+    const nW = Math.min(W - 40*scale, measureText(notifText, 11) + 30*scale);
+    const nH = 32 * scale;
+    const nX = centerX - nW/2;
+    
+    // Background
+    const nColor = notifCategory === 'key' ? 'rgba(40,80,40,0.9)' :
+                   notifCategory === 'warning' ? 'rgba(120,30,30,0.9)' : 'rgba(42,42,42,0.9)';
+    ctx.fillStyle = nColor;
+    ctx.beginPath();
+    const nr = 6*scale;
+    ctx.moveTo(nX + nr, nY); ctx.lineTo(nX + nW - nr, nY);
+    ctx.quadraticCurveTo(nX + nW, nY, nX + nW, nY + nr);
+    ctx.lineTo(nX + nW, nY + nH - nr);
+    ctx.quadraticCurveTo(nX + nW, nY + nH, nX + nW - nr, nY + nH);
+    ctx.lineTo(nX + nr, nY + nH);
+    ctx.quadraticCurveTo(nX, nY + nH, nX, nY + nH - nr);
+    ctx.lineTo(nX, nY + nr);
+    ctx.quadraticCurveTo(nX, nY, nX + nr, nY);
+    ctx.fill();
+    
+    // Icon
+    const icon = notifCategory === 'key' ? '🔑' : notifCategory === 'warning' ? '⚠️' : '📝';
+    drawText(icon, nX + 16*scale, nY + nH/2, 12, '#fff', 'center');
+    
+    // Text
+    drawText(notifText, centerX + 8*scale, nY + nH/2, 10, '#eee');
+    
+    ctx.restore();
+  }
+  
+  // Flicker overlay (urgency)
+  if (flickerAmount > 0.01) {
+    ctx.save();
+    ctx.globalAlpha = flickerAmount * (0.5 + Math.random() * 0.5);
+    ctx.fillStyle = '#b33';
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+  
+  drawVignette(0.3);
+}
+
+// ============================================================
+// JOURNAL
+// ============================================================
 function updateJournal() {
   for (const ev of inputEvents) {
     if (ev.type === 'tap') {
-      // Close button
-      const closeX = W - 40 * scale;
-      const closeY = 40 * scale;
-      if (hitTest(ev.x, ev.y, closeX, closeY, 50 * scale, 30 * scale)) {
+      const closeX = W - 40*scale, closeY = 35*scale;
+      if (hitTest(ev.x, ev.y, closeX, closeY, 60*scale, 28*scale)) {
         sfxPageFlip();
         gameState = 'playing';
         return;
@@ -928,276 +1172,296 @@ function updateJournal() {
 }
 
 function drawJournal() {
-  drawPaperBackground();
+  drawPaperBg();
   
-  // Spiral binding (left edge)
-  for (let i = 0; i < 15; i++) {
-    const y = 40 * scale + i * 40 * scale;
-    wobblyCircle(25 * scale, y, 8 * scale, '#646464', null, 1.5);
+  // Spiral holes
+  for (let i = 0; i < 12; i++) {
+    const y = 50*scale + i * 50*scale;
+    wobblyCircle(20*scale, y, 5*scale, '#aaa', null, 1);
   }
   
-  // Coffee stain
-  drawCoffeeStain(W * 0.7, H * 0.3, 50);
+  drawCoffeeStain(W * 0.7, H * 0.3, 40);
   
-  // Title
-  drawText(`LOOP ${loopNumber} JOURNAL`, centerX, 50 * scale, 20, '#282832');
-  drawText(`${totalDeaths} deaths | ${discoveries.length} discoveries`, centerX, 80 * scale, 11, '#646464');
+  drawTextBold(`JOURNAL — Loop ${loopNumber}`, centerX, 40*scale, 18, '#2a2a2a');
+  drawText(`${totalDeaths} deaths · ${discoveries.length} discoveries`, centerX, 65*scale, 10, '#999');
   
-  // Discoveries
-  let y = 120 * scale;
+  // Divider
+  wobblyLine(60*scale, 80*scale, W - 60*scale, 80*scale, '#ccc', 1);
+  
+  let y = 100 * scale;
   if (discoveries.length === 0) {
-    ctx.save();
-    ctx.globalAlpha = 0.5;
-    drawHandwritten('No discoveries yet.\nExplore the room.', 60 * scale, y, 14, '#646464', 'left');
+    ctx.save(); ctx.globalAlpha = 0.5;
+    ctx.font = `italic ${13*scale}px 'Courier New', monospace`;
+    ctx.fillStyle = '#888'; ctx.textAlign = 'left';
+    ctx.fillText('No discoveries yet.', 55*scale, y + 10*scale);
+    ctx.fillText('Explore the room...', 55*scale, y + 30*scale);
     ctx.restore();
   } else {
     for (let i = 0; i < discoveries.length; i++) {
+      if (y > H - 60*scale) break;
       const d = discoveries[i];
-      const color = d.category === 'warning' ? '#b40000' : 
-                    d.category === 'key' ? '#44aa44' : '#282832';
+      const color = d.category === 'warning' ? '#b33' : d.category === 'key' ? '#2a7a2a' : '#3a3a3a';
+      const icon = d.category === 'key' ? '🔑' : d.category === 'warning' ? '⚠️' : '•';
       
-      // Entry number
       ctx.save();
-      ctx.fillStyle = '#646464';
-      ctx.font = `${10 * scale}px monospace`;
-      ctx.textAlign = 'left';
-      ctx.fillText(`#${i+1}`, 55 * scale, y);
+      ctx.font = `${11*scale}px monospace`;
+      ctx.fillStyle = '#aaa'; ctx.textAlign = 'left';
+      ctx.fillText(icon, 45*scale, y + 5*scale);
       ctx.restore();
       
-      // Entry text (handwritten)
-      drawHandwritten(d.text, 80 * scale, y - 5 * scale, 12, color, 'left');
-      
-      // Loop number (faded)
+      // Wrap text
       ctx.save();
-      ctx.globalAlpha = 0.4;
-      ctx.fillStyle = '#646464';
-      ctx.font = `italic ${9 * scale}px monospace`;
-      ctx.textAlign = 'right';
-      ctx.fillText(`Loop ${d.loop}`, W - 40 * scale, y + 5*scale);
-      ctx.restore();
-      
-      // Separator line
-      if (i < discoveries.length - 1) {
-        ctx.save();
-        ctx.strokeStyle = 'rgba(100, 100, 100, 0.2)';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([3, 3]);
-        ctx.beginPath();
-        ctx.moveTo(60 * scale, y + 25*scale);
-        ctx.lineTo(W - 40 * scale, y + 25*scale);
-        ctx.stroke();
-        ctx.restore();
+      ctx.font = `italic ${11*scale}px 'Courier New', monospace`;
+      ctx.fillStyle = color; ctx.textAlign = 'left';
+      const maxW = W - 110*scale;
+      const words = d.text.split(' ');
+      let line = '', lineY = y;
+      for (const word of words) {
+        const test = line + word + ' ';
+        if (ctx.measureText(test).width > maxW && line) {
+          ctx.fillText(line.trim(), 65*scale, lineY + 5*scale);
+          line = word + ' ';
+          lineY += 16*scale;
+        } else {
+          line = test;
+        }
       }
+      ctx.fillText(line.trim(), 65*scale, lineY + 5*scale);
+      ctx.restore();
       
-      y += 50 * scale;
+      // Loop tag
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+      ctx.font = `${8*scale}px monospace`;
+      ctx.fillStyle = '#888'; ctx.textAlign = 'right';
+      ctx.fillText(`L${d.loop}`, W - 35*scale, y + 5*scale);
+      ctx.restore();
+      
+      y += 40*scale;
     }
   }
   
-  // Close button
-  const closeX = W - 40 * scale;
-  const closeY = 40 * scale;
-  wobblyRect(closeX - 25*scale, closeY - 12*scale, 50*scale, 24*scale, '#282832', '#f5ebd7', 2);
-  drawText('CLOSE', closeX, closeY, 10, '#282832');
-  
-  // Hint about solution
+  // Solution hint
   if (discoveries.length >= REQUIRED_DISCOVERIES) {
-    const hintY = H - 50 * scale;
     ctx.save();
-    ctx.globalAlpha = 0.6 + Math.sin(gameTime * 3) * 0.3;
-    drawText('You know enough. Try the door.', centerX, hintY, 12, '#44aa44');
+    ctx.globalAlpha = 0.5 + Math.sin(gameTime * 2.5) * 0.3;
+    drawText('You know enough. Try the door.', centerX, H - 40*scale, 11, '#2a7a2a');
+    ctx.restore();
+  }
+  
+  // Close button
+  const cx = W - 40*scale, cy = 35*scale;
+  wobblyRect(cx - 28*scale, cy - 12*scale, 56*scale, 24*scale, '#3a3a3a', '#f0e4cc', 1.5);
+  drawText('✕ CLOSE', cx, cy, 9, '#3a3a3a');
+  
+  drawVignette(0.2);
+}
+
+// ============================================================
+// DEATH
+// ============================================================
+function die(msg) {
+  if (gameState === 'dying') return;
+  gameState = 'dying';
+  deathMsg = msg;
+  deathTimer = 0;
+  totalDeaths++;
+  localStorage.setItem('dejaVuDeaths', totalDeaths);
+  sfxDeath();
+  shake(12);
+  spawnParticles(centerX, centerY, 25, '#b33');
+  
+  // Generate glitch lines
+  glitchLines = [];
+  for (let i = 0; i < 15; i++) {
+    glitchLines.push({
+      y: Math.random() * H,
+      h: 1 + Math.random() * 4,
+      offset: (Math.random() - 0.5) * 30,
+      delay: Math.random() * 0.5
+    });
+  }
+}
+
+function updateDying() {
+  deathTimer += deltaTime;
+  if (deathTimer > 2.8) {
+    resetLoop();
+  }
+  // Random glitch sounds
+  if (deathTimer < 1.5 && Math.random() < deltaTime * 4) {
+    sfxGlitch();
+  }
+}
+
+function drawDying() {
+  // Draw the room underneath (getting darker)
+  drawPaperBg();
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, 1 - deathTimer * 0.8);
+  drawPlayingRoom();
+  ctx.restore();
+  
+  // Glitch lines
+  if (deathTimer < 1.5) {
+    for (const g of glitchLines) {
+      if (deathTimer > g.delay) {
+        ctx.save();
+        ctx.globalAlpha = 0.6 * Math.random();
+        ctx.fillStyle = Math.random() > 0.5 ? '#b33' : '#fff';
+        ctx.fillRect(g.offset * scale, g.y, W, g.h * scale);
+        ctx.restore();
+      }
+    }
+  }
+  
+  // Dark overlay
+  const fadeIn = Math.min(1, deathTimer * 1.2);
+  ctx.fillStyle = `rgba(10,10,10,${fadeIn * 0.85})`;
+  ctx.fillRect(0, 0, W, H);
+  
+  // Death message
+  if (deathTimer > 0.4) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, (deathTimer - 0.4) * 2.5);
+    drawText('💀', centerX, centerY - 40*scale, 36, '#b33');
+    
+    // Typewriter death message
+    const chars = Math.floor((deathTimer - 0.6) * 25);
+    const shown = deathMsg.substring(0, Math.max(0, chars));
+    drawText(shown, centerX, centerY + 15*scale, 13, '#c66');
+    ctx.restore();
+  }
+  
+  // Rewind text
+  if (deathTimer > 2) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, (deathTimer - 2) * 3);
+    drawText('⟲ Rewinding...', centerX, centerY + 60*scale, 11, '#888');
     ctx.restore();
   }
 }
 
-// --- VICTORY ---
+function resetLoop() {
+  loopNumber++;
+  localStorage.setItem('dejaVuLoop', loopNumber);
+  loopTimer = 60;
+  lastTickSec = -1;
+  resetObjectStates();
+  gameState = 'waking';
+  wakeProgress = 0;
+  sfxWakeUp();
+}
+
+// ============================================================
+// VICTORY
+// ============================================================
+let victoryTimer = 0;
+
 function updateVictory() {
+  victoryTimer += deltaTime;
+  // Celebrate particles
+  if (victoryTimer < 3 && Math.random() < deltaTime * 8) {
+    const colors = ['#da2', '#4a4', '#48f', '#f4a', '#fa4'];
+    spawnParticles(
+      centerX + (Math.random()-0.5) * W * 0.6,
+      H * 0.3 + Math.random() * H * 0.3,
+      3, colors[Math.floor(Math.random() * colors.length)],
+      { rise: true, speed: 1.2, size: 0.8 }
+    );
+  }
+  
   for (const ev of inputEvents) {
-    if (ev.type === 'tap') {
-      // Reset game
+    if (ev.type === 'tap' && victoryTimer > 2) {
       localStorage.removeItem('dejaVuDiscoveries');
+      localStorage.removeItem('dejaVuLoop');
+      localStorage.removeItem('dejaVuDeaths');
       discoveries = [];
       loopNumber = 1;
       totalDeaths = 0;
-      objectStates = {
-        clockExamined: false,
-        drawerOpened: false,
-        mirrorExamined: false,
-        noteFound: false,
-        doorUnlocked: false,
-        windowExamined: false,
-        bedExamined: false
-      };
+      resetObjectStates();
       solutionStep = 0;
+      victoryTimer = 0;
       gameState = 'title';
     }
   }
 }
 
 function drawVictory() {
-  drawPaperBackground();
+  drawPaperBg();
+  drawCoffeeStain(centerX, centerY + 50*scale, 70);
   
-  drawCoffeeStain(centerX, centerY, 80);
-  
-  ctx.save();
-  ctx.font = `bold ${40 * scale}px monospace`;
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#44aa44';
-  ctx.fillText('ESCAPED', centerX, centerY - 80 * scale);
-  ctx.restore();
-  
-  drawText('You broke the loop.', centerX, centerY - 30 * scale, 18, '#282832');
-  drawText(`It took ${loopNumber} loops and ${totalDeaths} deaths.`, centerX, centerY + 10 * scale, 14, '#646464');
-  drawText(`You made ${discoveries.length} discoveries.`, centerX, centerY + 35 * scale, 14, '#646464');
-  
-  drawText('But the clock still reads 3:47.', centerX, centerY + 80 * scale, 13, '#b40000');
-  
-  const pulse = Math.sin(gameTime * 2) * 0.3 + 0.7;
-  ctx.save();
-  ctx.globalAlpha = pulse;
-  drawText('TAP TO WAKE UP AGAIN', centerX, H - 60 * scale, 16, '#282832');
-  ctx.restore();
-  
-  // Final coffee stain
-  drawCoffeeStain(centerX + 80*scale, H - 100*scale, 40);
-}
-
-// ============================================================
-// DEATH & RESET
-// ============================================================
-let deathMessage = '';
-let deathTimer = 0;
-let showingDeath = false;
-
-function die(message) {
-  if (showingDeath) return;
-  showingDeath = true;
-  deathMessage = message;
-  deathTimer = 0;
-  totalDeaths++;
-  sfxDeath();
-  shake(15);
-  spawnParticles(centerX, centerY, 20, '#b40000');
-  
-  // Save death count
-  localStorage.setItem('dejaVuDeaths', totalDeaths);
-  
-  setTimeout(() => {
-    resetLoop();
-  }, 2500);
-}
-
-function resetLoop() {
-  loopNumber++;
-  loopTimer = 60;
-  showingDeath = false;
-  deathTimer = 0;
-  objectStates = {
-    clockExamined: false,
-    drawerOpened: false,
-    mirrorExamined: false,
-    noteFound: false,
-    doorUnlocked: false,
-    windowExamined: false,
-    bedExamined: false
-  };
-  gameState = 'playing';
-  
-  // Save loop count
-  localStorage.setItem('dejaVuLoop', loopNumber);
-}
-
-function drawDeathOverlay() {
-  if (!showingDeath) return;
-  
-  deathTimer += deltaTime;
-  const alpha = Math.min(1, deathTimer * 2);
+  const t = Math.min(1, victoryTimer * 0.5);
   
   ctx.save();
-  ctx.globalAlpha = alpha;
-  
-  // Dark overlay
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-  ctx.fillRect(0, 0, W, H);
-  
-  // Death message
-  ctx.globalAlpha = Math.min(1, deathTimer * 3 - 0.5);
-  drawText('💀', centerX, centerY - 50 * scale, 40, '#b40000');
-  
-  // Word wrap death message
-  ctx.font = `${16 * scale}px monospace`;
-  const words = deathMessage.split(' ');
-  let lines = [];
-  let line = '';
-  for (const word of words) {
-    const test = line + word + ' ';
-    if (ctx.measureText(test).width > W * 0.8) {
-      lines.push(line.trim());
-      line = word + ' ';
-    } else {
-      line = test;
-    }
-  }
-  lines.push(line.trim());
-  
-  const lineHeight = 22 * scale;
-  const startY = centerY;
-  for (let i = 0; i < lines.length; i++) {
-    drawText(lines[i], centerX, startY + i * lineHeight, 14, '#ff6b6b');
-  }
-  
-  // Loop restarting message
-  if (deathTimer > 1.5) {
-    ctx.globalAlpha = Math.min(1, (deathTimer - 1.5) * 2);
-    drawText('Waking up...', centerX, centerY + 80 * scale, 12, '#646464');
-  }
-  
+  ctx.globalAlpha = t;
+  drawTextBold('ESCAPED', centerX, centerY - 80*scale, 38, '#2a7a2a');
   ctx.restore();
+  
+  if (victoryTimer > 0.5) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, (victoryTimer - 0.5) * 1.5);
+    drawText('You broke the loop.', centerX, centerY - 30*scale, 16, '#3a3a3a');
+    ctx.restore();
+  }
+  
+  if (victoryTimer > 1) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, (victoryTimer - 1) * 1.5);
+    drawText(`${loopNumber} loops · ${totalDeaths} deaths · ${discoveries.length} discoveries`, centerX, centerY + 10*scale, 11, '#888');
+    ctx.restore();
+  }
+  
+  if (victoryTimer > 2) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, (victoryTimer - 2));
+    drawText('But the clock still reads 3:47.', centerX, centerY + 60*scale, 12, '#b33');
+    
+    const pulse = 0.4 + Math.sin(gameTime * 2) * 0.3;
+    ctx.globalAlpha = pulse * Math.min(1, victoryTimer - 2.5);
+    drawText('TAP TO WAKE UP AGAIN', centerX, H - 60*scale, 14, '#3a3a3a');
+    ctx.restore();
+  }
+  
+  drawVignette(0.2);
 }
 
 // ============================================================
 // MAIN LOOP
 // ============================================================
-function gameLoop(timestamp) {
-  deltaTime = Math.min(0.1, (timestamp - lastTime) / 1000);
-  lastTime = timestamp;
+function gameLoop(ts) {
+  deltaTime = Math.min(0.1, (ts - lastTime) / 1000);
+  lastTime = ts;
   gameTime += deltaTime;
   
-  // Update based on state
-  if (gameState === 'title') {
-    updateTitle();
-  } else if (gameState === 'playing') {
-    updatePlaying();
-  } else if (gameState === 'journal') {
-    updateJournal();
-  } else if (gameState === 'victory') {
-    updateVictory();
+  // Update
+  switch (gameState) {
+    case 'title': updateTitle(); break;
+    case 'waking': updateWaking(); break;
+    case 'playing': updatePlaying(); break;
+    case 'journal': updateJournal(); break;
+    case 'dying': updateDying(); break;
+    case 'victory': updateVictory(); break;
   }
   
-  // Update particles
   updateParticles();
-  
-  // Clear input events
   inputEvents = [];
   
   // Draw
   ctx.save();
   applyShake();
   
-  if (gameState === 'title') {
-    drawTitle();
-  } else if (gameState === 'playing') {
-    drawPlaying();
-  } else if (gameState === 'journal') {
-    drawJournal();
-  } else if (gameState === 'victory') {
-    drawVictory();
+  switch (gameState) {
+    case 'title': drawTitle(); break;
+    case 'waking': drawWaking(); break;
+    case 'playing': drawPlaying(); break;
+    case 'journal': drawJournal(); break;
+    case 'dying': drawDying(); break;
+    case 'victory': drawVictory(); break;
   }
   
-  // Particles always on top
   drawParticles();
-  
-  // Death overlay
-  drawDeathOverlay();
+  if (gameState === 'playing') drawDustMotes();
   
   ctx.restore();
   
@@ -1207,21 +1471,8 @@ function gameLoop(timestamp) {
 // ============================================================
 // INIT
 // ============================================================
-function init() {
-  // Load saved progress
-  const savedLoop = localStorage.getItem('dejaVuLoop');
-  const savedDeaths = localStorage.getItem('dejaVuDeaths');
-  
-  if (savedLoop) loopNumber = parseInt(savedLoop);
-  if (savedDeaths) totalDeaths = parseInt(savedDeaths);
-  
-  loadDiscoveries();
-  
-  // Start game loop
-  requestAnimationFrame(gameLoop);
-}
-
-init();
+loadSave();
+requestAnimationFrame(gameLoop);
 </script>
 </body>
 </html>
