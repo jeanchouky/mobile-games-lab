@@ -19,14 +19,9 @@ html, body {
 }
 canvas {
   display: block;
-  margin: 0 auto;
+  width: 100%; height: 100%;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-}
-body {
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 </style>
 </head>
@@ -38,88 +33,125 @@ body {
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
-// Game resolution
-const GW = 180, GH = 320;
+// Dynamic resolution - fills screen
+let GW = 240, GH = 400;
 let pixelScale = 1;
 let gameTime = 0, deltaTime = 0, lastTime = 0;
-let gameState = 'title'; // title, combat, reward, shop, victory, dead
+let gameState = 'title';
 let particles = [];
 let floatingTexts = [];
 let shakeAmount = 0;
 let screenFlash = 0;
 let screenFlashColor = '#fff';
+let hiScore = 0;
+try { hiScore = parseInt(localStorage.getItem('obo_hi')) || 0; } catch(e){}
 
 // Player
-let player = { hp: 100, maxHp: 100, xp: 0, level: 1, gold: 0, atk: 12, def: 5 };
-let playerAnim = { x: 45, y: 200, frame: 0, attacking: false, hurt: false, blocking: false };
+let player = { hp: 100, maxHp: 100, xp: 0, level: 1, gold: 0, atk: 12, def: 5, kills: 0 };
+let playerAnim = { x: 0, y: 0, frame: 0, attacking: false, hurt: false, blocking: false, walkPhase: 0 };
 
 // Enemy
 let enemy = null;
-let enemyAnim = { x: 135, y: 200, frame: 0, hurt: false };
+let enemyAnim = { x: 0, y: 0, frame: 0, hurt: false };
 
-// Combat — TRUE one button: tap cycles through action wheel
-let actionWheel = ['⚔️ ATTACK', '🛡️ BLOCK', '⚡ POWER']; // auto-cycles, tap to execute
+// Combat
+let actionWheel = ['⚔️ ATTACK', '🛡️ BLOCK', '⚡ POWER'];
 let currentAction = 0;
-let wheelSpeed = 1.2; // seconds per cycle
+let wheelSpeed = 1.2;
 let wheelTimer = 0;
-let combatPhase = 'player'; // player, enemy, result
+let combatPhase = 'player';
 let enemyAttacking = false;
 let enemyAttackTimer = 0;
 let comboCount = 0;
 let turnDelay = 0;
+let perfectBlock = false;
+
+// Shop
+let shopItems = [];
+let shopCursor = 0;
+let shopWheelTimer = 0;
 
 // Zone progression
 let currentZone = 0;
 let encounter = 0;
+let walkProgress = 0;
+let walkTarget = 0;
+let walking = false;
+
+// Stars (background)
+let stars = [];
 
 const zones = [
-  { name: 'Darkwood Forest', sky: '#2a1a3a', ground: '#3a5a2a', tree: '#2a4a1a', path: '#5a4a3a',
-    enemies: ['slime','goblin','wolf','bat','spider'], boss: 'treant' },
-  { name: 'Crimson Caves', sky: '#3a1a1a', ground: '#4a3a2a', tree: '#5a3a2a', path: '#3a2a2a',
-    enemies: ['bat','skeleton','ghost','spider','zombie'], boss: 'demon' },
-  { name: 'Obsidian Castle', sky: '#1a1a2a', ground: '#3a3a4a', tree: '#2a2a3a', path: '#4a4a5a',
-    enemies: ['knight','mage','dragon','golem','wraith'], boss: 'darklord' },
+  { name: 'Darkwood Forest', sky: '#1a1030', skyBot: '#2a2a15', ground: '#3a5a2a', tree: '#2a4a1a', path: '#5a4a3a',
+    enemies: ['slime','goblin','wolf','bat','spider'], boss: 'treant', music: [65, 82, 98, 110] },
+  { name: 'Crystal Caverns', sky: '#0a1525', skyBot: '#1a1a30', ground: '#3a3a5a', tree: '#4a4a6a', path: '#2a2a4a',
+    enemies: ['bat','skeleton','ghost','crystal','zombie'], boss: 'demon', music: [55, 73, 87, 110] },
+  { name: 'Obsidian Castle', sky: '#0a0a1a', skyBot: '#1a0a1a', ground: '#3a2a3a', tree: '#2a1a2a', path: '#4a3a4a',
+    enemies: ['knight','mage','dragon','golem','wraith'], boss: 'darklord', music: [49, 65, 82, 98] },
 ];
 
 const enemyDefs = {
-  slime:    { name:'Slime',    hp:30,  atk:5,  spd:2.5, col:'#6b6', xp:10, gp:5,  sprite:'blob' },
-  goblin:   { name:'Goblin',   hp:40,  atk:8,  spd:2.0, col:'#8a5', xp:15, gp:8,  sprite:'humanoid' },
-  wolf:     { name:'Wolf',     hp:45,  atk:10, spd:1.8, col:'#876', xp:20, gp:10, sprite:'beast' },
-  bat:      { name:'Bat',      hp:25,  atk:6,  spd:1.5, col:'#86a', xp:12, gp:6,  sprite:'flying' },
-  spider:   { name:'Spider',   hp:35,  atk:9,  spd:2.2, col:'#543', xp:18, gp:9,  sprite:'beast' },
-  skeleton: { name:'Skeleton', hp:50,  atk:12, spd:2.3, col:'#bba', xp:25, gp:15, sprite:'humanoid' },
-  ghost:    { name:'Ghost',    hp:40,  atk:11, spd:1.7, col:'#9ab', xp:22, gp:12, sprite:'blob' },
-  zombie:   { name:'Zombie',   hp:60,  atk:10, spd:3.0, col:'#685', xp:28, gp:18, sprite:'humanoid' },
-  knight:   { name:'Knight',   hp:70,  atk:15, spd:2.5, col:'#99a', xp:35, gp:25, sprite:'humanoid' },
-  mage:     { name:'Mage',     hp:50,  atk:18, spd:2.0, col:'#86a', xp:40, gp:30, sprite:'humanoid' },
-  dragon:   { name:'Dragon',   hp:80,  atk:20, spd:2.2, col:'#a55', xp:50, gp:40, sprite:'beast' },
-  golem:    { name:'Golem',    hp:90,  atk:16, spd:3.5, col:'#887', xp:45, gp:35, sprite:'blob' },
-  wraith:   { name:'Wraith',   hp:65,  atk:22, spd:1.6, col:'#667', xp:55, gp:45, sprite:'blob' },
-  treant:   { name:'TREANT',   hp:150, atk:18, spd:2.8, col:'#5a3', xp:100,gp:80, sprite:'boss' },
-  demon:    { name:'FIRE DEMON',hp:200,atk:25, spd:2.0, col:'#c44', xp:150,gp:120,sprite:'boss' },
-  darklord: { name:'DARK LORD', hp:300, atk:30, spd:1.8, col:'#55a', xp:200,gp:200,sprite:'boss' },
+  slime:    { name:'Slime',    hp:30,  atk:5,  spd:2.5, col:'#5b5', col2:'#484', xp:10, gp:5,  sprite:'blob', emoji:'🟢' },
+  goblin:   { name:'Goblin',   hp:40,  atk:8,  spd:2.0, col:'#8a5', col2:'#674', xp:15, gp:8,  sprite:'humanoid', emoji:'👺' },
+  wolf:     { name:'Wolf',     hp:45,  atk:10, spd:1.8, col:'#876', col2:'#654', xp:20, gp:10, sprite:'beast', emoji:'🐺' },
+  bat:      { name:'Bat',      hp:25,  atk:6,  spd:1.5, col:'#86a', col2:'#648', xp:12, gp:6,  sprite:'flying', emoji:'🦇' },
+  spider:   { name:'Spider',   hp:35,  atk:9,  spd:2.2, col:'#543', col2:'#432', xp:18, gp:9,  sprite:'beast', emoji:'🕷️' },
+  skeleton: { name:'Skeleton', hp:50,  atk:12, spd:2.3, col:'#bba', col2:'#998', xp:25, gp:15, sprite:'humanoid', emoji:'💀' },
+  ghost:    { name:'Ghost',    hp:40,  atk:11, spd:1.7, col:'#9ab', col2:'#789', xp:22, gp:12, sprite:'blob', emoji:'👻' },
+  crystal:  { name:'Crystal',  hp:55,  atk:8,  spd:2.8, col:'#8af', col2:'#68c', xp:28, gp:20, sprite:'blob', emoji:'💎' },
+  zombie:   { name:'Zombie',   hp:60,  atk:10, spd:3.0, col:'#685', col2:'#463', xp:28, gp:18, sprite:'humanoid', emoji:'🧟' },
+  knight:   { name:'Knight',   hp:70,  atk:15, spd:2.5, col:'#99a', col2:'#778', xp:35, gp:25, sprite:'humanoid', emoji:'🗡️' },
+  mage:     { name:'Mage',     hp:50,  atk:18, spd:2.0, col:'#a6f', col2:'#84c', xp:40, gp:30, sprite:'humanoid', emoji:'🧙' },
+  dragon:   { name:'Dragon',   hp:80,  atk:20, spd:2.2, col:'#a55', col2:'#833', xp:50, gp:40, sprite:'beast', emoji:'🐲' },
+  golem:    { name:'Golem',    hp:90,  atk:16, spd:3.5, col:'#887', col2:'#665', xp:45, gp:35, sprite:'blob', emoji:'🗿' },
+  wraith:   { name:'Wraith',   hp:65,  atk:22, spd:1.6, col:'#667', col2:'#445', xp:55, gp:45, sprite:'blob', emoji:'👤' },
+  treant:   { name:'TREANT',   hp:150, atk:18, spd:2.8, col:'#5a3', col2:'#381', xp:100,gp:80, sprite:'boss', emoji:'🌳' },
+  demon:    { name:'FIRE DEMON',hp:200,atk:25, spd:2.0, col:'#c44', col2:'#a22', xp:150,gp:120,sprite:'boss', emoji:'😈' },
+  darklord: { name:'DARK LORD', hp:300, atk:30, spd:1.8, col:'#55a', col2:'#338', xp:200,gp:200,sprite:'boss', emoji:'🫅' },
 };
 
-const shopItems = [
-  { name:'Health Potion', cost:20, desc:'+30 HP', fn:() => { player.hp = Math.min(player.maxHp, player.hp+30); } },
-  { name:'Attack Gem',    cost:50, desc:'+5 ATK', fn:() => { player.atk += 5; } },
-  { name:'Shield Shard',  cost:40, desc:'+3 DEF', fn:() => { player.def += 3; } },
-  { name:'Life Crystal',  cost:35, desc:'+25 Max HP', fn:() => { player.maxHp += 25; player.hp += 25; } },
+const allShopItems = [
+  { name:'Health Potion', cost:15, desc:'+40 HP', icon:'🧪', fn:() => { player.hp = Math.min(player.maxHp, player.hp+40); } },
+  { name:'Attack Gem', cost:40, desc:'+4 ATK', icon:'💎', fn:() => { player.atk += 4; } },
+  { name:'Shield Shard', cost:35, desc:'+3 DEF', icon:'🛡️', fn:() => { player.def += 3; } },
+  { name:'Life Crystal', cost:30, desc:'+20 Max HP', icon:'❤️', fn:() => { player.maxHp += 20; player.hp += 20; } },
+  { name:'Speed Ring', cost:50, desc:'Slower wheel', icon:'💍', fn:() => { wheelSpeed = Math.min(2.5, wheelSpeed + 0.25); } },
+  { name:'Full Heal', cost:60, desc:'Full HP', icon:'✨', fn:() => { player.hp = player.maxHp; } },
 ];
 
 // ============================================================
-// RESIZE
+// RESIZE — fills screen, no black bars
 // ============================================================
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
-  pixelScale = Math.min(Math.floor(w / GW), Math.floor(h / GH));
-  pixelScale = Math.max(1, pixelScale);
+  // Use a low-res feel but fill the screen
+  const targetPx = 240; // target width in game pixels
+  pixelScale = Math.max(1, Math.floor(w / targetPx));
+  GW = Math.ceil(w / pixelScale);
+  GH = Math.ceil(h / pixelScale);
   canvas.width = GW;
   canvas.height = GH;
-  canvas.style.width = (GW * pixelScale) + 'px';
-  canvas.style.height = (GH * pixelScale) + 'px';
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  
+  // Reposition characters
+  playerAnim.x = GW * 0.25;
+  playerAnim.y = GH * 0.55;
+  enemyAnim.x = GW * 0.75;
+  enemyAnim.y = GH * 0.55;
+  
+  initStars();
 }
 window.addEventListener('resize', resize);
+
+function initStars() {
+  stars = [];
+  for (let i = 0; i < 40; i++) {
+    stars.push({ x: Math.random() * GW, y: Math.random() * GH * 0.5, 
+                 size: Math.random() < 0.3 ? 2 : 1, twinkle: Math.random() * Math.PI * 2 });
+  }
+}
+
 resize();
 
 // ============================================================
@@ -130,7 +162,7 @@ function ensureAudio() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   if (audioCtx.state === 'suspended') audioCtx.resume();
 }
-function tone(f, d, type='square', v=0.1) {
+function tone(f, d, type='square', v=0.08) {
   ensureAudio();
   const t = audioCtx.currentTime;
   const o = audioCtx.createOscillator(), g = audioCtx.createGain();
@@ -140,17 +172,34 @@ function tone(f, d, type='square', v=0.1) {
   o.connect(g).connect(audioCtx.destination);
   o.start(t); o.stop(t + d);
 }
-function sfxHit()    { tone(300, 0.06, 'square', 0.15); tone(150, 0.08, 'sawtooth', 0.1); }
-function sfxCrit()   { tone(400, 0.06, 'square', 0.18); setTimeout(() => tone(600, 0.06, 'square', 0.15), 40); }
-function sfxBlock()  { tone(200, 0.1, 'square', 0.12); tone(250, 0.08, 'triangle', 0.08); }
-function sfxPower()  { tone(220, 0.05, 'sawtooth', 0.15); setTimeout(() => tone(440, 0.1, 'sawtooth', 0.18), 50); }
-function sfxHurt()   { tone(120, 0.2, 'sawtooth', 0.15); }
-function sfxDeath()  { tone(180, 0.15, 'sawtooth', 0.12); setTimeout(() => tone(90, 0.3, 'sawtooth', 0.1), 120); }
-function sfxCoin()   { tone(800, 0.04, 'sine', 0.08); setTimeout(() => tone(1200, 0.04, 'sine', 0.08), 40); }
-function sfxLevelUp(){ [523,659,784,1047].forEach((f,i) => setTimeout(() => tone(f, 0.12, 'triangle', 0.1), i*100)); }
-function sfxSelect() { tone(600, 0.03, 'sine', 0.06); }
-function sfxWin()    { [262,330,392,523].forEach((f,i) => setTimeout(() => tone(f, 0.15, 'triangle', 0.1), i*120)); }
-function sfxTick()   { tone(900, 0.015, 'sine', 0.04); }
+function sfxHit()    { tone(300, 0.06, 'square', 0.12); tone(150, 0.08, 'sawtooth', 0.08); }
+function sfxCrit()   { tone(400, 0.06, 'square', 0.15); setTimeout(() => tone(600, 0.06, 'square', 0.12), 40); setTimeout(() => tone(800, 0.05, 'sine', 0.08), 80); }
+function sfxBlock()  { tone(200, 0.1, 'square', 0.1); tone(250, 0.08, 'triangle', 0.06); }
+function sfxPerfectBlock() { tone(800, 0.08, 'sine', 0.1); tone(1000, 0.06, 'sine', 0.08); tone(1200, 0.05, 'sine', 0.06); }
+function sfxPower()  { tone(220, 0.05, 'sawtooth', 0.12); setTimeout(() => tone(440, 0.1, 'sawtooth', 0.15), 50); setTimeout(() => tone(660, 0.08, 'sine', 0.1), 100); }
+function sfxHurt()   { tone(120, 0.2, 'sawtooth', 0.12); }
+function sfxDeath()  { tone(180, 0.15, 'sawtooth', 0.1); setTimeout(() => tone(90, 0.3, 'sawtooth', 0.08), 120); }
+function sfxCoin()   { tone(800, 0.04, 'sine', 0.06); setTimeout(() => tone(1200, 0.04, 'sine', 0.06), 40); }
+function sfxLevelUp(){ [523,659,784,1047].forEach((f,i) => setTimeout(() => tone(f, 0.12, 'triangle', 0.08), i*100)); }
+function sfxSelect() { tone(600, 0.03, 'sine', 0.05); }
+function sfxWin()    { [262,330,392,523,659,784].forEach((f,i) => setTimeout(() => tone(f, 0.15, 'triangle', 0.08), i*120)); }
+function sfxTick()   { tone(900, 0.015, 'sine', 0.03); }
+function sfxBuy()    { tone(523, 0.06, 'sine', 0.08); tone(784, 0.06, 'sine', 0.06); }
+function sfxWalk()   { tone(100 + Math.random()*50, 0.03, 'triangle', 0.03); }
+function sfxBossIntro() { tone(80, 0.5, 'sawtooth', 0.1); setTimeout(() => tone(60, 0.6, 'sawtooth', 0.08), 300); }
+
+// Ambient music - simple arpeggiated tones
+let musicTimer = 0;
+let musicNote = 0;
+function playMusic() {
+  if (gameState !== 'combat' && gameState !== 'walking') return;
+  const z = zones[currentZone];
+  if (!z.music) return;
+  const notes = z.music;
+  const f = notes[musicNote % notes.length];
+  tone(f, 0.4, 'triangle', 0.02);
+  musicNote++;
+}
 
 // ============================================================
 // DRAWING
@@ -168,127 +217,184 @@ function txt(str, x, y, size=8, col='#fff', align='center') {
 }
 
 function drawHPBar(x, y, w, h, cur, max, fg='#4a4', bg='#311') {
-  px(x-1, y-1, w+2, h+2, '#000');
+  px(x-1, y-1, w+2, h+2, '#111');
   px(x, y, w, h, bg);
   const fill = Math.max(0, Math.floor((cur / max) * w));
   if (fill > 0) px(x, y, fill, h, fg);
+  // Shine
+  if (fill > 2) { ctx.save(); ctx.globalAlpha = 0.2; px(x, y, fill, 1, '#fff'); ctx.restore(); }
 }
 
-// Sprite drawing
+// ============================================================
+// SPRITE DRAWING — improved with more detail
+// ============================================================
 function drawHero(ax, ay, attacking, hurt, blocking) {
   const x = Math.floor(ax), y = Math.floor(ay);
   const bob = Math.sin(gameTime * 3) * 1;
   const oy = Math.floor(bob);
   const flash = hurt && (Math.floor(gameTime * 20) % 2 === 0);
   
-  if (flash) { // damage flash = all white
-    px(x-3, y-12+oy, 6, 6, '#fff'); // head
-    px(x-4, y-6+oy, 8, 7, '#fff');  // body
-    px(x-4, y+1+oy, 3, 5, '#fff');  // legs
+  if (flash) {
+    px(x-3, y-12+oy, 6, 6, '#fff');
+    px(x-4, y-6+oy, 8, 7, '#fff');
+    px(x-4, y+1+oy, 3, 5, '#fff');
     px(x+1, y+1+oy, 3, 5, '#fff');
     return;
   }
   
-  // Head
-  px(x-3, y-12+oy, 6, 6, '#fca');
+  // Shadow
+  ctx.save(); ctx.globalAlpha = 0.3;
+  px(x-5, y+6, 10, 2, '#000');
+  ctx.restore();
+  
   // Hair
-  px(x-3, y-13+oy, 6, 2, '#754');
+  px(x-3, y-14+oy, 6, 3, '#754');
+  px(x-4, y-13+oy, 1, 2, '#754');
+  // Head
+  px(x-3, y-11+oy, 6, 5, '#fca');
   // Eyes
-  px(x-2, y-10+oy, 1, 1, '#222');
-  px(x+1, y-10+oy, 1, 1, '#222');
+  px(x-2, y-9+oy, 1, 1, '#222');
+  px(x+1, y-9+oy, 1, 1, '#222');
+  // Mouth
+  px(x-1, y-7+oy, 2, 1, '#c86');
+  
   // Body (armor)
-  px(x-4, y-6+oy, 8, 7, blocking ? '#58a' : '#46a');
+  const armorCol = blocking ? '#58a' : '#46a';
+  px(x-4, y-6+oy, 8, 7, armorCol);
+  // Armor detail
+  px(x-1, y-5+oy, 2, 4, '#57b');
   // Belt
   px(x-4, y-1+oy, 8, 1, '#aa6');
-  // Legs
+  px(x, y-1+oy, 1, 1, '#cc8');
+  
+  // Legs with walk animation
+  const walkOff = Math.sin(playerAnim.walkPhase) * 1;
   px(x-4, y+1+oy, 3, 5, '#335');
   px(x+1, y+1+oy, 3, 5, '#335');
   // Boots
-  px(x-4, y+5+oy, 3, 1, '#543');
-  px(x+1, y+5+oy, 3, 1, '#543');
+  px(x-5, y+5+oy, 4, 2, '#543');
+  px(x+1, y+5+oy, 4, 2, '#543');
+  
+  // Cape (subtle)
+  ctx.save(); ctx.globalAlpha = 0.6;
+  px(x-5, y-5+oy, 1, 8 + Math.sin(gameTime*2), '#428');
+  ctx.restore();
   
   // Weapon
   if (attacking) {
-    // Sword thrust right
-    px(x+4, y-8+oy, 2, 2, '#aa6'); // hilt
-    px(x+6, y-10+oy, 2, 8, '#ddd'); // blade
-    px(x+6, y-11+oy, 2, 1, '#fff'); // tip
-    // Slash arc
-    ctx.save();
-    ctx.globalAlpha = 0.4;
-    px(x+5, y-14+oy, 6, 2, '#ff8');
-    px(x+8, y-12+oy, 4, 4, '#ff8');
-    px(x+9, y-8+oy, 3, 4, '#ff8');
+    // Sword thrust right with slash arc
+    px(x+4, y-8+oy, 2, 2, '#aa6');
+    px(x+6, y-11+oy, 2, 9, '#ddd');
+    px(x+6, y-12+oy, 2, 1, '#fff');
+    // Slash particles
+    ctx.save(); ctx.globalAlpha = 0.5;
+    px(x+5, y-15+oy, 7, 2, '#ff8');
+    px(x+9, y-13+oy, 4, 5, '#ff8');
+    px(x+10, y-8+oy, 3, 4, '#fa6');
     ctx.restore();
   } else if (blocking) {
     // Shield
-    px(x+4, y-8+oy, 5, 8, '#68a');
-    px(x+5, y-7+oy, 3, 6, '#8ac');
-    px(x+6, y-5+oy, 1, 2, '#fff');
+    px(x+4, y-9+oy, 6, 10, '#68a');
+    px(x+5, y-8+oy, 4, 8, '#8ac');
+    px(x+6, y-6+oy, 2, 4, '#adf');
+    // Shield glow during perfect block window
+    if (perfectBlock) {
+      ctx.save(); ctx.globalAlpha = 0.4 + Math.sin(gameTime*10)*0.2;
+      px(x+3, y-10+oy, 8, 12, '#8cf');
+      ctx.restore();
+    }
   } else {
-    // Sword down
+    // Sword at side
     px(x-6, y-4+oy, 2, 2, '#aa6');
     px(x-7, y-2+oy, 1, 6, '#ccc');
+    px(x-7, y-3+oy, 1, 1, '#fff');
   }
 }
 
-function drawMonster(ax, ay, def, hurtFlash) {
+function drawMonster(ax, ay, def, hurtFlash, hpRatio) {
   const x = Math.floor(ax), y = Math.floor(ay);
   const bob = Math.sin(gameTime * 2 + 1) * 1.5;
   const oy = Math.floor(bob);
   const flash = hurtFlash && (Math.floor(gameTime * 20) % 2 === 0);
   const c = flash ? '#fff' : def.col;
-  const s = def.sprite === 'boss' ? 1.5 : 1;
+  const c2 = flash ? '#ddd' : def.col2;
+  const s = def.sprite === 'boss' ? 1.8 : 1;
   const ss = Math.floor;
   
+  // Shadow
+  ctx.save(); ctx.globalAlpha = 0.3;
+  px(x-ss(6*s), y+ss(3*s), ss(12*s), 2, '#000');
+  ctx.restore();
+  
+  // Boss aura
+  if (def.sprite === 'boss') {
+    ctx.save(); ctx.globalAlpha = 0.15 + Math.sin(gameTime*3)*0.05;
+    const grad = ctx.createRadialGradient(x, y-ss(5*s), 0, x, y-ss(5*s), ss(20*s));
+    grad.addColorStop(0, def.col);
+    grad.addColorStop(1, 'transparent');
+    ctx.fillStyle = grad;
+    ctx.fillRect(x-ss(20*s), y-ss(25*s), ss(40*s), ss(40*s));
+    ctx.restore();
+  }
+  
   if (def.sprite === 'blob' || def.sprite === 'boss') {
-    // Blob/boss shape
     const bw = ss(10*s), bh = ss(8*s);
     px(x-bw/2, y-bh+oy, bw, bh, c);
     px(x-bw/2+1, y-bh-ss(3*s)+oy, bw-2, ss(3*s), c);
+    // Inner highlight
+    px(x-bw/2+2, y-bh-ss(2*s)+oy, bw-4, ss(2*s), c2);
+    
     if (def.sprite === 'boss') {
-      px(x-bw/2-2, y-bh-ss(5*s)+oy, 3, ss(4*s), c); // horn L
-      px(x+bw/2-1, y-bh-ss(5*s)+oy, 3, ss(4*s), c); // horn R
+      px(x-bw/2-2, y-bh-ss(5*s)+oy, 3, ss(4*s), c);
+      px(x+bw/2-1, y-bh-ss(5*s)+oy, 3, ss(4*s), c);
+      // Crown/horns glow
+      ctx.save(); ctx.globalAlpha = 0.4;
+      px(x-bw/2-3, y-bh-ss(6*s)+oy, 2, 2, '#ff4');
+      px(x+bw/2, y-bh-ss(6*s)+oy, 2, 2, '#ff4');
+      ctx.restore();
     }
     // Eyes
-    px(x-ss(3*s), y-ss(6*s)+oy, ss(2*s), ss(2*s), flash?'#fff':'#fff');
-    px(x+ss(1*s), y-ss(6*s)+oy, ss(2*s), ss(2*s), flash?'#fff':'#fff');
+    const eyeW = ss(2*s);
+    px(x-ss(3*s), y-ss(6*s)+oy, eyeW, eyeW, '#fff');
+    px(x+ss(1*s), y-ss(6*s)+oy, eyeW, eyeW, '#fff');
     if (!flash) {
       px(x-ss(2*s), y-ss(5*s)+oy, 1, 1, '#000');
       px(x+ss(2*s), y-ss(5*s)+oy, 1, 1, '#000');
     }
   } else if (def.sprite === 'humanoid') {
-    // Head
     px(x-ss(3*s), y-ss(14*s)+oy, ss(6*s), ss(6*s), c);
-    // Body
     px(x-ss(4*s), y-ss(8*s)+oy, ss(8*s), ss(7*s), c);
-    // Legs
+    px(x-ss(3*s), y-ss(7*s)+oy, ss(6*s), ss(5*s), c2);
     px(x-ss(4*s), y-ss(1*s)+oy, ss(3*s), ss(4*s), c);
     px(x+ss(1*s), y-ss(1*s)+oy, ss(3*s), ss(4*s), c);
-    // Eyes
     if (!flash) {
       px(x-2, y-ss(12*s)+oy, 1, 1, '#f00');
       px(x+1, y-ss(12*s)+oy, 1, 1, '#f00');
     }
-    // Weapon
     px(x-ss(6*s), y-ss(6*s)+oy, ss(2*s), ss(8*s), '#888');
   } else if (def.sprite === 'beast') {
-    // Body
     px(x-ss(5*s), y-ss(6*s)+oy, ss(10*s), ss(5*s), c);
-    // Head
+    px(x-ss(4*s), y-ss(5*s)+oy, ss(8*s), ss(3*s), c2);
     px(x+ss(3*s), y-ss(9*s)+oy, ss(5*s), ss(5*s), c);
-    // Legs
     px(x-ss(4*s), y-ss(1*s)+oy, ss(2*s), ss(3*s), c);
     px(x+ss(2*s), y-ss(1*s)+oy, ss(2*s), ss(3*s), c);
-    // Eye
     if (!flash) px(x+ss(5*s), y-ss(8*s)+oy, 1, 1, '#f00');
-  } else { // flying
+    // Tail
+    px(x-ss(5*s), y-ss(5*s)+oy, 1, ss(3*s), c);
+  } else {
     px(x-ss(3*s), y-ss(5*s)+oy, ss(6*s), ss(4*s), c);
-    // Wings
     const wingFlap = Math.sin(gameTime * 8) * 2;
     px(x-ss(8*s), y-ss(6*s)+oy+wingFlap, ss(5*s), ss(2*s), c);
     px(x+ss(3*s), y-ss(6*s)+oy-wingFlap, ss(5*s), ss(2*s), c);
+    px(x-ss(2*s), y-ss(4*s)+oy, ss(4*s), ss(2*s), c2);
     if (!flash) px(x-1, y-ss(4*s)+oy, 1, 1, '#f00');
+  }
+  
+  // Low HP warning
+  if (hpRatio < 0.3 && !flash) {
+    ctx.save(); ctx.globalAlpha = 0.5 + Math.sin(gameTime*6)*0.3;
+    px(x-1, y-ss(16*s)+oy, 2, 2, '#f44');
+    ctx.restore();
   }
 }
 
@@ -300,15 +406,16 @@ function spawnP(x, y, n, col, opts={}) {
     const a = Math.random() * Math.PI * 2;
     const spd = (0.5 + Math.random() * 2) * (opts.speed || 1);
     particles.push({
-      x, y, vx: Math.cos(a)*spd, vy: Math.sin(a)*spd - (opts.rise ? 1 : 0),
+      x, y, vx: Math.cos(a)*spd, vy: Math.sin(a)*spd - (opts.rise ? 1.5 : 0),
       life: 1, decay: 0.02 + Math.random() * 0.02,
-      size: opts.size || (1 + Math.random() * 2), col
+      size: opts.size || (1 + Math.random() * 2), col,
+      glow: opts.glow || false
     });
   }
 }
 
 function floatText(str, x, y, col='#fff', size=7) {
-  floatingTexts.push({ str, x, y, vy: -0.8, life: 1.2, col, size });
+  floatingTexts.push({ str, x, y, vy: -0.8, life: 1.2, col, size, ox: 0 });
 }
 
 function updateEffects() {
@@ -317,28 +424,37 @@ function updateEffects() {
     p.x += p.vx; p.y += p.vy; p.vy += 0.05; p.life -= p.decay;
     if (p.life <= 0) particles.splice(i, 1);
   }
+  if (particles.length > 300) particles.splice(0, particles.length - 300);
   for (let i = floatingTexts.length-1; i >= 0; i--) {
     const f = floatingTexts[i];
     f.y += f.vy; f.life -= deltaTime;
+    f.ox = Math.sin(gameTime * 5 + i) * 0.5;
     if (f.life <= 0) floatingTexts.splice(i, 1);
   }
-  if (screenFlash > 0) screenFlash -= deltaTime * 5;
+  if (screenFlash > 0) screenFlash -= deltaTime * 4;
   if (shakeAmount > 0.3) shakeAmount *= 0.85; else shakeAmount = 0;
 }
 
 function drawEffects() {
   for (const p of particles) {
     ctx.save(); ctx.globalAlpha = Math.min(1, p.life);
+    if (p.glow) {
+      ctx.globalAlpha *= 0.3;
+      px(p.x-1, p.y-1, p.size+2, p.size+2, p.col);
+      ctx.globalAlpha = Math.min(1, p.life);
+    }
     px(p.x, p.y, p.size, p.size, p.col);
     ctx.restore();
   }
   for (const f of floatingTexts) {
     ctx.save(); ctx.globalAlpha = Math.min(1, f.life * 2);
-    txt(f.str, f.x, f.y, f.size, f.col);
+    // Shadow
+    txt(f.str, f.x + f.ox + 1, f.y + 1, f.size, '#000');
+    txt(f.str, f.x + f.ox, f.y, f.size, f.col);
     ctx.restore();
   }
   if (screenFlash > 0) {
-    ctx.save(); ctx.globalAlpha = Math.min(0.4, screenFlash);
+    ctx.save(); ctx.globalAlpha = Math.min(0.5, screenFlash);
     px(0, 0, GW, GH, screenFlashColor);
     ctx.restore();
   }
@@ -348,63 +464,118 @@ function shake(a) { shakeAmount = Math.max(shakeAmount, a); }
 function flash(col='#fff') { screenFlash = 1; screenFlashColor = col; }
 
 // ============================================================
-// BACKGROUND
+// BACKGROUND — parallax & weather
 // ============================================================
 function drawBG() {
   const z = zones[currentZone];
-  // Sky gradient (2 colors)
-  px(0, 0, GW, 140, z.sky);
-  // Distant mountains
-  for (let i = 0; i < 6; i++) {
-    const mx = i * 35 - 10 + currentZone * 15;
-    const mh = 20 + Math.sin(i * 1.7) * 15;
-    const my = 140 - mh;
-    for (let dy = 0; dy < mh; dy++) {
-      const w = mh - dy;
-      px(mx + dy * 0.5, my + dy, w, 1, z.ground);
+  
+  // Sky gradient
+  const skyG = ctx.createLinearGradient(0, 0, 0, GH * 0.45);
+  skyG.addColorStop(0, z.sky);
+  skyG.addColorStop(1, z.skyBot);
+  ctx.fillStyle = skyG;
+  ctx.fillRect(0, 0, GW, GH * 0.45);
+  
+  // Stars (twinkle)
+  for (const s of stars) {
+    const tw = 0.3 + Math.sin(gameTime * 1.5 + s.twinkle) * 0.4;
+    ctx.save(); ctx.globalAlpha = tw;
+    px(s.x, s.y, s.size, s.size, '#fff');
+    ctx.restore();
+  }
+  
+  // Moon/sun
+  if (currentZone === 0) {
+    ctx.save(); ctx.globalAlpha = 0.5;
+    ctx.fillStyle = '#ffa';
+    ctx.beginPath(); ctx.arc(GW*0.8, GH*0.12, 10, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+  
+  // Distant mountains (parallax layer 1)
+  const mOffset = walkProgress * 0.3;
+  for (let i = 0; i < 8; i++) {
+    const mx = ((i * 40 - 20 + currentZone * 20) - mOffset) % (GW + 60) - 30;
+    const mh = 18 + Math.sin(i * 1.7) * 12;
+    const my = GH * 0.45 - mh;
+    // Simple triangle mountains
+    ctx.fillStyle = z.ground;
+    ctx.beginPath();
+    ctx.moveTo(mx, GH * 0.45);
+    ctx.lineTo(mx + mh * 0.8, my);
+    ctx.lineTo(mx + mh * 1.6, GH * 0.45);
+    ctx.fill();
+    // Snow caps for zone 2
+    if (currentZone === 1) {
+      ctx.fillStyle = '#aaf';
+      ctx.beginPath();
+      ctx.moveTo(mx + mh * 0.6, my + 4);
+      ctx.lineTo(mx + mh * 0.8, my);
+      ctx.lineTo(mx + mh * 1.0, my + 4);
+      ctx.fill();
     }
   }
+  
   // Ground
-  px(0, 140, GW, GH - 140, z.ground);
-  // Path
-  px(30, 140, 20, GH - 140, z.path);
-  px(28, 140, 2, GH - 140, z.tree);
-  px(50, 140, 2, GH - 140, z.tree);
+  px(0, GH * 0.45, GW, GH * 0.55, z.ground);
   
-  // Trees/decorations
-  if (currentZone === 0) { // Forest
-    for (let i = 0; i < 4; i++) {
-      const tx = 65 + i * 30;
-      const ty = 130 + Math.sin(i * 2.3) * 8;
-      // Trunk
-      px(tx, ty, 3, 12, '#432');
-      // Leaves
-      px(tx-4, ty-6, 11, 4, '#3a2');
-      px(tx-3, ty-10, 9, 4, '#4a3');
-      px(tx-1, ty-13, 5, 3, '#5a4');
-    }
-  } else if (currentZone === 1) { // Cave
-    // Stalactites
+  // Path
+  const pathW = 28;
+  const pathX = GW/2 - pathW/2;
+  px(pathX, GH * 0.45, pathW, GH * 0.55, z.path);
+  px(pathX - 1, GH * 0.45, 1, GH * 0.55, z.tree);
+  px(pathX + pathW, GH * 0.45, 1, GH * 0.55, z.tree);
+  
+  // Path lines
+  for (let i = 0; i < 8; i++) {
+    const ly = ((GH * 0.5 + i * 30 - walkProgress * 2) % (GH * 0.55)) + GH * 0.45;
+    ctx.save(); ctx.globalAlpha = 0.2;
+    px(pathX + pathW/2 - 1, ly, 2, 6, z.tree);
+    ctx.restore();
+  }
+  
+  // Trees/decorations (parallax layer 2)
+  const tOffset = walkProgress * 0.8;
+  if (currentZone === 0) {
     for (let i = 0; i < 6; i++) {
-      const sx = 10 + i * 30, sh = 8 + Math.sin(i*1.5) * 5;
-      px(sx, 0, 3, sh, '#654');
-      px(sx+1, 0, 1, sh+2, '#543');
+      const tx = ((15 + i * 45 - tOffset) % (GW + 40)) - 20;
+      const ty = GH * 0.43 + Math.sin(i * 2.3) * 5;
+      const side = i % 2 === 0 ? -1 : 1;
+      const ox = side * (pathW/2 + 15 + Math.abs(Math.sin(i*1.5)) * 20);
+      px(GW/2 + ox + tx * 0.02, ty, 3, 12, '#432');
+      px(GW/2 + ox + tx * 0.02 - 4, ty - 6, 11, 4, '#3a2');
+      px(GW/2 + ox + tx * 0.02 - 3, ty - 10, 9, 4, '#4a3');
+      px(GW/2 + ox + tx * 0.02 - 1, ty - 13, 5, 3, '#5a4');
     }
-  } else { // Castle
-    // Columns
-    for (let i = 0; i < 3; i++) {
-      const cx = 70 + i * 40;
-      px(cx, 100, 6, 40, '#556');
-      px(cx-1, 98, 8, 3, '#667');
-      px(cx-1, 139, 8, 3, '#667');
+  } else if (currentZone === 1) {
+    for (let i = 0; i < 8; i++) {
+      const sx = ((5 + i * 35) + Math.sin(i*3.1)*10);
+      const sh = 6 + Math.sin(i*1.5) * 4;
+      px(sx, 0, 2, sh, '#546');
+      px(sx, sh, 1, 2, '#435');
+      // Crystal glow
+      if (i % 3 === 0) {
+        ctx.save(); ctx.globalAlpha = 0.15 + Math.sin(gameTime + i)*0.1;
+        px(sx-1, sh-2, 4, 4, '#8af');
+        ctx.restore();
+      }
+    }
+  } else {
+    for (let i = 0; i < 4; i++) {
+      const cx = 30 + i * 55;
+      px(cx, GH*0.3, 4, GH*0.15, '#445');
+      px(cx-1, GH*0.28, 6, 3, '#556');
+      px(cx-1, GH*0.45 - 3, 6, 3, '#556');
     }
   }
   
-  // Ground texture (small dots)
-  for (let i = 0; i < 15; i++) {
+  // Ground texture
+  for (let i = 0; i < 20; i++) {
     const gx = (i * 13 + currentZone * 7) % GW;
-    const gy = 145 + (i * 11) % 30;
+    const gy = GH * 0.46 + (i * 11) % (GH * 0.4);
+    ctx.save(); ctx.globalAlpha = 0.3;
     px(gx, gy, 1, 1, z.tree);
+    ctx.restore();
   }
 }
 
@@ -424,13 +595,14 @@ canvas.addEventListener('mousedown', handleTap);
 // ============================================================
 function spawnEnemy(type, isBoss) {
   const d = enemyDefs[type];
-  const hpMult = isBoss ? 1 : 1 + currentZone * 0.2;
+  const hpMult = isBoss ? 1 : 1 + currentZone * 0.25 + encounter * 0.05;
+  const atkMult = 1 + currentZone * 0.15;
   enemy = {
-    type, def: d, hp: Math.floor(d.hp * hpMult), maxHp: Math.floor(d.hp * hpMult),
-    atk: d.atk, spd: d.spd, isBoss
+    type, def: d, 
+    hp: Math.floor(d.hp * hpMult), maxHp: Math.floor(d.hp * hpMult),
+    atk: Math.floor(d.atk * atkMult), spd: d.spd, isBoss
   };
   enemyAnim.hurt = false;
-  enemyAnim.x = 135;
   combatPhase = 'player';
   wheelTimer = 0;
   currentAction = 0;
@@ -438,6 +610,15 @@ function spawnEnemy(type, isBoss) {
   enemyAttacking = false;
   enemyAttackTimer = 0;
   turnDelay = 0;
+  perfectBlock = false;
+  
+  if (isBoss) sfxBossIntro();
+}
+
+function startWalking() {
+  gameState = 'walking';
+  walkTarget = walkProgress + 60;
+  walking = true;
 }
 
 function startEncounter() {
@@ -462,28 +643,29 @@ function executeAction() {
     playerAnim.attacking = true;
     
     setTimeout(() => {
-      const crit = Math.random() < 0.15 + comboCount * 0.05;
-      const dmg = Math.floor(player.atk * (crit ? 1.8 : 1) * (1 + comboCount * 0.1));
+      const critChance = 0.12 + comboCount * 0.06;
+      const crit = Math.random() < critChance;
+      const dmg = Math.floor(player.atk * (crit ? 2.0 : 1) * (1 + comboCount * 0.1));
       enemy.hp -= dmg;
       enemyAnim.hurt = true;
       setTimeout(() => enemyAnim.hurt = false, 200);
       
       if (crit) {
         sfxCrit();
-        floatText(`CRIT ${dmg}!`, enemyAnim.x, enemyAnim.y - 20, '#ff4', 8);
-        shake(6);
+        floatText(`CRIT ${dmg}!`, enemyAnim.x, enemyAnim.y - 25, '#ff4', 9);
+        shake(7);
         flash('#ff4');
-        spawnP(enemyAnim.x, enemyAnim.y, 12, '#ff4');
+        spawnP(enemyAnim.x, enemyAnim.y, 15, '#ff4', { glow: true });
         comboCount++;
       } else {
         sfxHit();
         floatText(`${dmg}`, enemyAnim.x, enemyAnim.y - 15, '#faa', 7);
         shake(3);
-        spawnP(enemyAnim.x, enemyAnim.y, 6, '#f66');
+        spawnP(enemyAnim.x, enemyAnim.y, 8, '#f66');
         comboCount++;
       }
       
-      if (comboCount > 1) floatText(`x${comboCount}`, enemyAnim.x + 12, enemyAnim.y - 8, '#fa0', 6);
+      if (comboCount > 1) floatText(`x${comboCount}`, enemyAnim.x + 14, enemyAnim.y - 10, '#fa0', 6);
       
       playerAnim.attacking = false;
       
@@ -491,30 +673,58 @@ function executeAction() {
         enemyDefeated();
       } else {
         combatPhase = 'enemy';
-        enemyAttackTimer = 0.6;
+        enemyAttackTimer = 0.5;
       }
     }, 150);
     
   } else if (action === 1) { // BLOCK
     combatPhase = 'blocking';
     playerAnim.blocking = true;
-    comboCount = 0;
-    sfxBlock();
-    floatText('BLOCK!', playerAnim.x, playerAnim.y - 20, '#8af', 7);
-    spawnP(playerAnim.x + 8, playerAnim.y - 5, 4, '#8af');
     
-    // Enemy attacks but blocked
+    // Perfect block: if you block right when enemy was about to attack
+    const blockQuality = comboCount >= 2 ? 0.8 : 0.65;
+    perfectBlock = comboCount >= 2;
+    comboCount = 0;
+    
+    if (perfectBlock) {
+      sfxPerfectBlock();
+      floatText('PERFECT!', playerAnim.x, playerAnim.y - 25, '#4ff', 8);
+      spawnP(playerAnim.x + 8, playerAnim.y - 5, 8, '#4ff', { glow: true });
+    } else {
+      sfxBlock();
+      floatText('BLOCK', playerAnim.x, playerAnim.y - 20, '#8af', 7);
+      spawnP(playerAnim.x + 8, playerAnim.y - 5, 4, '#8af');
+    }
+    
     setTimeout(() => {
-      const blocked = Math.floor(enemy.atk * 0.7);
-      const dmg = Math.max(1, enemy.atk - blocked - player.def);
+      const blockPct = perfectBlock ? 0.9 : blockQuality;
+      const blocked = Math.floor(enemy.atk * blockPct);
+      const dmg = Math.max(0, enemy.atk - blocked - Math.floor(player.def * 0.5));
       player.hp -= dmg;
-      if (dmg > 2) floatText(`-${dmg}`, playerAnim.x, playerAnim.y - 10, '#f88', 6);
+      if (dmg > 0) {
+        floatText(`-${dmg}`, playerAnim.x, playerAnim.y - 10, '#f88', 6);
+        playerAnim.hurt = true;
+        setTimeout(() => playerAnim.hurt = false, 150);
+      }
+      
+      // Perfect block counter-attack!
+      if (perfectBlock && enemy) {
+        const counterDmg = Math.floor(player.atk * 0.5);
+        enemy.hp -= counterDmg;
+        floatText(`${counterDmg}!`, enemyAnim.x, enemyAnim.y - 15, '#4ff', 7);
+        spawnP(enemyAnim.x, enemyAnim.y, 6, '#4ff');
+        enemyAnim.hurt = true;
+        setTimeout(() => enemyAnim.hurt = false, 150);
+        if (enemy.hp <= 0) { enemyDefeated(); playerAnim.blocking = false; return; }
+      }
+      
       playerAnim.blocking = false;
+      perfectBlock = false;
       if (player.hp <= 0) { playerDied(); return; }
       combatPhase = 'player';
       wheelTimer = 0;
       turnDelay = 0.3;
-    }, 600);
+    }, 500);
     
   } else { // POWER ATTACK
     combatPhase = 'animating';
@@ -528,19 +738,18 @@ function executeAction() {
       enemyAnim.hurt = true;
       setTimeout(() => enemyAnim.hurt = false, 300);
       
-      floatText(`💥${dmg}!`, enemyAnim.x, enemyAnim.y - 22, '#f84', 9);
-      shake(8);
+      floatText(`💥${dmg}!`, enemyAnim.x, enemyAnim.y - 25, '#f84', 10);
+      shake(10);
       flash('#f84');
-      spawnP(enemyAnim.x, enemyAnim.y, 20, '#f84', { speed: 1.5 });
+      spawnP(enemyAnim.x, enemyAnim.y, 25, '#f84', { speed: 1.5, glow: true });
       
       playerAnim.attacking = false;
       
       if (enemy.hp <= 0) {
         enemyDefeated();
       } else {
-        // Power leaves you open — enemy counter-attacks hard
         combatPhase = 'enemy';
-        enemyAttackTimer = 0.3; // faster retaliation
+        enemyAttackTimer = 0.3;
       }
     }, 200);
   }
@@ -550,7 +759,7 @@ function enemyTurn() {
   if (!enemy || combatPhase !== 'enemy') return;
   
   enemyAttacking = true;
-  const dmg = Math.max(1, enemy.atk - Math.floor(player.def * 0.5));
+  const dmg = Math.max(1, enemy.atk - Math.floor(player.def * 0.4));
   player.hp -= dmg;
   playerAnim.hurt = true;
   setTimeout(() => playerAnim.hurt = false, 250);
@@ -559,7 +768,7 @@ function enemyTurn() {
   floatText(`-${dmg}`, playerAnim.x, playerAnim.y - 12, '#f44', 7);
   shake(4);
   flash('#f44');
-  spawnP(playerAnim.x, playerAnim.y, 8, '#f44');
+  spawnP(playerAnim.x, playerAnim.y, 10, '#f44');
   
   if (player.hp <= 0) {
     playerDied();
@@ -577,32 +786,33 @@ function enemyDefeated() {
   sfxDeath();
   shake(10);
   flash('#fff');
-  spawnP(enemyAnim.x, enemyAnim.y, 25, enemy.def.col, { speed: 1.5 });
+  spawnP(enemyAnim.x, enemyAnim.y, 30, enemy.def.col, { speed: 1.5, glow: true });
   
   const xpGain = enemy.def.xp;
   const gpGain = enemy.def.gp;
   player.xp += xpGain;
   player.gold += gpGain;
+  player.kills++;
   
-  floatText(`+${xpGain} XP`, enemyAnim.x, enemyAnim.y - 30, '#af4', 7);
+  floatText(`+${xpGain} XP`, enemyAnim.x - 5, enemyAnim.y - 30, '#af4', 7);
   setTimeout(() => {
-    floatText(`+${gpGain} G`, enemyAnim.x, enemyAnim.y - 20, '#fd4', 7);
+    floatText(`+${gpGain} G`, enemyAnim.x + 5, enemyAnim.y - 20, '#fd4', 7);
     sfxCoin();
   }, 300);
   
-  // Level up check
-  const needed = player.level * 50;
+  // Level up
+  const needed = player.level * 40 + 20;
   if (player.xp >= needed) {
     player.level++;
     player.xp -= needed;
-    player.maxHp += 15;
+    player.maxHp += 12;
     player.hp = player.maxHp;
-    player.atk += 3;
-    player.def += 2;
+    player.atk += 2;
+    player.def += 1;
     setTimeout(() => {
       sfxLevelUp();
-      floatText('LEVEL UP!', GW/2, GH/2 - 30, '#fd4', 10);
-      spawnP(playerAnim.x, playerAnim.y, 20, '#fd4', { rise: true });
+      floatText('LEVEL UP!', GW/2, GH/2 - 40, '#fd4', 10);
+      spawnP(playerAnim.x, playerAnim.y, 25, '#fd4', { rise: true, glow: true });
     }, 500);
   }
   
@@ -610,53 +820,84 @@ function enemyDefeated() {
   enemy = null;
   encounter++;
   
+  // Track hi score
+  if (player.kills > hiScore) {
+    hiScore = player.kills;
+    try { localStorage.setItem('obo_hi', hiScore); } catch(e){}
+  }
+  
   setTimeout(() => {
     if (wasBoss) {
       if (currentZone < zones.length - 1) {
+        initShop();
         gameState = 'shop';
       } else {
         gameState = 'victory';
         sfxWin();
       }
     } else {
-      startEncounter();
+      startWalking();
     }
-  }, 1200);
+  }, 800);
 }
 
 function playerDied() {
   sfxDeath();
-  shake(12);
+  shake(15);
   flash('#f00');
   gameState = 'dead';
 }
 
-function revive() {
-  player.hp = player.maxHp;
-  player.gold = Math.floor(player.gold * 0.5); // lose half gold
-  encounter = Math.max(0, Math.floor(encounter / 5) * 5); // restart zone segment
-  startEncounter();
+// ============================================================
+// SHOP — fully functional one-button shop
+// ============================================================
+function initShop() {
+  // Pick 3 random items, one always a heal
+  shopItems = [allShopItems[0]]; // always include health potion
+  const others = allShopItems.slice(1).sort(() => Math.random() - 0.5).slice(0, 2);
+  shopItems = shopItems.concat(others);
+  shopItems.push({ name: 'CONTINUE', cost: 0, desc: 'Next zone', icon: '➡️', fn: null });
+  shopCursor = 0;
+  shopWheelTimer = 0;
 }
 
 // ============================================================
 // UPDATE
 // ============================================================
 function update() {
+  // Music
+  musicTimer -= deltaTime;
+  if (musicTimer <= 0) {
+    musicTimer = 1.5;
+    playMusic();
+  }
+  
   if (turnDelay > 0) { turnDelay -= deltaTime; tapped = false; return; }
   
   if (gameState === 'title') {
     if (tapped) {
-      player = { hp: 100, maxHp: 100, xp: 0, level: 1, gold: 0, atk: 12, def: 5 };
-      currentZone = 0; encounter = 0;
+      player = { hp: 100, maxHp: 100, xp: 0, level: 1, gold: 0, atk: 12, def: 5, kills: 0 };
+      currentZone = 0; encounter = 0; walkProgress = 0;
+      wheelSpeed = 1.2;
+      startWalking();
+    }
+  }
+  
+  else if (gameState === 'walking') {
+    walkProgress += deltaTime * 30;
+    playerAnim.walkPhase += deltaTime * 6;
+    if (Math.random() < 0.1) sfxWalk();
+    
+    if (walkProgress >= walkTarget) {
+      walking = false;
       startEncounter();
     }
   }
   
   else if (gameState === 'combat') {
-    // Wheel auto-cycling
     if (combatPhase === 'player') {
       wheelTimer += deltaTime;
-      const speed = wheelSpeed - currentZone * 0.15; // faster in later zones
+      const speed = wheelSpeed - currentZone * 0.1;
       if (wheelTimer >= speed) {
         wheelTimer -= speed;
         currentAction = (currentAction + 1) % actionWheel.length;
@@ -664,42 +905,60 @@ function update() {
       }
     }
     
-    // Enemy attack timing
     if (combatPhase === 'enemy') {
       enemyAttackTimer -= deltaTime;
-      if (enemyAttackTimer <= 0) {
-        enemyTurn();
-      }
+      if (enemyAttackTimer <= 0) enemyTurn();
     }
     
-    // Tap to execute
-    if (tapped && combatPhase === 'player') {
-      executeAction();
-    }
+    if (tapped && combatPhase === 'player') executeAction();
   }
   
   else if (gameState === 'shop') {
+    // Wheel cycles through shop items
+    shopWheelTimer += deltaTime;
+    const shopSpeed = 1.0;
+    if (shopWheelTimer >= shopSpeed) {
+      shopWheelTimer -= shopSpeed;
+      shopCursor = (shopCursor + 1) % shopItems.length;
+      sfxTick();
+    }
+    
     if (tapped) {
-      // Simple: tap cycles through items, auto-buy if affordable
-      // Actually let's just auto-heal and advance
-      // Better: show items, tap to cycle, hold... nah, keep it one-button
-      // Tap advances to next zone after brief shop
-      currentZone++;
-      encounter = 0;
-      player.hp = player.maxHp;
-      startEncounter();
+      const item = shopItems[shopCursor];
+      if (item.fn === null) {
+        // Continue
+        sfxSelect();
+        currentZone++;
+        encounter = 0;
+        player.hp = player.maxHp;
+        startWalking();
+      } else if (player.gold >= item.cost) {
+        player.gold -= item.cost;
+        item.fn();
+        sfxBuy();
+        floatText(`${item.icon} ${item.name}!`, GW/2, GH/2 - 20, '#4f4', 8);
+        spawnP(GW/2, GH/2, 10, '#4f4', { rise: true });
+        // Remove bought item, reset cursor
+        shopItems.splice(shopCursor, 1);
+        shopCursor = shopCursor % shopItems.length;
+        shopWheelTimer = 0;
+      } else {
+        floatText('Not enough gold!', GW/2, GH/2, '#f44', 7);
+      }
     }
   }
   
   else if (gameState === 'victory') {
-    if (tapped) {
-      gameState = 'title';
-    }
+    if (tapped) gameState = 'title';
   }
   
   else if (gameState === 'dead') {
     if (tapped) {
-      revive();
+      // Revive with penalty
+      player.hp = player.maxHp;
+      player.gold = Math.floor(player.gold * 0.5);
+      encounter = Math.max(0, Math.floor(encounter / 5) * 5);
+      startWalking();
     }
   }
   
@@ -719,6 +978,7 @@ function draw() {
   drawBG();
   
   if (gameState === 'title') drawTitle();
+  else if (gameState === 'walking') drawWalking();
   else if (gameState === 'combat') drawCombat();
   else if (gameState === 'shop') drawShop();
   else if (gameState === 'victory') drawVictory();
@@ -729,178 +989,314 @@ function draw() {
 }
 
 function drawTitle() {
-  // Darken bg
-  ctx.save(); ctx.globalAlpha = 0.5;
+  ctx.save(); ctx.globalAlpha = 0.6;
   px(0, 0, GW, GH, '#000');
   ctx.restore();
   
-  txt('ONE BUTTON', GW/2, 100, 12, '#fd4');
-  txt('ODYSSEY', GW/2, 118, 12, '#fd4');
+  // Logo with glow
+  ctx.save(); ctx.globalAlpha = 0.3;
+  txt('ONE BUTTON', GW/2, GH*0.28, 14, '#fa0');
+  txt('ODYSSEY 🗡️', GW/2, GH*0.28 + 18, 14, '#fa0');
+  ctx.restore();
+  txt('ONE BUTTON', GW/2, GH*0.28, 13, '#fd4');
+  txt('ODYSSEY 🗡️', GW/2, GH*0.28 + 17, 13, '#fd4');
   
-  // Hero
-  drawHero(GW/2, 180, false, false, false);
+  // Animated hero
+  const heroY = GH * 0.5;
+  playerAnim.walkPhase += deltaTime * 4;
+  drawHero(GW/2, heroY, false, false, false);
   
   // Pulsing prompt
-  const pulse = 0.5 + Math.sin(gameTime * 3) * 0.3;
+  const pulse = 0.4 + Math.sin(gameTime * 3) * 0.3;
   ctx.save(); ctx.globalAlpha = pulse;
-  txt('TAP TO BEGIN', GW/2, 240, 8, '#fff');
+  txt('TAP TO BEGIN', GW/2, GH*0.68, 9, '#fff');
   ctx.restore();
   
-  txt('An RPG with ONE button', GW/2, 275, 6, '#888');
-  txt('Tap when the right action', GW/2, 286, 6, '#888');
-  txt('is highlighted!', GW/2, 297, 6, '#888');
+  // Instructions
+  txt('A one-button RPG', GW/2, GH*0.78, 6, '#888');
+  txt('Tap when the right', GW/2, GH*0.82, 6, '#888');
+  txt('action is highlighted!', GW/2, GH*0.86, 6, '#888');
+  
+  // Hi score
+  if (hiScore > 0) {
+    txt(`Best: ${hiScore} kills`, GW/2, GH*0.93, 6, '#666');
+  }
+  
+  // Version
+  txt('v2.0', GW/2, GH - 6, 5, '#333');
+}
+
+function drawWalking() {
+  // Hero walking
+  drawHero(playerAnim.x, playerAnim.y, false, false, false);
+  
+  // Zone name
+  px(0, 0, GW, 18, 'rgba(0,0,0,0.5)');
+  txt(zones[currentZone].name, GW/2, 9, 7, '#ccc');
+  
+  // Progress dots
+  const total = 6;
+  const dotY = 16;
+  for (let i = 0; i < total; i++) {
+    const dx = GW/2 - (total * 5)/2 + i * 6;
+    const done = i < encounter;
+    const isBoss = (i + 1) % 5 === 0 || i === total - 1;
+    px(dx, dotY, 3, 3, done ? '#4a4' : (isBoss ? '#a44' : '#444'));
+  }
+  
+  // Walking indicator
+  const dots = '.'.repeat(1 + Math.floor(gameTime * 3) % 3);
+  txt(`Walking${dots}`, GW/2, GH*0.72, 7, '#888');
+  
+  // Stats bar
+  px(0, GH - 14, GW, 14, 'rgba(0,0,0,0.6)');
+  txt(`LV${player.level}  ❤️${player.hp}  ⚔${player.atk}  🛡${player.def}  ${player.gold}G`, GW/2, GH - 7, 5, '#aaa');
 }
 
 function drawCombat() {
   if (!enemy) return;
   
   // Top bar
-  px(0, 0, GW, 32, 'rgba(0,0,0,0.7)');
+  px(0, 0, GW, 40, 'rgba(0,0,0,0.7)');
   
-  // Player HP
-  txt('HP', 4, 8, 6, '#8f8', 'left');
-  drawHPBar(14, 4, 55, 7, player.hp, player.maxHp, '#4a4', '#311');
-  txt(`${player.hp}`, 42, 8, 5, '#fff');
+  // Player side
+  txt('YOU', 8, 7, 6, '#8f8', 'left');
+  drawHPBar(8, 13, GW/2 - 15, 7, player.hp, player.maxHp, '#4a4', '#311');
+  txt(`${player.hp}/${player.maxHp}`, GW/4, 10, 5, '#8f8');
   
-  // Enemy HP
+  // Enemy side
   const eDef = enemy.def;
-  txt(enemy.isBoss ? eDef.name : eDef.name, GW-4, 8, 6, eDef.col, 'right');
-  drawHPBar(GW-70, 4, 55, 7, enemy.hp, enemy.maxHp, enemy.isBoss ? '#a44' : '#4a4', '#311');
+  txt(enemy.isBoss ? `⚠ ${eDef.name}` : eDef.name, GW-8, 7, 6, eDef.col, 'right');
+  drawHPBar(GW/2 + 7, 13, GW/2 - 15, 7, enemy.hp, enemy.maxHp, enemy.isBoss ? '#a44' : '#c84', '#311');
+  
+  // XP bar
+  const xpNeeded = player.level * 40 + 20;
+  const xpRatio = player.xp / xpNeeded;
+  drawHPBar(8, 24, GW - 16, 4, player.xp, xpNeeded, '#88f', '#224');
+  txt(`LV${player.level}`, 8, 32, 5, '#88f', 'left');
+  txt(`${player.gold}G`, GW-8, 32, 5, '#fd4', 'right');
   
   // Zone + encounter
-  txt(zones[currentZone].name, GW/2, 22, 6, zones[currentZone].path);
-  txt(`${encounter+1}/6`, GW/2, 29, 5, '#666');
+  txt(`${zones[currentZone].name} ${encounter+1}/6`, GW/2, 32, 5, '#666');
   
   // Draw characters
-  drawMonster(enemyAnim.x, enemyAnim.y, eDef, enemyAnim.hurt);
+  drawMonster(enemyAnim.x, enemyAnim.y, eDef, enemyAnim.hurt, enemy.hp/enemy.maxHp);
   drawHero(playerAnim.x, playerAnim.y, playerAnim.attacking, playerAnim.hurt, playerAnim.blocking);
+  
+  // VS effect during combat
+  if (combatPhase === 'player') {
+    ctx.save(); ctx.globalAlpha = 0.15;
+    txt('VS', GW/2, GH*0.52, 20, '#fff');
+    ctx.restore();
+  }
   
   // Enemy attack warning
   if (combatPhase === 'enemy') {
     const warn = Math.sin(gameTime * 10) > 0;
     if (warn) {
-      txt('!', enemyAnim.x, enemyAnim.y - 25, 10, '#f44');
+      txt('⚠', enemyAnim.x, enemyAnim.y - 28, 12, '#f44');
+      // Line toward player
+      ctx.save(); ctx.globalAlpha = 0.3;
+      ctx.strokeStyle = '#f44'; ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(enemyAnim.x, enemyAnim.y); ctx.lineTo(playerAnim.x, playerAnim.y); ctx.stroke();
+      ctx.restore();
     }
   }
   
   // === ACTION WHEEL (bottom) ===
-  const wheelY = 265;
-  px(0, wheelY - 15, GW, 55, 'rgba(0,0,0,0.6)');
+  const wheelY = GH - 55;
+  px(0, wheelY - 18, GW, 70, 'rgba(0,0,0,0.7)');
   
-  // Draw 3 actions
+  // Draw action bar with clear visual hierarchy
   const labels = ['⚔ ATK', '🛡 BLK', '⚡ PWR'];
   const colors = ['#f66', '#68f', '#fa4'];
-  const bgCols = ['#411', '#114', '#441'];
+  const bgActive = ['#622', '#226', '#642'];
+  const barW = Math.floor((GW - 16) / 3);
   
   for (let i = 0; i < 3; i++) {
-    const ax = 10 + i * 58;
-    const ay = wheelY;
+    const ax = 4 + i * (barW + 4);
+    const ay = wheelY - 12;
     const active = (i === currentAction && combatPhase === 'player');
     
     // Background
-    px(ax, ay - 10, 52, 22, active ? bgCols[i] : '#222');
+    px(ax, ay, barW, 24, active ? bgActive[i] : '#181818');
+    
     // Border
     if (active) {
-      // Pulsing highlight
-      const p = 0.7 + Math.sin(gameTime * 8) * 0.3;
-      ctx.save(); ctx.globalAlpha = p;
       ctx.strokeStyle = colors[i];
       ctx.lineWidth = 2;
-      ctx.strokeRect(ax, ay - 10, 52, 22);
+      ctx.strokeRect(ax, ay, barW, 24);
+      
+      // Glow
+      ctx.save(); ctx.globalAlpha = 0.2 + Math.sin(gameTime * 8) * 0.1;
+      px(ax, ay, barW, 24, colors[i]);
       ctx.restore();
       
-      // Arrow indicator
-      txt('▼', ax + 26, ay - 16, 6, colors[i]);
+      // Arrow
+      txt('▼', ax + barW/2, ay - 6, 7, colors[i]);
+    } else {
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(ax, ay, barW, 24);
     }
     
-    txt(labels[i], ax + 26, ay, active ? 7 : 6, active ? colors[i] : '#555');
+    txt(labels[i], ax + barW/2, ay + 12, active ? 8 : 6, active ? '#fff' : '#555');
   }
   
-  // Combo counter
+  // Combo counter with flair
   if (comboCount > 1) {
-    txt(`COMBO x${comboCount}`, GW/2, wheelY + 22, 7, '#fa0');
-  }
-  
-  // Instructions
-  if (combatPhase === 'player') {
-    const p2 = 0.4 + Math.sin(gameTime * 4) * 0.2;
-    ctx.save(); ctx.globalAlpha = p2;
-    txt('TAP!', GW/2, wheelY + 35, 8, '#fff');
+    const comboAlpha = 0.6 + Math.sin(gameTime * 6) * 0.3;
+    ctx.save(); ctx.globalAlpha = comboAlpha;
+    txt(`🔥 COMBO x${comboCount}`, GW/2, wheelY + 20, 7, '#fa0');
     ctx.restore();
   }
   
-  // Stats bar
-  px(0, GH - 14, GW, 14, 'rgba(0,0,0,0.5)');
-  txt(`LV${player.level}  ATK${player.atk}  DEF${player.def}  ${player.gold}G`, GW/2, GH - 7, 5, '#888');
+  // Tap prompt
+  if (combatPhase === 'player') {
+    const p2 = 0.3 + Math.sin(gameTime * 4) * 0.2;
+    ctx.save(); ctx.globalAlpha = p2;
+    txt('TAP!', GW/2, wheelY + 32, 9, '#fff');
+    ctx.restore();
+  }
 }
 
 function drawShop() {
-  px(0, 0, GW, GH, '#1a1a2a');
+  // Full screen shop with nice layout
+  px(0, 0, GW, GH, '#0a0a15');
   
-  txt('ZONE CLEARED!', GW/2, 40, 10, '#fd4');
-  txt(zones[currentZone].name, GW/2, 55, 7, '#aaa');
+  // Decorative border
+  ctx.strokeStyle = '#fd4';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(4, 4, GW-8, GH-8);
   
-  // Auto-heal
-  txt('HP fully restored!', GW/2, 90, 7, '#8f8');
-  txt(`Gold: ${player.gold}`, GW/2, 110, 7, '#fd4');
+  txt('🏪 ZONE CLEARED!', GW/2, GH*0.08, 11, '#fd4');
+  txt(zones[currentZone].name + ' conquered!', GW/2, GH*0.14, 7, '#aaa');
+  
+  // HP restored message
+  txt('❤️ HP fully restored!', GW/2, GH*0.2, 7, '#8f8');
   
   // Stats
-  txt(`LV ${player.level}`, GW/2, 140, 8, '#fff');
-  txt(`HP ${player.hp}/${player.maxHp}`, GW/2, 155, 7, '#8f8');
-  txt(`ATK ${player.atk}  DEF ${player.def}`, GW/2, 170, 7, '#aaf');
+  txt(`LV ${player.level}  |  HP ${player.hp}/${player.maxHp}`, GW/2, GH*0.26, 6, '#888');
+  txt(`⚔ ${player.atk}  🛡 ${player.def}  💰 ${player.gold}G`, GW/2, GH*0.3, 6, '#888');
+  
+  // Shop items
+  const startY = GH * 0.38;
+  const itemH = GH * 0.12;
+  
+  for (let i = 0; i < shopItems.length; i++) {
+    const item = shopItems[i];
+    const iy = startY + i * (itemH + 4);
+    const active = i === shopCursor;
+    const affordable = item.cost === 0 || player.gold >= item.cost;
+    
+    // Background
+    if (active) {
+      px(8, iy, GW - 16, itemH, affordable ? '#224' : '#322');
+      ctx.strokeStyle = affordable ? '#4af' : '#f44';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(8, iy, GW - 16, itemH);
+      
+      // Arrow
+      txt('►', 14, iy + itemH/2, 8, '#4af');
+    } else {
+      px(8, iy, GW - 16, itemH, '#111');
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(8, iy, GW - 16, itemH);
+    }
+    
+    const alpha = active ? 1 : (affordable ? 0.5 : 0.3);
+    ctx.save(); ctx.globalAlpha = alpha;
+    
+    txt(item.icon, 30, iy + itemH/2 - 4, 12, '#fff');
+    txt(item.name, 46, iy + itemH/2 - 4, 7, '#fff', 'left');
+    txt(item.desc, 46, iy + itemH/2 + 6, 5, '#aaa', 'left');
+    if (item.cost > 0) {
+      txt(`${item.cost}G`, GW - 16, iy + itemH/2, 7, affordable ? '#fd4' : '#f44', 'right');
+    }
+    
+    ctx.restore();
+  }
+  
+  // Instructions
+  const p = 0.3 + Math.sin(gameTime * 3) * 0.2;
+  ctx.save(); ctx.globalAlpha = p;
+  txt('TAP to select highlighted item', GW/2, GH - 24, 6, '#888');
+  ctx.restore();
   
   // Next zone preview
   if (currentZone < zones.length - 1) {
-    txt('Next:', GW/2, 210, 7, '#888');
-    txt(zones[currentZone + 1].name, GW/2, 225, 8, zones[currentZone + 1].path);
+    txt(`Next: ${zones[currentZone + 1].name}`, GW/2, GH - 12, 5, '#555');
   }
-  
-  const p = 0.5 + Math.sin(gameTime * 3) * 0.3;
-  ctx.save(); ctx.globalAlpha = p;
-  txt('TAP TO CONTINUE', GW/2, 280, 8, '#fff');
-  ctx.restore();
 }
 
 function drawVictory() {
   px(0, 0, GW, GH, '#0a0a1a');
   
   // Confetti
-  if (Math.random() < 0.1) {
-    spawnP(Math.random() * GW, 0, 1, ['#f44','#4f4','#44f','#fd4','#f4f'][Math.floor(Math.random()*5)], { speed: 0.5 });
+  if (Math.random() < 0.15) {
+    spawnP(Math.random() * GW, -5, 1, ['#f44','#4f4','#44f','#fd4','#f4f'][Math.floor(Math.random()*5)], { speed: 0.3, glow: true });
   }
   
-  txt('VICTORY!', GW/2, 80, 14, '#fd4');
-  txt('The Dark Lord is slain!', GW/2, 105, 7, '#fff');
-  txt('Peace returns to the land.', GW/2, 118, 7, '#aaa');
+  // Crown
+  px(GW/2 - 8, GH*0.18, 16, 3, '#fd4');
+  px(GW/2 - 6, GH*0.15, 3, 6, '#fd4');
+  px(GW/2 - 1, GH*0.13, 3, 8, '#fd4');
+  px(GW/2 + 4, GH*0.15, 3, 6, '#fd4');
+  
+  txt('👑 VICTORY! 👑', GW/2, GH*0.28, 14, '#fd4');
+  txt('The Dark Lord is slain!', GW/2, GH*0.36, 7, '#fff');
+  txt('Peace returns to the land.', GW/2, GH*0.41, 7, '#aaa');
   
   // Trophy
-  px(GW/2-6, 145, 12, 20, '#fd4');
-  px(GW/2-8, 140, 16, 6, '#fd4');
-  px(GW/2-3, 165, 6, 4, '#864');
-  px(GW/2-5, 169, 10, 3, '#864');
+  px(GW/2-6, GH*0.48, 12, 16, '#fd4');
+  px(GW/2-8, GH*0.46, 16, 5, '#fd4');
+  px(GW/2-3, GH*0.48+16, 6, 3, '#864');
+  px(GW/2-5, GH*0.48+19, 10, 3, '#864');
   
-  txt(`Level: ${player.level}`, GW/2, 200, 8, '#fff');
-  txt(`Gold: ${player.gold}`, GW/2, 215, 7, '#fd4');
+  // Stats
+  txt(`Level: ${player.level}`, GW/2, GH*0.66, 8, '#fff');
+  txt(`Kills: ${player.kills}`, GW/2, GH*0.71, 7, '#aaa');
+  txt(`Gold: ${player.gold}`, GW/2, GH*0.76, 7, '#fd4');
   
-  const p = 0.5 + Math.sin(gameTime * 2) * 0.3;
+  // Rating
+  let rating = '⭐', rCol = '#fd4';
+  if (player.level >= 8) { rating = '⭐⭐⭐ LEGENDARY'; rCol = '#ffa'; }
+  else if (player.level >= 6) { rating = '⭐⭐ HEROIC'; rCol = '#fd4'; }
+  else { rating = '⭐ BRAVE'; rCol = '#da4'; }
+  txt(rating, GW/2, GH*0.82, 8, rCol);
+  
+  const p = 0.4 + Math.sin(gameTime * 2) * 0.3;
   ctx.save(); ctx.globalAlpha = p;
-  txt('TAP TO PLAY AGAIN', GW/2, 270, 7, '#888');
+  txt('TAP TO PLAY AGAIN', GW/2, GH*0.92, 7, '#888');
   ctx.restore();
 }
 
 function drawDead() {
-  px(0, 0, GW, GH, '#1a0a0a');
+  px(0, 0, GW, GH, '#1a0505');
   
-  txt('DEFEATED', GW/2, 100, 12, '#f44');
-  txt('Your journey ends here...', GW/2, 125, 7, '#aaa');
-  txt('but heroes never truly die.', GW/2, 138, 7, '#888');
+  // Skull decoration
+  txt('💀', GW/2, GH*0.22, 24, '#f44');
   
-  txt(`Lost: ${Math.floor(player.gold * 0.5)}G`, GW/2, 175, 7, '#f88');
+  txt('DEFEATED', GW/2, GH*0.35, 13, '#f44');
+  txt('Your journey ends here...', GW/2, GH*0.43, 7, '#aaa');
+  txt('but heroes never truly die.', GW/2, GH*0.48, 7, '#888');
   
-  const p = 0.5 + Math.sin(gameTime * 3) * 0.3;
+  // Penalty info
+  txt(`Kills: ${player.kills}`, GW/2, GH*0.58, 7, '#888');
+  txt(`Lost: ${Math.floor(player.gold * 0.5)}G`, GW/2, GH*0.63, 7, '#f88');
+  
+  if (player.kills >= hiScore && player.kills > 0) {
+    txt('🏆 NEW BEST!', GW/2, GH*0.7, 8, '#fd4');
+  }
+  
+  const p = 0.4 + Math.sin(gameTime * 3) * 0.3;
   ctx.save(); ctx.globalAlpha = p;
-  txt('TAP TO REVIVE', GW/2, 240, 8, '#fff');
+  txt('TAP TO REVIVE', GW/2, GH*0.82, 9, '#fff');
   ctx.restore();
+  
+  txt('(Lose half gold, restart zone segment)', GW/2, GH*0.88, 5, '#555');
 }
 
 // ============================================================
