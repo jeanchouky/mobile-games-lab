@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>Pixel Painter</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-user-select:none;user-select:none}
+body{background:#1a1a2e;overflow:hidden;font-family:-apple-system,system-ui,sans-serif;color:#fff;display:flex;flex-direction:column;height:100vh;touch-action:none}
+#toolbar{display:flex;align-items:center;padding:8px;gap:6px;background:rgba(0,0,0,0.4);backdrop-filter:blur(8px);z-index:10;flex-wrap:wrap}
+#toolbar button{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);color:#fff;padding:8px 12px;border-radius:8px;font-size:14px;cursor:pointer;min-width:36px}
+#toolbar button.active{background:rgba(255,217,61,0.2);border-color:#ffd93d}
+#toolbar button:active{transform:scale(0.95)}
+#size-display{font-size:11px;color:#888;margin-left:auto}
+canvas{flex:1;display:block;background:#16213e}
+#palette{display:flex;padding:6px;gap:4px;background:rgba(0,0,0,0.4);flex-wrap:wrap;justify-content:center}
+.swatch{width:32px;height:32px;border-radius:6px;border:2px solid transparent;cursor:pointer;transition:all .1s}
+.swatch.active{border-color:#fff;transform:scale(1.15);box-shadow:0 0 10px rgba(255,255,255,0.3)}
+#bottom-bar{display:flex;padding:8px;gap:6px;background:rgba(0,0,0,0.4);justify-content:center}
+#bottom-bar button{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);color:#fff;padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer}
+#bottom-bar button:active{transform:scale(0.95)}
+#gallery{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(26,26,46,0.97);z-index:20;overflow-y:auto;padding:16px}
+#gallery h2{text-align:center;margin-bottom:16px}
+#gallery .gallery-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:10px}
+#gallery .gallery-item{aspect-ratio:1;background:#16213e;border-radius:8px;overflow:hidden;cursor:pointer;border:2px solid rgba(255,255,255,0.1)}
+#gallery .gallery-item img{width:100%;height:100%;object-fit:contain;image-rendering:pixelated}
+#gallery .close-btn{position:fixed;top:16px;right:16px;background:rgba(255,255,255,0.1);border:none;color:#fff;width:40px;height:40px;border-radius:50%;font-size:20px;cursor:pointer}
+.hidden{display:none!important}
+#prompt-bar{text-align:center;padding:6px;background:rgba(255,217,61,0.1);font-size:12px;color:#ffd93d}
+</style>
+</head>
+<body>
+<div id="prompt-bar">✏️ Daily Prompt: <span id="daily-prompt">Loading...</span></div>
+<div id="toolbar">
+  <button id="btn-draw" class="active" onclick="setTool('draw')">✏️</button>
+  <button id="btn-erase" onclick="setTool('erase')">🧹</button>
+  <button id="btn-fill" onclick="setTool('fill')">🪣</button>
+  <button id="btn-undo" onclick="undo()">↩️</button>
+  <button id="btn-redo" onclick="redo()">↪️</button>
+  <button onclick="clearCanvas()">🗑️</button>
+  <span id="size-display">16×16</span>
+</div>
+<canvas id="c"></canvas>
+<div id="palette"></div>
+<div id="bottom-bar">
+  <button onclick="changeSize(-4)">➖ Size</button>
+  <button onclick="changeSize(4)">➕ Size</button>
+  <button onclick="saveToGallery()">💾 Save</button>
+  <button onclick="showGallery()">🖼️ Gallery</button>
+  <button onclick="shareArt()">📤 Share</button>
+</div>
+<div id="gallery" class="hidden">
+  <button class="close-btn" onclick="hideGallery()">✕</button>
+  <h2>🖼️ Gallery</h2>
+  <div class="gallery-grid" id="gallery-grid"></div>
+</div>
+
+<script>
+const C=document.getElementById('c'),X=C.getContext('2d');
+const COLORS=[
+  '#000000','#ffffff','#ff6b6b','#e94560','#c23152','#a55eea','#6c5ce7',
+  '#4d96ff','#74b9ff','#0abde3','#1dd1a1','#6bcb77','#badc58','#ffd93d',
+  '#fdcb6e','#e17055','#d63031','#b33939','#6d4c41','#8d6e63',
+  '#bdbdbd','#757575','#424242','#2d3436','#636e72','#dfe6e9',
+  '#fab1a0','#ffeaa7','#55efc4','#81ecec','#a29bfe','#fd79a8'
+];
+
+let gridSize=16,pixels=[],tool='draw',currentColor='#ff6b6b';
+let history=[],historyIdx=-1,maxHistory=50;
+let cellPx,offX,offY,drawing=false;
+
+const PROMPTS=['a sunset','your pet','a robot','a tree','a spaceship','a castle','a dragon','pizza','a ghost','the ocean','a mountain','a flower','a cat face','a mushroom','a sword','rainy day','a star','your mood','a burger','the moon','a house','a bird','a fish','a heart','a skull','fire','ice cream','a rainbow','a crown','lightning'];
+
+function initPixels(){
+  pixels=[];
+  for(let y=0;y<gridSize;y++){
+    pixels[y]=[];
+    for(let x=0;x<gridSize;x++)pixels[y][x]=null;
+  }
+  history=[];historyIdx=-1;
+  pushHistory();
+}
+
+function pushHistory(){
+  history=history.slice(0,historyIdx+1);
+  history.push(JSON.parse(JSON.stringify(pixels)));
+  if(history.length>maxHistory)history.shift();
+  historyIdx=history.length-1;
+}
+
+function undo(){
+  if(historyIdx>0){historyIdx--;pixels=JSON.parse(JSON.stringify(history[historyIdx]))}
+}
+function redo(){
+  if(historyIdx<history.length-1){historyIdx++;pixels=JSON.parse(JSON.stringify(history[historyIdx]))}
+}
+
+function resize(){
+  let dpr=window.devicePixelRatio||1;
+  let w=window.innerWidth;
+  let toolbarH=document.getElementById('toolbar').offsetHeight;
+  let paletteH=document.getElementById('palette').offsetHeight;
+  let bottomH=document.getElementById('bottom-bar').offsetHeight;
+  let promptH=document.getElementById('prompt-bar').offsetHeight;
+  let h=window.innerHeight-toolbarH-paletteH-bottomH-promptH;
+  C.width=w*dpr;C.height=h*dpr;
+  C.style.width=w+'px';C.style.height=h+'px';
+  X.setTransform(dpr,0,0,dpr,0,0);
+  cellPx=Math.floor(Math.min(w,h)*0.9/gridSize);
+  offX=(w-gridSize*cellPx)/2;
+  offY=(h-gridSize*cellPx)/2;
+}
+
+function render(){
+  let w=C.width/(window.devicePixelRatio||1);
+  let h=C.height/(window.devicePixelRatio||1);
+  X.fillStyle='#16213e';X.fillRect(0,0,w,h);
+  
+  // Grid
+  for(let y=0;y<gridSize;y++){
+    for(let x=0;x<gridSize;x++){
+      let px=offX+x*cellPx,py=offY+y*cellPx;
+      if(pixels[y][x]){
+        X.fillStyle=pixels[y][x];
+        X.fillRect(px,py,cellPx,cellPx);
+      }else{
+        X.fillStyle=(x+y)%2===0?'rgba(255,255,255,0.03)':'rgba(255,255,255,0.06)';
+        X.fillRect(px,py,cellPx,cellPx);
+      }
+    }
+  }
+  
+  // Grid lines
+  X.strokeStyle='rgba(255,255,255,0.08)';X.lineWidth=0.5;
+  for(let i=0;i<=gridSize;i++){
+    X.beginPath();X.moveTo(offX+i*cellPx,offY);X.lineTo(offX+i*cellPx,offY+gridSize*cellPx);X.stroke();
+    X.beginPath();X.moveTo(offX,offY+i*cellPx);X.lineTo(offX+gridSize*cellPx,offY+i*cellPx);X.stroke();
+  }
+  
+  requestAnimationFrame(render);
+}
+
+function getCellFromEvent(e){
+  let rect=C.getBoundingClientRect();
+  let px=(e.clientX||e.touches[0].clientX)-rect.left;
+  let py=(e.clientY||e.touches[0].clientY)-rect.top;
+  let x=Math.floor((px-offX)/cellPx);
+  let y=Math.floor((py-offY)/cellPx);
+  if(x<0||x>=gridSize||y<0||y>=gridSize)return null;
+  return{x,y};
+}
+
+function paint(cell){
+  if(!cell)return;
+  if(tool==='draw'){pixels[cell.y][cell.x]=currentColor}
+  else if(tool==='erase'){pixels[cell.y][cell.x]=null}
+  else if(tool==='fill'){floodFill(cell.x,cell.y,pixels[cell.y][cell.x],currentColor)}
+}
+
+function floodFill(x,y,target,fill){
+  if(target===fill)return;
+  let stack=[{x,y}];
+  let visited=new Set();
+  while(stack.length){
+    let{x:cx,y:cy}=stack.pop();
+    if(cx<0||cx>=gridSize||cy<0||cy>=gridSize)continue;
+    let key=cy*gridSize+cx;
+    if(visited.has(key))continue;
+    visited.add(key);
+    if(pixels[cy][cx]!==target)continue;
+    pixels[cy][cx]=fill;
+    stack.push({x:cx+1,y:cy},{x:cx-1,y:cy},{x:cx,y:cy+1},{x:cx,y:cy-1});
+  }
+}
+
+C.addEventListener('touchstart',e=>{e.preventDefault();drawing=true;let c=getCellFromEvent(e);paint(c)});
+C.addEventListener('touchmove',e=>{e.preventDefault();if(drawing){let c=getCellFromEvent(e);paint(c)}});
+C.addEventListener('touchend',e=>{e.preventDefault();if(drawing){drawing=false;pushHistory()}});
+C.addEventListener('mousedown',e=>{drawing=true;paint(getCellFromEvent(e))});
+C.addEventListener('mousemove',e=>{if(drawing)paint(getCellFromEvent(e))});
+C.addEventListener('mouseup',()=>{if(drawing){drawing=false;pushHistory()}});
+
+function setTool(t){
+  tool=t;
+  document.querySelectorAll('#toolbar button').forEach(b=>b.classList.remove('active'));
+  document.getElementById('btn-'+t)?.classList.add('active');
+}
+
+function clearCanvas(){
+  for(let y=0;y<gridSize;y++)for(let x=0;x<gridSize;x++)pixels[y][x]=null;
+  pushHistory();
+}
+
+function changeSize(d){
+  gridSize=Math.max(8,Math.min(64,gridSize+d));
+  document.getElementById('size-display').textContent=`${gridSize}×${gridSize}`;
+  initPixels();resize();
+}
+
+function toDataURL(){
+  let tc=document.createElement('canvas');
+  tc.width=gridSize;tc.height=gridSize;
+  let tx=tc.getContext('2d');
+  for(let y=0;y<gridSize;y++){
+    for(let x=0;x<gridSize;x++){
+      if(pixels[y][x]){tx.fillStyle=pixels[y][x];tx.fillRect(x,y,1,1)}
+    }
+  }
+  return tc.toDataURL();
+}
+
+function saveToGallery(){
+  let gallery=JSON.parse(localStorage.getItem('pixelpainter_gallery')||'[]');
+  gallery.unshift({data:toDataURL(),date:Date.now(),size:gridSize});
+  if(gallery.length>50)gallery.pop();
+  localStorage.setItem('pixelpainter_gallery',JSON.stringify(gallery));
+  // Flash feedback
+  document.body.style.background='#2a2a4e';
+  setTimeout(()=>document.body.style.background='#1a1a2e',200);
+}
+
+function showGallery(){
+  let gallery=JSON.parse(localStorage.getItem('pixelpainter_gallery')||'[]');
+  let grid=document.getElementById('gallery-grid');
+  grid.innerHTML='';
+  if(gallery.length===0){grid.innerHTML='<p style="color:#888;text-align:center;grid-column:1/-1">No saved art yet!</p>'}
+  gallery.forEach((item,i)=>{
+    let div=document.createElement('div');div.className='gallery-item';
+    let img=document.createElement('img');img.src=item.data;
+    div.appendChild(img);
+    div.onclick=()=>{
+      if(confirm('Load this artwork?')){
+        let tc=document.createElement('canvas');tc.width=item.size;tc.height=item.size;
+        // Load back... simplified: just show
+        hideGallery();
+      }
+    };
+    grid.appendChild(div);
+  });
+  document.getElementById('gallery').classList.remove('hidden');
+}
+
+function hideGallery(){document.getElementById('gallery').classList.add('hidden')}
+
+function shareArt(){
+  let url=toDataURL();
+  if(navigator.share){
+    navigator.share({title:'My Pixel Art',url});
+  }else{
+    let a=document.createElement('a');a.href=url;a.download='pixel-art.png';a.click();
+  }
+}
+
+// Build palette
+let pal=document.getElementById('palette');
+COLORS.forEach(c=>{
+  let d=document.createElement('div');d.className='swatch';
+  if(c===currentColor)d.classList.add('active');
+  d.style.background=c;
+  d.onclick=()=>{
+    currentColor=c;tool='draw';setTool('draw');
+    document.querySelectorAll('.swatch').forEach(s=>s.classList.remove('active'));
+    d.classList.add('active');
+  };
+  pal.appendChild(d);
+});
+
+// Daily prompt
+let day=Math.floor(Date.now()/86400000);
+document.getElementById('daily-prompt').textContent=PROMPTS[day%PROMPTS.length];
+
+initPixels();
+window.addEventListener('resize',resize);
+resize();
+render();
+</script>
+</body>
+</html>

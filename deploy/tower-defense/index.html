@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>Tower Defense Lite</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;touch-action:none;-webkit-user-select:none;user-select:none}
+body{background:#1a1a2e;overflow:hidden;font-family:-apple-system,system-ui,sans-serif;color:#fff}
+canvas{display:block}
+#hud{position:absolute;top:0;left:0;width:100%;padding:8px 12px;display:flex;justify-content:space-between;align-items:center;z-index:10;background:rgba(0,0,0,0.5);backdrop-filter:blur(8px);font-size:13px;font-weight:700}
+.hud-item{display:flex;align-items:center;gap:4px}
+#tower-panel{position:absolute;bottom:0;left:0;width:100%;display:flex;justify-content:center;gap:10px;padding:12px;z-index:10;background:rgba(0,0,0,0.6);backdrop-filter:blur(8px)}
+.tower-btn{width:70px;height:70px;border-radius:12px;border:2px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.05);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s}
+.tower-btn.selected{border-color:#ffd93d;background:rgba(255,217,61,0.15);box-shadow:0 0 15px rgba(255,217,61,0.3)}
+.tower-btn .icon{font-size:24px}
+.tower-btn .cost{font-size:11px;color:#ffd93d;font-weight:700}
+.tower-btn .name{font-size:9px;color:#aaa;text-transform:uppercase;letter-spacing:0.5px}
+#menu{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(26,26,46,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:20}
+#menu h1{font-size:40px;margin-bottom:6px}
+#menu p{color:#888;margin-bottom:24px;font-size:14px}
+#menu button{background:linear-gradient(135deg,#e94560,#c23152);border:none;color:#fff;padding:16px 40px;border-radius:50px;font-size:18px;font-weight:700;cursor:pointer}
+#menu button:active{transform:scale(0.95)}
+.hidden{display:none!important}
+#wave-banner{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:36px;font-weight:900;pointer-events:none;z-index:10;opacity:0;text-shadow:0 0 20px rgba(233,69,96,0.8);transition:opacity .3s}
+#game-over{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(26,26,46,0.9);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:20}
+#game-over h2{font-size:32px;margin-bottom:10px}
+#game-over .stat{font-size:18px;color:#888;margin:4px}
+#game-over button{background:linear-gradient(135deg,#4d96ff,#6bcb77);border:none;color:#fff;padding:14px 36px;border-radius:50px;font-size:16px;font-weight:700;margin-top:16px;cursor:pointer}
+#upgrade-panel{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(20,20,40,0.95);border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:20px;z-index:15;min-width:200px;text-align:center;backdrop-filter:blur(10px)}
+#upgrade-panel h3{margin-bottom:10px;font-size:16px}
+#upgrade-panel button{margin:4px;padding:8px 16px;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;color:#fff}
+#upgrade-panel .up-btn{background:#4d96ff}
+#upgrade-panel .sell-btn{background:#e94560}
+#upgrade-panel .close-btn{background:rgba(255,255,255,0.1)}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div class="hud-item">❤️ <span id="lives">20</span></div>
+  <div class="hud-item">💰 <span id="gold">100</span></div>
+  <div class="hud-item">🌊 Wave <span id="wave">0</span>/10</div>
+</div>
+<div id="tower-panel">
+  <div class="tower-btn" data-type="arrow" onclick="selectTower('arrow')">
+    <div class="icon">🏹</div>
+    <div class="cost">$25</div>
+    <div class="name">Arrow</div>
+  </div>
+  <div class="tower-btn" data-type="freeze" onclick="selectTower('freeze')">
+    <div class="icon">❄️</div>
+    <div class="cost">$40</div>
+    <div class="name">Freeze</div>
+  </div>
+  <div class="tower-btn" data-type="splash" onclick="selectTower('splash')">
+    <div class="icon">💥</div>
+    <div class="cost">$50</div>
+    <div class="name">Splash</div>
+  </div>
+</div>
+<div id="wave-banner"></div>
+<div id="menu">
+  <h1>🏰 Tower Defense</h1>
+  <p>Place towers • Stop the waves</p>
+  <button onclick="startGame()">Start Game</button>
+</div>
+<div id="game-over" class="hidden">
+  <h2 id="go-title">Victory!</h2>
+  <p class="stat">Waves survived: <span id="go-waves">0</span></p>
+  <button onclick="location.reload()">Play Again</button>
+</div>
+<div id="upgrade-panel" class="hidden">
+  <h3 id="up-title">Tower</h3>
+  <p style="font-size:12px;color:#888" id="up-info">Level 1</p>
+  <button class="up-btn" id="up-btn" onclick="upgradeTower()">Upgrade $30</button>
+  <button class="sell-btn" onclick="sellTower()">Sell</button>
+  <button class="close-btn" onclick="closeUpgrade()">✕</button>
+</div>
+<script>
+const C=document.getElementById('c'),X=C.getContext('2d');
+let W,H,dpr,cellSize;
+const GRID_COLS=12,GRID_ROWS=18;
+let grid=[];// 0=empty,1=path,2=tower
+let path=[];
+let towers=[],enemies=[],projectiles=[],particles=[];
+let gold=100,lives=20,wave=0,maxWaves=10,gameActive=false;
+let selectedType=null,selectedTower=null;
+let spawnTimer=0,waveEnemies=0,waveSpawned=0,betweenWaves=true,waveDelay=3;
+let shakeX=0,shakeY=0,shakeMag=0;
+
+const TOWER_TYPES={
+  arrow:{cost:25,range:3,rate:0.8,dmg:10,color:'#ffd93d',name:'Arrow'},
+  freeze:{cost:40,range:2.5,rate:1.2,dmg:5,color:'#74b9ff',name:'Freeze',slow:0.5},
+  splash:{cost:50,range:2,rate:1.5,dmg:15,color:'#e94560',name:'Splash',splash:1.5}
+};
+
+const actx=new(window.AudioContext||window.webkitAudioContext)();
+function snd(f,d,t='sine',v=0.1){const o=actx.createOscillator(),g=actx.createGain();o.type=t;o.frequency.value=f;g.gain.setValueAtTime(v,actx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,actx.currentTime+d);o.connect(g);g.connect(actx.destination);o.start();o.stop(actx.currentTime+d)}
+
+function resize(){
+  dpr=window.devicePixelRatio||1;W=window.innerWidth;H=window.innerHeight;
+  C.width=W*dpr;C.height=H*dpr;C.style.width=W+'px';C.style.height=H+'px';
+  X.setTransform(dpr,0,0,dpr,0,0);
+  cellSize=Math.min(W/GRID_COLS,(H-130)/GRID_ROWS);
+}
+
+function generatePath(){
+  // Create a winding path
+  path=[];grid=[];
+  for(let r=0;r<GRID_ROWS;r++){grid[r]=[];for(let c=0;c<GRID_COLS;c++)grid[r][c]=0}
+  let c=0,r=0;
+  path.push({c,r});grid[r][c]=1;
+  let dir=1;// 1=right,-1=left
+  while(r<GRID_ROWS-1){
+    // Go horizontal
+    let target=dir===1?GRID_COLS-2:1;
+    while(c!==target){c+=dir;path.push({c,r});grid[r][c]=1}
+    // Go down 2-3
+    let down=Math.min(2+Math.floor(Math.random()*2),GRID_ROWS-1-r);
+    for(let i=0;i<down;i++){r++;path.push({c,r});grid[r][c]=1}
+    dir*=-1;
+  }
+}
+
+function cellToPixel(c,r){
+  let ox=(W-GRID_COLS*cellSize)/2;
+  return{x:ox+c*cellSize+cellSize/2,y:44+r*cellSize+cellSize/2};
+}
+
+function pixelToCell(px,py){
+  let ox=(W-GRID_COLS*cellSize)/2;
+  let c=Math.floor((px-ox)/cellSize);
+  let r=Math.floor((py-44)/cellSize);
+  if(c<0||c>=GRID_COLS||r<0||r>=GRID_ROWS)return null;
+  return{c,r};
+}
+
+function selectTower(type){
+  actx.resume();
+  if(selectedType===type){selectedType=null}else{selectedType=type}
+  document.querySelectorAll('.tower-btn').forEach(b=>{
+    b.classList.toggle('selected',b.dataset.type===selectedType);
+  });
+  closeUpgrade();
+}
+
+C.addEventListener('click',e=>{
+  if(!gameActive)return;
+  actx.resume();
+  let cell=pixelToCell(e.clientX,e.clientY);
+  if(!cell)return;
+  
+  // Check if clicking existing tower
+  let existing=towers.find(t=>t.c===cell.c&&t.r===cell.r);
+  if(existing&&!selectedType){
+    selectedTower=existing;
+    showUpgrade(existing);
+    return;
+  }
+  
+  if(!selectedType)return;
+  if(grid[cell.r][cell.c]!==0)return;
+  let cost=TOWER_TYPES[selectedType].cost;
+  if(gold<cost)return;
+  
+  gold-=cost;
+  let t={...TOWER_TYPES[selectedType],type:selectedType,c:cell.c,r:cell.r,level:1,cooldown:0};
+  towers.push(t);
+  grid[cell.r][cell.c]=2;
+  snd(600,0.1);
+  updateHUD();
+});
+
+function showUpgrade(t){
+  let panel=document.getElementById('upgrade-panel');
+  panel.classList.remove('hidden');
+  document.getElementById('up-title').textContent=t.name+' Tower';
+  document.getElementById('up-info').textContent=`Level ${t.level} • DMG: ${t.dmg}`;
+  let cost=Math.floor(t.cost*t.level*0.8);
+  document.getElementById('up-btn').textContent=t.level>=3?'MAX':`Upgrade $${cost}`;
+  document.getElementById('up-btn').disabled=t.level>=3;
+}
+
+function upgradeTower(){
+  if(!selectedTower||selectedTower.level>=3)return;
+  let cost=Math.floor(selectedTower.cost*selectedTower.level*0.8);
+  if(gold<cost)return;
+  gold-=cost;
+  selectedTower.level++;
+  selectedTower.dmg=Math.floor(selectedTower.dmg*1.5);
+  selectedTower.range+=0.3;
+  selectedTower.rate*=0.85;
+  snd(800,0.15);
+  showUpgrade(selectedTower);
+  updateHUD();
+}
+
+function sellTower(){
+  if(!selectedTower)return;
+  gold+=Math.floor(selectedTower.cost*0.6);
+  grid[selectedTower.r][selectedTower.c]=0;
+  towers=towers.filter(t=>t!==selectedTower);
+  closeUpgrade();
+  updateHUD();
+}
+
+function closeUpgrade(){
+  document.getElementById('upgrade-panel').classList.add('hidden');
+  selectedTower=null;
+}
+
+function spawnEnemy(){
+  let hp=30+wave*20;
+  let speed=0.8+wave*0.1;
+  let type=wave>=7?Math.random()>0.7?'fast':'normal':wave>=4?Math.random()>0.8?'tank':'normal':'normal';
+  if(type==='fast'){speed*=1.8;hp*=0.5}
+  if(type==='tank'){speed*=0.5;hp*=3}
+  enemies.push({pathIdx:0,progress:0,hp,maxHp:hp,speed,slow:0,type,
+    color:type==='fast'?'#ffd93d':type==='tank'?'#a55eea':'#e94560'});
+}
+
+function startWave(){
+  wave++;
+  waveEnemies=5+wave*3;
+  waveSpawned=0;spawnTimer=0;betweenWaves=false;
+  let b=document.getElementById('wave-banner');
+  b.textContent=`Wave ${wave}`;b.style.opacity='1';
+  setTimeout(()=>b.style.opacity='0',1500);
+  updateHUD();
+}
+
+function updateHUD(){
+  document.getElementById('gold').textContent=gold;
+  document.getElementById('lives').textContent=lives;
+  document.getElementById('wave').textContent=wave;
+}
+
+function update(dt){
+  if(!gameActive)return;
+  
+  // Spawn
+  if(!betweenWaves&&waveSpawned<waveEnemies){
+    spawnTimer-=dt;
+    if(spawnTimer<=0){spawnEnemy();waveSpawned++;spawnTimer=0.6}
+  }
+  
+  // Check wave complete
+  if(!betweenWaves&&waveSpawned>=waveEnemies&&enemies.length===0){
+    if(wave>=maxWaves){gameActive=false;endGame(true);return}
+    betweenWaves=true;waveDelay=2;
+    gold+=20+wave*5;updateHUD();
+  }
+  if(betweenWaves){waveDelay-=dt;if(waveDelay<=0)startWave()}
+  
+  // Enemies
+  for(let i=enemies.length-1;i>=0;i--){
+    let e=enemies[i];
+    let spd=e.speed*(e.slow>0?0.4:1)*dt;
+    e.slow=Math.max(0,e.slow-dt);
+    e.progress+=spd;
+    
+    while(e.progress>=1&&e.pathIdx<path.length-1){
+      e.progress-=1;e.pathIdx++;
+    }
+    
+    if(e.pathIdx>=path.length-1){
+      enemies.splice(i,1);lives--;
+      shakeMag=5;snd(200,0.2,'square',0.1);
+      updateHUD();
+      if(lives<=0){gameActive=false;endGame(false)}
+      continue;
+    }
+    
+    if(e.hp<=0){
+      enemies.splice(i,1);
+      gold+=5+wave;
+      let pos=getEnemyPos(e);
+      for(let j=0;j<10;j++){
+        let a=Math.random()*Math.PI*2;
+        particles.push({x:pos.x,y:pos.y,vx:Math.cos(a)*3,vy:Math.sin(a)*3,life:1,color:e.color,size:3});
+      }
+      snd(300,0.1,'triangle');
+      updateHUD();
+    }
+  }
+  
+  // Towers
+  for(let t of towers){
+    t.cooldown=Math.max(0,t.cooldown-dt);
+    if(t.cooldown>0)continue;
+    let tp=cellToPixel(t.c,t.r);
+    let best=null,bestD=Infinity;
+    for(let e of enemies){
+      let ep=getEnemyPos(e);
+      let d=Math.hypot(ep.x-tp.x,ep.y-tp.y)/cellSize;
+      if(d<=t.range&&e.pathIdx>=(best?best.pathIdx:0)){best=e;bestD=d}
+    }
+    if(best){
+      t.cooldown=t.rate;
+      let ep=getEnemyPos(best);
+      projectiles.push({x:tp.x,y:tp.y,tx:ep.x,ty:ep.y,target:best,tower:t,speed:300,color:t.color});
+      snd(800,0.05,'sine',0.03);
+    }
+  }
+  
+  // Projectiles
+  for(let i=projectiles.length-1;i>=0;i--){
+    let p=projectiles[i];
+    let ep=p.target?getEnemyPos(p.target):{x:p.tx,y:p.ty};
+    let dx=ep.x-p.x,dy=ep.y-p.y,d=Math.hypot(dx,dy);
+    if(d<8){
+      // Hit
+      if(p.target&&p.target.hp>0){
+        p.target.hp-=p.tower.dmg;
+        if(p.tower.slow)p.target.slow=1.5;
+        if(p.tower.splash){
+          for(let e of enemies){
+            if(e===p.target)continue;
+            let eep=getEnemyPos(e);
+            if(Math.hypot(eep.x-ep.x,eep.y-ep.y)/cellSize<p.tower.splash){
+              e.hp-=p.tower.dmg*0.5;
+            }
+          }
+          for(let j=0;j<6;j++){
+            let a=Math.random()*Math.PI*2;
+            particles.push({x:ep.x,y:ep.y,vx:Math.cos(a)*4,vy:Math.sin(a)*4,life:0.6,color:'#e94560',size:4});
+          }
+        }
+      }
+      projectiles.splice(i,1);continue;
+    }
+    p.x+=dx/d*p.speed*dt;p.y+=dy/d*p.speed*dt;
+  }
+  
+  // Particles
+  for(let i=particles.length-1;i>=0;i--){
+    let p=particles[i];
+    p.x+=p.vx;p.y+=p.vy;p.vy+=0.1;p.life-=dt*2;
+    if(p.life<=0)particles.splice(i,1);
+  }
+  
+  if(shakeMag>0)shakeMag*=0.9;if(shakeMag<0.3)shakeMag=0;
+}
+
+function getEnemyPos(e){
+  let cur=path[e.pathIdx];
+  let next=path[Math.min(e.pathIdx+1,path.length-1)];
+  let p1=cellToPixel(cur.c,cur.r);
+  let p2=cellToPixel(next.c,next.r);
+  let t=Math.min(e.progress,1);
+  return{x:p1.x+(p2.x-p1.x)*t,y:p1.y+(p2.y-p1.y)*t};
+}
+
+function render(){
+  X.clearRect(0,0,W,H);
+  let sx=shakeMag?(Math.random()-0.5)*shakeMag:0;
+  let sy=shakeMag?(Math.random()-0.5)*shakeMag:0;
+  X.save();X.translate(sx,sy);
+  let ox=(W-GRID_COLS*cellSize)/2;
+  
+  // Grid
+  for(let r=0;r<GRID_ROWS;r++){
+    for(let c=0;c<GRID_COLS;c++){
+      let x=ox+c*cellSize,y=44+r*cellSize;
+      if(grid[r][c]===1){
+        X.fillStyle='rgba(255,255,255,0.06)';
+        X.fillRect(x+1,y+1,cellSize-2,cellSize-2);
+      }
+    }
+  }
+  
+  // Path highlight
+  X.strokeStyle='rgba(255,217,61,0.15)';X.lineWidth=cellSize*0.6;X.lineCap='round';X.lineJoin='round';
+  X.beginPath();
+  for(let i=0;i<path.length;i++){
+    let p=cellToPixel(path[i].c,path[i].r);
+    i===0?X.moveTo(p.x,p.y):X.lineTo(p.x,p.y);
+  }
+  X.stroke();
+  
+  // Towers
+  for(let t of towers){
+    let p=cellToPixel(t.c,t.r);
+    let s=cellSize*0.35;
+    // Range indicator if selected
+    if(t===selectedTower){
+      X.beginPath();X.arc(p.x,p.y,t.range*cellSize,0,Math.PI*2);
+      X.fillStyle='rgba(255,255,255,0.05)';X.fill();
+      X.strokeStyle='rgba(255,255,255,0.15)';X.lineWidth=1;X.stroke();
+    }
+    // Tower body
+    X.fillStyle=t.color;
+    X.shadowColor=t.color;X.shadowBlur=10;
+    X.beginPath();
+    X.moveTo(p.x,p.y-s);X.lineTo(p.x+s*0.8,p.y+s*0.6);X.lineTo(p.x-s*0.8,p.y+s*0.6);
+    X.closePath();X.fill();
+    X.shadowBlur=0;
+    // Level dots
+    for(let l=0;l<t.level;l++){
+      X.fillStyle='#fff';X.beginPath();
+      X.arc(p.x-6+l*6,p.y+s+6,2,0,Math.PI*2);X.fill();
+    }
+  }
+  
+  // Enemies
+  for(let e of enemies){
+    let p=getEnemyPos(e);
+    let r=cellSize*0.3*(e.type==='tank'?1.3:e.type==='fast'?0.7:1);
+    // HP bar
+    let bw=r*2;
+    X.fillStyle='rgba(0,0,0,0.5)';X.fillRect(p.x-bw/2,p.y-r-8,bw,4);
+    X.fillStyle=e.hp/e.maxHp>0.5?'#6bcb77':'#e94560';
+    X.fillRect(p.x-bw/2,p.y-r-8,bw*(e.hp/e.maxHp),4);
+    // Body
+    X.fillStyle=e.slow>0?'#74b9ff':e.color;
+    X.shadowColor=e.color;X.shadowBlur=8;
+    X.beginPath();X.arc(p.x,p.y,r,0,Math.PI*2);X.fill();
+    X.shadowBlur=0;
+  }
+  
+  // Projectiles
+  for(let p of projectiles){
+    X.fillStyle=p.color;X.shadowColor=p.color;X.shadowBlur=6;
+    X.beginPath();X.arc(p.x,p.y,3,0,Math.PI*2);X.fill();
+    X.shadowBlur=0;
+  }
+  
+  // Particles
+  for(let p of particles){
+    X.globalAlpha=Math.max(0,p.life);
+    X.fillStyle=p.color;
+    X.beginPath();X.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);X.fill();
+  }
+  X.globalAlpha=1;
+  
+  // Placement preview
+  if(selectedType&&gameActive){
+    let t=TOWER_TYPES[selectedType];
+    // Draw range on hover would need mouse tracking, skip for mobile
+  }
+  
+  X.restore();
+  requestAnimationFrame(render);
+}
+
+let lastT=0;
+function loop(t){
+  let dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  update(dt);
+  requestAnimationFrame(loop);
+}
+
+function endGame(won){
+  document.getElementById('go-title').textContent=won?'🎉 Victory!':'💀 Defeated';
+  document.getElementById('go-waves').textContent=wave;
+  document.getElementById('game-over').classList.remove('hidden');
+}
+
+function startGame(){
+  actx.resume();
+  document.getElementById('menu').classList.add('hidden');
+  generatePath();
+  gold=100;lives=20;wave=0;
+  towers=[];enemies=[];projectiles=[];particles=[];
+  betweenWaves=true;waveDelay=1;
+  gameActive=true;
+  updateHUD();
+}
+
+window.addEventListener('resize',resize);
+resize();
+requestAnimationFrame(render);
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

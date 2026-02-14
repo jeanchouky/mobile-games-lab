@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>Memory Palace</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-user-select:none;user-select:none;touch-action:manipulation}
+body{background:#0a0a1e;overflow:hidden;font-family:-apple-system,system-ui,sans-serif;color:#fff}
+canvas{display:block;width:100vw;height:100vh}
+#hud{position:absolute;top:0;left:0;width:100%;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;z-index:10;pointer-events:none}
+.hud-box{background:rgba(0,0,0,0.5);border-radius:10px;padding:6px 14px;backdrop-filter:blur(8px);pointer-events:auto}
+.hud-box .lbl{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:0.5px}
+.hud-box .val{font-size:20px;font-weight:900}
+#menu{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(10,10,30,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:20}
+#menu h1{font-size:42px;margin-bottom:6px}
+#menu p{color:#888;margin-bottom:24px;font-size:14px;text-align:center;padding:0 20px}
+#menu .diff-btns{display:flex;flex-direction:column;gap:10px}
+#menu button{border:none;color:#fff;padding:14px 36px;border-radius:50px;font-size:16px;font-weight:700;cursor:pointer;min-width:200px}
+#menu button:active{transform:scale(0.95)}
+.btn-easy{background:linear-gradient(135deg,#6bcb77,#1dd1a1)}
+.btn-med{background:linear-gradient(135deg,#ffd93d,#e17055)}
+.btn-hard{background:linear-gradient(135deg,#e94560,#a55eea)}
+.hidden{display:none!important}
+#result{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:15;text-align:center;pointer-events:none;opacity:0;transition:opacity .3s}
+#result h2{font-size:36px;margin-bottom:8px}
+#result p{color:#888;font-size:14px}
+#game-over{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(10,10,30,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:20}
+#game-over h2{font-size:32px;margin-bottom:8px}
+#game-over .score{font-size:56px;font-weight:900;background:linear-gradient(135deg,#ffd93d,#e94560);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+#game-over p{color:#888;margin:4px}
+#game-over button{background:linear-gradient(135deg,#4d96ff,#a55eea);border:none;color:#fff;padding:14px 36px;border-radius:50px;font-size:16px;font-weight:700;margin-top:16px;cursor:pointer}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div class="hud-box"><div class="lbl">Matches</div><div class="val" id="matches">0/0</div></div>
+  <div class="hud-box"><div class="lbl">Moves</div><div class="val" id="moves">0</div></div>
+  <div class="hud-box"><div class="lbl">Level</div><div class="val" id="level">1</div></div>
+</div>
+<div id="result"><h2 id="res-text">Nice!</h2><p id="res-sub"></p></div>
+<div id="menu">
+  <h1>🏛️ Memory Palace</h1>
+  <p>Match cards in 3D space.<br>The view rotates — remember positions!</p>
+  <div class="diff-btns">
+    <button class="btn-easy" onclick="startGame('easy')">Easy (3×2)</button>
+    <button class="btn-med" onclick="startGame('medium')">Medium (4×3)</button>
+    <button class="btn-hard" onclick="startGame('hard')">Hard (4×4)</button>
+  </div>
+</div>
+<div id="game-over" class="hidden">
+  <h2>🎉 Complete!</h2>
+  <div class="score" id="go-score">0</div>
+  <p>Moves: <span id="go-moves">0</span></p>
+  <button onclick="document.getElementById('game-over').classList.add('hidden');document.getElementById('menu').classList.remove('hidden')">Play Again</button>
+</div>
+
+<script>
+const C=document.getElementById('c'),ctx=C.getContext('2d');
+let W,H,dpr;
+const actx=new(window.AudioContext||window.webkitAudioContext)();
+function snd(f,d,t='sine',v=0.08){const o=actx.createOscillator(),g=actx.createGain();o.type=t;o.frequency.value=f;g.gain.setValueAtTime(v,actx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,actx.currentTime+d);o.connect(g);g.connect(actx.destination);o.start();o.stop(actx.currentTime+d)}
+
+const SYMBOLS=['🌟','🎈','🔥','💎','🌈','🎵','🍀','⚡','🌸','🎯','🦋','🌙','❄️','🎪','🍄','🎭','🌺','💫','🎲','🐱'];
+const CARD_COLORS=['#e94560','#4d96ff','#6bcb77','#ffd93d','#a55eea','#fd79a8','#00cec9','#e17055','#74b9ff','#badc58'];
+
+let cards=[],cols=4,rows=3,totalPairs=0;
+let flipped=[],matched=new Set(),moves=0,gameActive=false,level=1;
+let rotAngle=0,rotSpeed=0.003,rotTarget=0;
+let difficulty='medium';
+let cardW,cardH,gapX,gapY,baseX,baseY;
+let flipAnims={};// cardIdx -> {progress, direction}
+let shakeT=0;
+
+function resize(){
+  dpr=window.devicePixelRatio||1;W=window.innerWidth;H=window.innerHeight;
+  C.width=W*dpr;C.height=H*dpr;C.style.width=W+'px';C.style.height=H+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  layoutCards();
+}
+
+function layoutCards(){
+  let maxW=(W-40)/cols;
+  let maxH=(H-120)/rows;
+  cardW=Math.min(maxW,80);cardH=Math.min(maxH,110);
+  gapX=(W-cols*cardW)/(cols+1);
+  gapY=(H-80-rows*cardH)/(rows+1);
+  baseX=gapX;baseY=60+gapY;
+}
+
+function cardPos(idx){
+  let c=idx%cols,r=Math.floor(idx/cols);
+  let x=baseX+c*(cardW+gapX)+cardW/2;
+  let y=baseY+r*(cardH+gapY)+cardH/2;
+  return{x,y};
+}
+
+function project3D(x,y){
+  // Apply perspective rotation around Y axis
+  let cx=W/2,cy=H/2;
+  let dx=x-cx,dy=y-cy;
+  let cos=Math.cos(rotAngle),sin=Math.sin(rotAngle);
+  let px=dx*cos;
+  let pz=dx*sin;
+  let perspective=800;
+  let scale=perspective/(perspective+pz);
+  return{x:cx+px*scale,y:cy+dy*scale,scale,z:pz};
+}
+
+function initCards(){
+  let n=cols*rows;
+  totalPairs=n/2;
+  let symbols=SYMBOLS.slice(0,totalPairs);
+  let deck=[...symbols,...symbols];
+  // Shuffle
+  for(let i=deck.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[deck[i],deck[j]]=[deck[j],deck[i]]}
+  cards=deck.map((sym,i)=>({symbol:sym,color:CARD_COLORS[i%CARD_COLORS.length]}));
+  flipped=[];matched=new Set();moves=0;flipAnims={};
+  rotAngle=0;
+  document.getElementById('matches').textContent=`0/${totalPairs}`;
+  document.getElementById('moves').textContent='0';
+  document.getElementById('level').textContent=level;
+  
+  // Brief peek at start
+  cards.forEach((c,i)=>flipAnims[i]={progress:1,direction:-1,timer:1.5+i*0.05});
+}
+
+function startGame(diff){
+  actx.resume();
+  difficulty=diff;level=1;
+  if(diff==='easy'){cols=3;rows=2}
+  else if(diff==='medium'){cols=4;rows=3}
+  else{cols=4;rows=4}
+  document.getElementById('menu').classList.add('hidden');
+  document.getElementById('game-over').classList.add('hidden');
+  layoutCards();initCards();
+  rotSpeed=0.003*(diff==='hard'?2:diff==='medium'?1.5:1);
+  gameActive=true;
+}
+
+function clickCard(idx){
+  if(!gameActive)return;
+  if(matched.has(idx))return;
+  if(flipped.includes(idx))return;
+  if(flipped.length>=2)return;
+  if(flipAnims[idx]&&flipAnims[idx].progress>0)return;
+  
+  flipped.push(idx);
+  flipAnims[idx]={progress:0,direction:1,timer:0};
+  snd(400+idx*20,0.1);
+  
+  if(flipped.length===2){
+    moves++;
+    document.getElementById('moves').textContent=moves;
+    let [a,b]=flipped;
+    if(cards[a].symbol===cards[b].symbol){
+      // Match!
+      setTimeout(()=>{
+        matched.add(a);matched.add(b);
+        flipped=[];
+        snd(600,0.2);snd(800,0.15,'triangle');
+        document.getElementById('matches').textContent=`${matched.size/2}/${totalPairs}`;
+        
+        if(matched.size===cards.length){
+          // Level complete
+          setTimeout(()=>{
+            level++;
+            if(level>5){
+              gameActive=false;
+              let score=Math.max(0,1000-moves*10+level*200);
+              document.getElementById('go-score').textContent=score;
+              document.getElementById('go-moves').textContent=moves;
+              document.getElementById('game-over').classList.remove('hidden');
+            }else{
+              rotSpeed+=0.002;
+              initCards();layoutCards();
+            }
+          },600);
+        }
+      },400);
+    }else{
+      // No match
+      setTimeout(()=>{
+        flipAnims[a]={progress:1,direction:-1,timer:0};
+        flipAnims[b]={progress:1,direction:-1,timer:0};
+        flipped=[];
+        snd(200,0.15,'square',0.05);
+      },800);
+    }
+  }
+}
+
+C.addEventListener('click',e=>{
+  if(!gameActive)return;
+  actx.resume();
+  let mx=e.clientX,my=e.clientY;
+  // Find closest card
+  let bestIdx=-1,bestD=Infinity;
+  for(let i=0;i<cards.length;i++){
+    let p=cardPos(i);
+    let pp=project3D(p.x,p.y);
+    let d=Math.hypot(mx-pp.x,my-pp.y);
+    let hitR=cardW*pp.scale*0.6;
+    if(d<hitR&&d<bestD){bestD=d;bestIdx=i}
+  }
+  if(bestIdx>=0)clickCard(bestIdx);
+});
+
+C.addEventListener('touchstart',e=>{
+  e.preventDefault();
+  if(!gameActive)return;
+  actx.resume();
+  let t=e.touches[0];
+  let mx=t.clientX,my=t.clientY;
+  let bestIdx=-1,bestD=Infinity;
+  for(let i=0;i<cards.length;i++){
+    let p=cardPos(i);
+    let pp=project3D(p.x,p.y);
+    let d=Math.hypot(mx-pp.x,my-pp.y);
+    let hitR=cardW*pp.scale*0.6;
+    if(d<hitR&&d<bestD){bestD=d;bestIdx=i}
+  }
+  if(bestIdx>=0)clickCard(bestIdx);
+});
+
+let lastT=0;
+function loop(t){
+  let dt=Math.min((t-lastT)/1000,0.05);lastT=t;
+  
+  if(gameActive)rotAngle+=rotSpeed*dt*60;
+  
+  // Update flip animations
+  for(let idx in flipAnims){
+    let a=flipAnims[idx];
+    if(a.timer>0){a.timer-=dt;continue}
+    a.progress+=a.direction*dt*4;
+    a.progress=Math.max(0,Math.min(1,a.progress));
+  }
+  
+  // Render
+  ctx.clearRect(0,0,W,H);
+  
+  // Background stars
+  ctx.fillStyle='rgba(255,255,255,0.3)';
+  for(let i=0;i<40;i++){
+    let sx=(i*137.5+Date.now()*0.001*i*0.1)%W;
+    let sy=(i*97.3)%H;
+    ctx.fillRect(sx,sy,1,1);
+  }
+  
+  // Sort cards by z for proper overlap
+  let indices=[...Array(cards.length).keys()];
+  indices.sort((a,b)=>{
+    let pa=cardPos(a),pb=cardPos(b);
+    let za=project3D(pa.x,pa.y).z;
+    let zb=project3D(pb.x,pb.y).z;
+    return zb-za;
+  });
+  
+  for(let idx of indices){
+    if(matched.has(idx))continue;
+    let card=cards[idx];
+    let pos=cardPos(idx);
+    let pp=project3D(pos.x,pos.y);
+    let s=pp.scale;
+    let w=cardW*s*0.9,h=cardH*s*0.9;
+    
+    let flipProg=flipAnims[idx]?flipAnims[idx].progress:0;
+    let isFlipped=flipProg>0.5;
+    let flipScale=Math.abs(Math.cos(flipProg*Math.PI));
+    
+    ctx.save();
+    ctx.translate(pp.x,pp.y);
+    ctx.scale(flipScale,1);
+    
+    // Card shadow
+    ctx.fillStyle='rgba(0,0,0,0.3)';
+    roundRect(ctx,-(w/2)+3,-(h/2)+3,w,h,8*s);ctx.fill();
+    
+    if(isFlipped){
+      // Front face
+      let grad=ctx.createLinearGradient(-w/2,-h/2,w/2,h/2);
+      grad.addColorStop(0,card.color);
+      grad.addColorStop(1,shadeColor(card.color,-30));
+      ctx.fillStyle=grad;
+      roundRect(ctx,-w/2,-h/2,w,h,8*s);ctx.fill();
+      
+      // Symbol
+      ctx.font=`${28*s}px sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(card.symbol,0,0);
+    }else{
+      // Back face
+      let grad=ctx.createLinearGradient(-w/2,-h/2,w/2,h/2);
+      grad.addColorStop(0,'#2d3436');grad.addColorStop(1,'#1a1a2e');
+      ctx.fillStyle=grad;
+      roundRect(ctx,-w/2,-h/2,w,h,8*s);ctx.fill();
+      
+      // Pattern
+      ctx.strokeStyle='rgba(255,255,255,0.08)';ctx.lineWidth=1;
+      for(let i=-3;i<=3;i++){
+        ctx.beginPath();ctx.moveTo(-w/2+i*12*s,-h/2);ctx.lineTo(-w/2+i*12*s+h*s,h/2);ctx.stroke();
+      }
+      
+      // Question mark
+      ctx.fillStyle='rgba(255,255,255,0.15)';
+      ctx.font=`bold ${20*s}px sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText('?',0,0);
+    }
+    
+    // Border
+    ctx.strokeStyle='rgba(255,255,255,0.15)';ctx.lineWidth=1;
+    roundRect(ctx,-w/2,-h/2,w,h,8*s);ctx.stroke();
+    
+    ctx.restore();
+  }
+  
+  // Matched cards fade effect
+  matched.forEach(idx=>{
+    let pos=cardPos(idx);
+    let pp=project3D(pos.x,pos.y);
+    ctx.fillStyle=cards[idx].color;
+    ctx.globalAlpha=0.1+Math.sin(Date.now()*0.003)*0.05;
+    ctx.beginPath();ctx.arc(pp.x,pp.y,8*pp.scale,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;
+  });
+  
+  requestAnimationFrame(loop);
+}
+
+function roundRect(c,x,y,w,h,r){
+  c.beginPath();c.moveTo(x+r,y);c.lineTo(x+w-r,y);c.quadraticCurveTo(x+w,y,x+w,y+r);
+  c.lineTo(x+w,y+h-r);c.quadraticCurveTo(x+w,y+h,x+w-r,y+h);c.lineTo(x+r,y+h);
+  c.quadraticCurveTo(x,y+h,x,y+h-r);c.lineTo(x,y+r);c.quadraticCurveTo(x,y,x+r,y);c.closePath();
+}
+
+function shadeColor(color,percent){
+  let num=parseInt(color.replace('#',''),16);
+  let r=Math.min(255,Math.max(0,(num>>16)+percent));
+  let g=Math.min(255,Math.max(0,((num>>8)&0xff)+percent));
+  let b=Math.min(255,Math.max(0,(num&0xff)+percent));
+  return`#${(r<<16|g<<8|b).toString(16).padStart(6,'0')}`;
+}
+
+window.addEventListener('resize',resize);
+resize();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
