@@ -35,887 +35,888 @@ body {
 <script>
 'use strict';
 
-// ============================================================
-// ONE BUTTON ODYSSEY - Mobile RPG
-// ============================================================
-
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
-// --- GLOBALS ---
-let W, H, pixelScale;
+// Game resolution
+const GW = 180, GH = 320;
+let pixelScale = 1;
 let gameTime = 0, deltaTime = 0, lastTime = 0;
-let gameState = 'title'; // title, combat, shop, dialogue, victory
-let currentZone = 0; // 0=forest, 1=cave, 2=castle
-let currentEncounter = 0;
-let beatTime = 0;
-let beatPeriod = 0.6; // beat every 0.6s
-let lastBeatTime = 0;
-let inputQueue = [];
+let gameState = 'title'; // title, combat, reward, shop, victory, dead
 let particles = [];
+let floatingTexts = [];
 let shakeAmount = 0;
+let screenFlash = 0;
+let screenFlashColor = '#fff';
 
-// Player stats
-let player = {
-  hp: 100,
-  maxHp: 100,
-  xp: 0,
-  level: 1,
-  gold: 0,
-  attack: 10,
-  defense: 5
-};
+// Player
+let player = { hp: 100, maxHp: 100, xp: 0, level: 1, gold: 0, atk: 12, def: 5 };
+let playerAnim = { x: 45, y: 200, frame: 0, attacking: false, hurt: false, blocking: false };
 
-// Enemy state
+// Enemy
 let enemy = null;
+let enemyAnim = { x: 135, y: 200, frame: 0, hurt: false };
+
+// Combat — TRUE one button: tap cycles through action wheel
+let actionWheel = ['⚔️ ATTACK', '🛡️ BLOCK', '⚡ POWER']; // auto-cycles, tap to execute
+let currentAction = 0;
+let wheelSpeed = 1.2; // seconds per cycle
+let wheelTimer = 0;
+let combatPhase = 'player'; // player, enemy, result
+let enemyAttacking = false;
 let enemyAttackTimer = 0;
-let enemyAttackWarning = false;
-
-// Combat state
-let combatState = 'waiting'; // waiting, attacking, blocking, dodging, hit
-let actionTimer = 0;
 let comboCount = 0;
-let lastActionTime = 0;
+let turnDelay = 0;
 
-// Music state
-let musicPlaying = false;
-let bgmOscillators = [];
+// Zone progression
+let currentZone = 0;
+let encounter = 0;
 
-// Zone definitions
 const zones = [
-  { 
-    name: 'Darkwood Forest', 
-    bg: '#2a1a3a', 
-    fg: '#4a6741', 
-    accent: '#7a9a5f',
-    enemies: ['slime', 'goblin', 'wolf', 'bat', 'spider'],
-    boss: 'treant'
-  },
-  { 
-    name: 'Crimson Caves', 
-    bg: '#3a1a1a', 
-    fg: '#5a3a3a', 
-    accent: '#8a5a5a',
-    enemies: ['bat', 'skeleton', 'ghost', 'spider', 'zombie'],
-    boss: 'demon'
-  },
-  { 
-    name: 'Obsidian Castle', 
-    bg: '#1a1a3a', 
-    fg: '#3a3a5a', 
-    accent: '#5a5a8a',
-    enemies: ['knight', 'mage', 'dragon', 'golem', 'wraith'],
-    boss: 'darklord'
-  }
+  { name: 'Darkwood Forest', sky: '#2a1a3a', ground: '#3a5a2a', tree: '#2a4a1a', path: '#5a4a3a',
+    enemies: ['slime','goblin','wolf','bat','spider'], boss: 'treant' },
+  { name: 'Crimson Caves', sky: '#3a1a1a', ground: '#4a3a2a', tree: '#5a3a2a', path: '#3a2a2a',
+    enemies: ['bat','skeleton','ghost','spider','zombie'], boss: 'demon' },
+  { name: 'Obsidian Castle', sky: '#1a1a2a', ground: '#3a3a4a', tree: '#2a2a3a', path: '#4a4a5a',
+    enemies: ['knight','mage','dragon','golem','wraith'], boss: 'darklord' },
 ];
 
-// Enemy definitions
-const enemyTypes = {
-  slime: { name: 'Slime', hp: 30, atk: 5, speed: 2.5, color: '#5a9a4a', xp: 10, gold: 5 },
-  goblin: { name: 'Goblin', hp: 40, atk: 8, speed: 2.0, color: '#6a7a3a', xp: 15, gold: 8 },
-  wolf: { name: 'Wolf', hp: 45, atk: 10, speed: 1.8, color: '#7a6a5a', xp: 20, gold: 10 },
-  bat: { name: 'Bat', hp: 25, atk: 6, speed: 1.5, color: '#5a4a6a', xp: 12, gold: 6 },
-  spider: { name: 'Spider', hp: 35, atk: 9, speed: 2.2, color: '#4a3a3a', xp: 18, gold: 9 },
-  skeleton: { name: 'Skeleton', hp: 50, atk: 12, speed: 2.3, color: '#8a8a7a', xp: 25, gold: 15 },
-  ghost: { name: 'Ghost', hp: 40, atk: 11, speed: 1.7, color: '#6a7a8a', xp: 22, gold: 12 },
-  zombie: { name: 'Zombie', hp: 60, atk: 10, speed: 3.0, color: '#5a6a4a', xp: 28, gold: 18 },
-  knight: { name: 'Knight', hp: 70, atk: 15, speed: 2.5, color: '#7a7a8a', xp: 35, gold: 25 },
-  mage: { name: 'Mage', hp: 50, atk: 18, speed: 2.0, color: '#6a5a8a', xp: 40, gold: 30 },
-  dragon: { name: 'Dragon', hp: 80, atk: 20, speed: 2.2, color: '#8a4a4a', xp: 50, gold: 40 },
-  golem: { name: 'Golem', hp: 90, atk: 16, speed: 3.5, color: '#6a6a5a', xp: 45, gold: 35 },
-  wraith: { name: 'Wraith', hp: 65, atk: 22, speed: 1.6, color: '#4a4a5a', xp: 55, gold: 45 },
-  treant: { name: 'Ancient Treant', hp: 150, atk: 18, speed: 2.8, color: '#5a7a3a', xp: 100, gold: 100 },
-  demon: { name: 'Fire Demon', hp: 200, atk: 25, speed: 2.0, color: '#aa3a3a', xp: 150, gold: 150 },
-  darklord: { name: 'Dark Lord', hp: 300, atk: 30, speed: 1.8, color: '#3a3a6a', xp: 200, gold: 200 }
+const enemyDefs = {
+  slime:    { name:'Slime',    hp:30,  atk:5,  spd:2.5, col:'#6b6', xp:10, gp:5,  sprite:'blob' },
+  goblin:   { name:'Goblin',   hp:40,  atk:8,  spd:2.0, col:'#8a5', xp:15, gp:8,  sprite:'humanoid' },
+  wolf:     { name:'Wolf',     hp:45,  atk:10, spd:1.8, col:'#876', xp:20, gp:10, sprite:'beast' },
+  bat:      { name:'Bat',      hp:25,  atk:6,  spd:1.5, col:'#86a', xp:12, gp:6,  sprite:'flying' },
+  spider:   { name:'Spider',   hp:35,  atk:9,  spd:2.2, col:'#543', xp:18, gp:9,  sprite:'beast' },
+  skeleton: { name:'Skeleton', hp:50,  atk:12, spd:2.3, col:'#bba', xp:25, gp:15, sprite:'humanoid' },
+  ghost:    { name:'Ghost',    hp:40,  atk:11, spd:1.7, col:'#9ab', xp:22, gp:12, sprite:'blob' },
+  zombie:   { name:'Zombie',   hp:60,  atk:10, spd:3.0, col:'#685', xp:28, gp:18, sprite:'humanoid' },
+  knight:   { name:'Knight',   hp:70,  atk:15, spd:2.5, col:'#99a', xp:35, gp:25, sprite:'humanoid' },
+  mage:     { name:'Mage',     hp:50,  atk:18, spd:2.0, col:'#86a', xp:40, gp:30, sprite:'humanoid' },
+  dragon:   { name:'Dragon',   hp:80,  atk:20, spd:2.2, col:'#a55', xp:50, gp:40, sprite:'beast' },
+  golem:    { name:'Golem',    hp:90,  atk:16, spd:3.5, col:'#887', xp:45, gp:35, sprite:'blob' },
+  wraith:   { name:'Wraith',   hp:65,  atk:22, spd:1.6, col:'#667', xp:55, gp:45, sprite:'blob' },
+  treant:   { name:'TREANT',   hp:150, atk:18, spd:2.8, col:'#5a3', xp:100,gp:80, sprite:'boss' },
+  demon:    { name:'FIRE DEMON',hp:200,atk:25, spd:2.0, col:'#c44', xp:150,gp:120,sprite:'boss' },
+  darklord: { name:'DARK LORD', hp:300, atk:30, spd:1.8, col:'#55a', xp:200,gp:200,sprite:'boss' },
 };
 
-// Shop items
 const shopItems = [
-  { name: 'Health Potion', cost: 20, effect: () => { player.hp = Math.min(player.maxHp, player.hp + 30); sfxHeal(); } },
-  { name: 'Attack Boost', cost: 50, effect: () => { player.attack += 5; player.maxHp += 10; player.hp += 10; } },
-  { name: 'Defense Ring', cost: 40, effect: () => { player.defense += 3; player.maxHp += 15; player.hp += 15; } },
-  { name: 'Max HP Up', cost: 30, effect: () => { player.maxHp += 20; player.hp += 20; } }
+  { name:'Health Potion', cost:20, desc:'+30 HP', fn:() => { player.hp = Math.min(player.maxHp, player.hp+30); } },
+  { name:'Attack Gem',    cost:50, desc:'+5 ATK', fn:() => { player.atk += 5; } },
+  { name:'Shield Shard',  cost:40, desc:'+3 DEF', fn:() => { player.def += 3; } },
+  { name:'Life Crystal',  cost:35, desc:'+25 Max HP', fn:() => { player.maxHp += 25; player.hp += 25; } },
 ];
 
 // ============================================================
-// AUDIO ENGINE
+// RESIZE
+// ============================================================
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  pixelScale = Math.min(Math.floor(w / GW), Math.floor(h / GH));
+  pixelScale = Math.max(1, pixelScale);
+  canvas.width = GW;
+  canvas.height = GH;
+  canvas.style.width = (GW * pixelScale) + 'px';
+  canvas.style.height = (GH * pixelScale) + 'px';
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ============================================================
+// AUDIO
 // ============================================================
 let audioCtx = null;
 function ensureAudio() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   if (audioCtx.state === 'suspended') audioCtx.resume();
 }
-
-function playTone(freq, duration, type = 'square', vol = 0.12) {
+function tone(f, d, type='square', v=0.1) {
   ensureAudio();
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  osc.type = type;
-  osc.frequency.value = freq;
-  gain.gain.setValueAtTime(vol, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
-  osc.connect(gain);
-  gain.connect(audioCtx.destination);
-  osc.start();
-  osc.stop(audioCtx.currentTime + duration);
+  const t = audioCtx.currentTime;
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type; o.frequency.value = f;
+  g.gain.setValueAtTime(v, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + d);
+  o.connect(g).connect(audioCtx.destination);
+  o.start(t); o.stop(t + d);
 }
-
-function sfxHit() { playTone(440, 0.08, 'square', 0.15); }
-function sfxBlock() { playTone(220, 0.12, 'square', 0.12); }
-function sfxDodge() { playTone(880, 0.06, 'sine', 0.1); }
-function sfxParry() { playTone(660, 0.1, 'triangle', 0.15); setTimeout(() => playTone(880, 0.1, 'triangle', 0.15), 60); }
-function sfxPlayerHit() { playTone(150, 0.2, 'sawtooth', 0.18); }
-function sfxEnemyDeath() { playTone(200, 0.15, 'sawtooth', 0.15); setTimeout(() => playTone(100, 0.25, 'sawtooth', 0.12), 150); }
-function sfxLevelUp() { 
-  playTone(523, 0.1, 'sine', 0.12); 
-  setTimeout(() => playTone(659, 0.1, 'sine', 0.12), 100); 
-  setTimeout(() => playTone(784, 0.15, 'sine', 0.12), 200);
-  setTimeout(() => playTone(1047, 0.2, 'sine', 0.12), 350);
-}
-function sfxCoin() { playTone(800, 0.05, 'sine', 0.1); setTimeout(() => playTone(1200, 0.05, 'sine', 0.1), 50); }
-function sfxPurchase() { playTone(880, 0.08, 'triangle', 0.1); setTimeout(() => playTone(1100, 0.08, 'triangle', 0.1), 80); }
-function sfxBeat() { playTone(660, 0.04, 'sine', 0.08); }
-function sfxHeal() { playTone(440, 0.1, 'sine', 0.1); setTimeout(() => playTone(550, 0.1, 'sine', 0.1), 90); }
-function sfxVictory() {
-  [262, 330, 392, 523].forEach((f, i) => {
-    setTimeout(() => playTone(f, 0.15, 'triangle', 0.12), i * 120);
-  });
-}
-
-// Background music (simple chiptune melody)
-function startBGM() {
-  if (musicPlaying) return;
-  musicPlaying = true;
-  ensureAudio();
-  
-  const melody = [262, 294, 330, 349, 392, 440, 494, 523]; // C major scale
-  let noteIndex = 0;
-  
-  function playNote() {
-    if (!musicPlaying) return;
-    const freq = melody[noteIndex % melody.length];
-    noteIndex++;
-    playTone(freq, 0.2, 'square', 0.04);
-    setTimeout(playNote, 300);
-  }
-  playNote();
-}
-
-function stopBGM() {
-  musicPlaying = false;
-}
+function sfxHit()    { tone(300, 0.06, 'square', 0.15); tone(150, 0.08, 'sawtooth', 0.1); }
+function sfxCrit()   { tone(400, 0.06, 'square', 0.18); setTimeout(() => tone(600, 0.06, 'square', 0.15), 40); }
+function sfxBlock()  { tone(200, 0.1, 'square', 0.12); tone(250, 0.08, 'triangle', 0.08); }
+function sfxPower()  { tone(220, 0.05, 'sawtooth', 0.15); setTimeout(() => tone(440, 0.1, 'sawtooth', 0.18), 50); }
+function sfxHurt()   { tone(120, 0.2, 'sawtooth', 0.15); }
+function sfxDeath()  { tone(180, 0.15, 'sawtooth', 0.12); setTimeout(() => tone(90, 0.3, 'sawtooth', 0.1), 120); }
+function sfxCoin()   { tone(800, 0.04, 'sine', 0.08); setTimeout(() => tone(1200, 0.04, 'sine', 0.08), 40); }
+function sfxLevelUp(){ [523,659,784,1047].forEach((f,i) => setTimeout(() => tone(f, 0.12, 'triangle', 0.1), i*100)); }
+function sfxSelect() { tone(600, 0.03, 'sine', 0.06); }
+function sfxWin()    { [262,330,392,523].forEach((f,i) => setTimeout(() => tone(f, 0.15, 'triangle', 0.1), i*120)); }
+function sfxTick()   { tone(900, 0.015, 'sine', 0.04); }
 
 // ============================================================
-// RESIZE
+// DRAWING
 // ============================================================
-function resize() {
-  const dpr = window.devicePixelRatio || 1;
-  W = window.innerWidth;
-  H = window.innerHeight;
-  
-  // Fixed game resolution
-  const gameW = 360;
-  const gameH = 640;
-  pixelScale = Math.min(W / gameW, H / gameH);
-  
-  canvas.width = gameW;
-  canvas.height = gameH;
-  canvas.style.width = (gameW * pixelScale) + 'px';
-  canvas.style.height = (gameH * pixelScale) + 'px';
+function px(x, y, w, h, col) {
+  ctx.fillStyle = col;
+  ctx.fillRect(Math.floor(x), Math.floor(y), Math.ceil(w), Math.ceil(h));
 }
-window.addEventListener('resize', resize);
-resize();
-
-// ============================================================
-// DRAWING HELPERS
-// ============================================================
-function drawPixelRect(x, y, w, h, color) {
-  ctx.fillStyle = color;
-  ctx.fillRect(Math.floor(x), Math.floor(y), Math.floor(w), Math.floor(h));
-}
-
-function drawPixelText(text, x, y, size = 8, color = '#fff') {
-  ctx.fillStyle = color;
+function txt(str, x, y, size=8, col='#fff', align='center') {
+  ctx.fillStyle = col;
   ctx.font = `${size}px monospace`;
-  ctx.textAlign = 'center';
+  ctx.textAlign = align;
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, Math.floor(x), Math.floor(y));
+  ctx.fillText(str, Math.floor(x), Math.floor(y));
 }
 
-function drawHPBar(x, y, w, h, current, max, fgColor = '#4a9a4a', bgColor = '#3a3a3a') {
-  drawPixelRect(x, y, w, h, bgColor);
-  const fillW = Math.floor((current / max) * w);
-  if (fillW > 0) drawPixelRect(x, y, fillW, h, fgColor);
+function drawHPBar(x, y, w, h, cur, max, fg='#4a4', bg='#311') {
+  px(x-1, y-1, w+2, h+2, '#000');
+  px(x, y, w, h, bg);
+  const fill = Math.max(0, Math.floor((cur / max) * w));
+  if (fill > 0) px(x, y, fill, h, fg);
+}
+
+// Sprite drawing
+function drawHero(ax, ay, attacking, hurt, blocking) {
+  const x = Math.floor(ax), y = Math.floor(ay);
+  const bob = Math.sin(gameTime * 3) * 1;
+  const oy = Math.floor(bob);
+  const flash = hurt && (Math.floor(gameTime * 20) % 2 === 0);
   
-  // Border
-  ctx.strokeStyle = '#8a8a8a';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(Math.floor(x), Math.floor(y), Math.floor(w), Math.floor(h));
-}
-
-function drawPlayer(x, y, size = 16) {
-  // Simple pixel character
-  const s = size;
+  if (flash) { // damage flash = all white
+    px(x-3, y-12+oy, 6, 6, '#fff'); // head
+    px(x-4, y-6+oy, 8, 7, '#fff');  // body
+    px(x-4, y+1+oy, 3, 5, '#fff');  // legs
+    px(x+1, y+1+oy, 3, 5, '#fff');
+    return;
+  }
+  
   // Head
-  drawPixelRect(x - s/4, y - s, s/2, s/2, '#faa');
-  // Body
-  drawPixelRect(x - s/3, y - s/2, s * 2/3, s/2, '#4a6a9a');
+  px(x-3, y-12+oy, 6, 6, '#fca');
+  // Hair
+  px(x-3, y-13+oy, 6, 2, '#754');
+  // Eyes
+  px(x-2, y-10+oy, 1, 1, '#222');
+  px(x+1, y-10+oy, 1, 1, '#222');
+  // Body (armor)
+  px(x-4, y-6+oy, 8, 7, blocking ? '#58a' : '#46a');
+  // Belt
+  px(x-4, y-1+oy, 8, 1, '#aa6');
   // Legs
-  drawPixelRect(x - s/3, y, s/4, s/2, '#3a4a6a');
-  drawPixelRect(x + s/12, y, s/4, s/2, '#3a4a6a');
-  // Weapon (sword)
-  if (combatState === 'attacking') {
-    drawPixelRect(x + s/2, y - s/2, s/2, s/8, '#aa8a5a');
+  px(x-4, y+1+oy, 3, 5, '#335');
+  px(x+1, y+1+oy, 3, 5, '#335');
+  // Boots
+  px(x-4, y+5+oy, 3, 1, '#543');
+  px(x+1, y+5+oy, 3, 1, '#543');
+  
+  // Weapon
+  if (attacking) {
+    // Sword thrust right
+    px(x+4, y-8+oy, 2, 2, '#aa6'); // hilt
+    px(x+6, y-10+oy, 2, 8, '#ddd'); // blade
+    px(x+6, y-11+oy, 2, 1, '#fff'); // tip
+    // Slash arc
+    ctx.save();
+    ctx.globalAlpha = 0.4;
+    px(x+5, y-14+oy, 6, 2, '#ff8');
+    px(x+8, y-12+oy, 4, 4, '#ff8');
+    px(x+9, y-8+oy, 3, 4, '#ff8');
+    ctx.restore();
+  } else if (blocking) {
+    // Shield
+    px(x+4, y-8+oy, 5, 8, '#68a');
+    px(x+5, y-7+oy, 3, 6, '#8ac');
+    px(x+6, y-5+oy, 1, 2, '#fff');
   } else {
-    drawPixelRect(x - s/2, y - s/4, s/2, s/8, '#aa8a5a');
+    // Sword down
+    px(x-6, y-4+oy, 2, 2, '#aa6');
+    px(x-7, y-2+oy, 1, 6, '#ccc');
   }
 }
 
-function drawEnemy(enemy, x, y, size = 20) {
-  if (!enemy) return;
-  const s = size;
-  const type = enemyTypes[enemy.type];
+function drawMonster(ax, ay, def, hurtFlash) {
+  const x = Math.floor(ax), y = Math.floor(ay);
+  const bob = Math.sin(gameTime * 2 + 1) * 1.5;
+  const oy = Math.floor(bob);
+  const flash = hurtFlash && (Math.floor(gameTime * 20) % 2 === 0);
+  const c = flash ? '#fff' : def.col;
+  const s = def.sprite === 'boss' ? 1.5 : 1;
+  const ss = Math.floor;
   
-  // Flash white when damaged
-  const flash = enemy.damaged && (gameTime % 0.1) < 0.05;
-  const color = flash ? '#fff' : type.color;
-  
-  // Different shapes for different enemies
-  if (enemy.type === 'slime' || enemy.type === 'ghost') {
-    // Blob shape
-    drawPixelRect(x - s/2, y - s/3, s, s/3, color);
-    drawPixelRect(x - s/3, y - s * 2/3, s * 2/3, s/3, color);
-    drawPixelRect(x - s/4, y - s, s/2, s/3, color);
-    // Eyes
-    drawPixelRect(x - s/4, y - s * 2/3, s/6, s/6, '#fff');
-    drawPixelRect(x + s/12, y - s * 2/3, s/6, s/6, '#fff');
-  } else if (enemy.type === 'bat' || enemy.type === 'spider') {
-    // Winged/legged
-    drawPixelRect(x - s/4, y - s/2, s/2, s/2, color);
-    drawPixelRect(x - s/2, y - s/4, s/4, s/8, color);
-    drawPixelRect(x + s/4, y - s/4, s/4, s/8, color);
-    if (enemy.type === 'bat') {
-      drawPixelRect(x - s * 3/4, y - s/3, s/4, s/6, color);
-      drawPixelRect(x + s/2, y - s/3, s/4, s/6, color);
+  if (def.sprite === 'blob' || def.sprite === 'boss') {
+    // Blob/boss shape
+    const bw = ss(10*s), bh = ss(8*s);
+    px(x-bw/2, y-bh+oy, bw, bh, c);
+    px(x-bw/2+1, y-bh-ss(3*s)+oy, bw-2, ss(3*s), c);
+    if (def.sprite === 'boss') {
+      px(x-bw/2-2, y-bh-ss(5*s)+oy, 3, ss(4*s), c); // horn L
+      px(x+bw/2-1, y-bh-ss(5*s)+oy, 3, ss(4*s), c); // horn R
     }
-  } else if (enemy.type.includes('boss') || enemy.type === 'treant' || enemy.type === 'demon' || enemy.type === 'darklord' || enemy.type === 'dragon') {
-    // Boss - larger and more detailed
-    drawPixelRect(x - s * 3/4, y - s, s * 3/2, s, color);
-    drawPixelRect(x - s/2, y - s * 3/2, s, s/2, color);
     // Eyes
-    drawPixelRect(x - s/3, y - s * 4/3, s/4, s/4, '#aa3a3a');
-    drawPixelRect(x + s/12, y - s * 4/3, s/4, s/4, '#aa3a3a');
-    // Horns or spikes
-    drawPixelRect(x - s * 5/6, y - s * 7/4, s/3, s/4, color);
-    drawPixelRect(x + s/2, y - s * 7/4, s/3, s/4, color);
-  } else {
-    // Humanoid
-    drawPixelRect(x - s/4, y - s, s/2, s/3, color);
-    drawPixelRect(x - s/3, y - s * 2/3, s * 2/3, s/3, color);
-    drawPixelRect(x - s/3, y - s/3, s/4, s/3, color);
-    drawPixelRect(x + s/12, y - s/3, s/4, s/3, color);
+    px(x-ss(3*s), y-ss(6*s)+oy, ss(2*s), ss(2*s), flash?'#fff':'#fff');
+    px(x+ss(1*s), y-ss(6*s)+oy, ss(2*s), ss(2*s), flash?'#fff':'#fff');
+    if (!flash) {
+      px(x-ss(2*s), y-ss(5*s)+oy, 1, 1, '#000');
+      px(x+ss(2*s), y-ss(5*s)+oy, 1, 1, '#000');
+    }
+  } else if (def.sprite === 'humanoid') {
+    // Head
+    px(x-ss(3*s), y-ss(14*s)+oy, ss(6*s), ss(6*s), c);
+    // Body
+    px(x-ss(4*s), y-ss(8*s)+oy, ss(8*s), ss(7*s), c);
+    // Legs
+    px(x-ss(4*s), y-ss(1*s)+oy, ss(3*s), ss(4*s), c);
+    px(x+ss(1*s), y-ss(1*s)+oy, ss(3*s), ss(4*s), c);
+    // Eyes
+    if (!flash) {
+      px(x-2, y-ss(12*s)+oy, 1, 1, '#f00');
+      px(x+1, y-ss(12*s)+oy, 1, 1, '#f00');
+    }
     // Weapon
-    drawPixelRect(x + s/3, y - s/2, s/3, s/8, '#8a8a8a');
-  }
-  
-  // Attack warning indicator
-  if (enemyAttackWarning && (gameTime % 0.15) < 0.075) {
-    drawPixelRect(x - s - 4, y - s/2 - 4, 4, 4, '#aa3a3a');
-  }
-}
-
-function drawBeatIndicator(x, y, radius = 30) {
-  // Calculate beat phase
-  const phase = (gameTime - lastBeatTime) / beatPeriod;
-  const pulse = Math.sin(phase * Math.PI * 2);
-  
-  // Perfect timing window
-  const perfectWindow = 0.15;
-  const inPerfect = phase > (1 - perfectWindow) || phase < perfectWindow;
-  const inGood = phase > (1 - perfectWindow * 2) || phase < perfectWindow * 2;
-  
-  // Outer ring
-  ctx.strokeStyle = inPerfect ? '#ffd700' : (inGood ? '#aaa' : '#555');
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.arc(x, y, radius, 0, Math.PI * 2);
-  ctx.stroke();
-  
-  // Inner pulse
-  const innerRadius = radius * 0.3 + (1 - Math.abs(pulse)) * radius * 0.3;
-  drawPixelRect(x - innerRadius, y - innerRadius, innerRadius * 2, innerRadius * 2, '#ffdd44');
-  
-  // TAP text
-  drawPixelText('TAP', x, y + radius + 12, 8, '#fff');
-  
-  // Action feedback
-  if (actionTimer > 0) {
-    const alpha = Math.min(1, actionTimer / 0.3);
-    ctx.globalAlpha = alpha;
-    let feedbackColor = '#fff';
-    let feedbackText = '';
-    
-    if (combatState === 'attacking') {
-      feedbackColor = '#ff4444';
-      feedbackText = comboCount > 1 ? `HIT x${comboCount}!` : 'HIT!';
-    } else if (combatState === 'blocking') {
-      feedbackColor = '#4444ff';
-      feedbackText = 'BLOCK!';
-    } else if (combatState === 'dodging') {
-      feedbackColor = '#44ff44';
-      feedbackText = 'DODGE!';
-    }
-    
-    drawPixelText(feedbackText, x, y - radius - 20, 10, feedbackColor);
-    ctx.globalAlpha = 1;
+    px(x-ss(6*s), y-ss(6*s)+oy, ss(2*s), ss(8*s), '#888');
+  } else if (def.sprite === 'beast') {
+    // Body
+    px(x-ss(5*s), y-ss(6*s)+oy, ss(10*s), ss(5*s), c);
+    // Head
+    px(x+ss(3*s), y-ss(9*s)+oy, ss(5*s), ss(5*s), c);
+    // Legs
+    px(x-ss(4*s), y-ss(1*s)+oy, ss(2*s), ss(3*s), c);
+    px(x+ss(2*s), y-ss(1*s)+oy, ss(2*s), ss(3*s), c);
+    // Eye
+    if (!flash) px(x+ss(5*s), y-ss(8*s)+oy, 1, 1, '#f00');
+  } else { // flying
+    px(x-ss(3*s), y-ss(5*s)+oy, ss(6*s), ss(4*s), c);
+    // Wings
+    const wingFlap = Math.sin(gameTime * 8) * 2;
+    px(x-ss(8*s), y-ss(6*s)+oy+wingFlap, ss(5*s), ss(2*s), c);
+    px(x+ss(3*s), y-ss(6*s)+oy-wingFlap, ss(5*s), ss(2*s), c);
+    if (!flash) px(x-1, y-ss(4*s)+oy, 1, 1, '#f00');
   }
 }
 
-function spawnParticles(x, y, count, color) {
-  for (let i = 0; i < count; i++) {
+// ============================================================
+// PARTICLES & EFFECTS
+// ============================================================
+function spawnP(x, y, n, col, opts={}) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const spd = (0.5 + Math.random() * 2) * (opts.speed || 1);
     particles.push({
-      x, y,
-      vx: (Math.random() - 0.5) * 4,
-      vy: (Math.random() - 0.5) * 4 - 2,
-      life: 1,
-      color
+      x, y, vx: Math.cos(a)*spd, vy: Math.sin(a)*spd - (opts.rise ? 1 : 0),
+      life: 1, decay: 0.02 + Math.random() * 0.02,
+      size: opts.size || (1 + Math.random() * 2), col
     });
   }
 }
 
-function updateParticles() {
-  for (let i = particles.length - 1; i >= 0; i--) {
+function floatText(str, x, y, col='#fff', size=7) {
+  floatingTexts.push({ str, x, y, vy: -0.8, life: 1.2, col, size });
+}
+
+function updateEffects() {
+  for (let i = particles.length-1; i >= 0; i--) {
     const p = particles[i];
-    p.x += p.vx;
-    p.y += p.vy;
-    p.vy += 0.2;
-    p.life -= 0.02;
+    p.x += p.vx; p.y += p.vy; p.vy += 0.05; p.life -= p.decay;
     if (p.life <= 0) particles.splice(i, 1);
   }
+  for (let i = floatingTexts.length-1; i >= 0; i--) {
+    const f = floatingTexts[i];
+    f.y += f.vy; f.life -= deltaTime;
+    if (f.life <= 0) floatingTexts.splice(i, 1);
+  }
+  if (screenFlash > 0) screenFlash -= deltaTime * 5;
+  if (shakeAmount > 0.3) shakeAmount *= 0.85; else shakeAmount = 0;
 }
 
-function drawParticles() {
-  particles.forEach(p => {
-    ctx.globalAlpha = p.life;
-    drawPixelRect(p.x - 2, p.y - 2, 4, 4, p.color);
-    ctx.globalAlpha = 1;
-  });
-}
-
-function shake(amount = 8) {
-  shakeAmount = amount;
-}
-
-function applyShake() {
-  if (shakeAmount > 0.5) {
-    ctx.translate(
-      Math.floor((Math.random() - 0.5) * shakeAmount),
-      Math.floor((Math.random() - 0.5) * shakeAmount)
-    );
-    shakeAmount *= 0.85;
-  } else {
-    shakeAmount = 0;
+function drawEffects() {
+  for (const p of particles) {
+    ctx.save(); ctx.globalAlpha = Math.min(1, p.life);
+    px(p.x, p.y, p.size, p.size, p.col);
+    ctx.restore();
+  }
+  for (const f of floatingTexts) {
+    ctx.save(); ctx.globalAlpha = Math.min(1, f.life * 2);
+    txt(f.str, f.x, f.y, f.size, f.col);
+    ctx.restore();
+  }
+  if (screenFlash > 0) {
+    ctx.save(); ctx.globalAlpha = Math.min(0.4, screenFlash);
+    px(0, 0, GW, GH, screenFlashColor);
+    ctx.restore();
   }
 }
+
+function shake(a) { shakeAmount = Math.max(shakeAmount, a); }
+function flash(col='#fff') { screenFlash = 1; screenFlashColor = col; }
 
 // ============================================================
-// GAME LOGIC
+// BACKGROUND
 // ============================================================
-
-function startGame() {
-  gameState = 'combat';
-  currentZone = 0;
-  currentEncounter = 0;
-  player = {
-    hp: 100,
-    maxHp: 100,
-    xp: 0,
-    level: 1,
-    gold: 0,
-    attack: 10,
-    defense: 5
-  };
-  startCombat();
-  startBGM();
-}
-
-function startCombat() {
-  const zone = zones[currentZone];
-  
-  // Boss fight every 5 encounters
-  if (currentEncounter > 0 && currentEncounter % 5 === 0) {
-    enemy = createEnemy(zone.boss, true);
-  } else {
-    const enemyType = zone.enemies[Math.floor(Math.random() * zone.enemies.length)];
-    enemy = createEnemy(enemyType, false);
-  }
-  
-  combatState = 'waiting';
-  enemyAttackTimer = enemy.speed;
-  enemyAttackWarning = false;
-  comboCount = 0;
-}
-
-function createEnemy(type, isBoss) {
-  const template = enemyTypes[type];
-  return {
-    type,
-    name: template.name,
-    hp: template.hp * (isBoss ? 1 : 1),
-    maxHp: template.hp * (isBoss ? 1 : 1),
-    atk: template.atk,
-    speed: template.speed,
-    xp: template.xp,
-    gold: template.gold,
-    isBoss,
-    damaged: false
-  };
-}
-
-function checkBeatTiming() {
-  const phase = (gameTime - lastBeatTime) / beatPeriod;
-  const perfectWindow = 0.15;
-  const goodWindow = 0.25;
-  
-  // Wrap phase to [0, 1]
-  const wrappedPhase = phase - Math.floor(phase);
-  const distFromBeat = Math.min(wrappedPhase, 1 - wrappedPhase);
-  
-  if (distFromBeat < perfectWindow) return 'perfect';
-  if (distFromBeat < goodWindow) return 'good';
-  return 'miss';
-}
-
-function playerAttack() {
-  const timing = checkBeatTiming();
-  
-  if (timing === 'miss') {
-    combatState = 'waiting';
-    return;
-  }
-  
-  combatState = 'attacking';
-  actionTimer = 0.5;
-  
-  const damage = Math.floor(player.attack * (timing === 'perfect' ? 1.5 : 1.0));
-  enemy.hp -= damage;
-  enemy.damaged = true;
-  setTimeout(() => { if (enemy) enemy.damaged = false; }, 200);
-  
-  if (timing === 'perfect') {
-    comboCount++;
-    sfxParry();
-  } else {
-    comboCount = 1;
-    sfxHit();
-  }
-  
-  spawnParticles(200, 150, 8, '#ff4444');
-  shake(5);
-  
-  if (enemy.hp <= 0) {
-    enemyDefeated();
-  }
-}
-
-function playerBlock() {
-  const timing = checkBeatTiming();
-  if (timing === 'miss') return;
-  
-  combatState = 'blocking';
-  actionTimer = 0.5;
-  comboCount = 0;
-  sfxBlock();
-  
-  // Reset enemy attack if blocking during warning
-  if (enemyAttackWarning && timing === 'perfect') {
-    enemyAttackTimer = enemy.speed;
-    enemyAttackWarning = false;
-    spawnParticles(180, 250, 6, '#4444ff');
-  }
-}
-
-function playerDodge() {
-  const timing = checkBeatTiming();
-  if (timing !== 'perfect') return;
-  
-  combatState = 'dodging';
-  actionTimer = 0.5;
-  comboCount = 0;
-  sfxDodge();
-  
-  // Reset enemy attack completely
-  enemyAttackTimer = enemy.speed * 1.5;
-  enemyAttackWarning = false;
-  spawnParticles(180, 320, 10, '#44ff44');
-}
-
-function enemyAttack() {
-  if (combatState === 'blocking') {
-    // Blocked - reduced damage
-    const damage = Math.max(1, Math.floor((enemy.atk - player.defense) * 0.3));
-    player.hp -= damage;
-    sfxBlock();
-    spawnParticles(180, 320, 5, '#8888ff');
-  } else if (combatState === 'dodging') {
-    // Dodged - no damage
-    sfxDodge();
-  } else {
-    // Full damage
-    const damage = Math.max(1, enemy.atk - Math.floor(player.defense * 0.5));
-    player.hp -= damage;
-    sfxPlayerHit();
-    shake(8);
-    spawnParticles(180, 320, 12, '#aa3a3a');
-  }
-  
-  if (player.hp <= 0) {
-    playerDeath();
-  }
-  
-  combatState = 'waiting';
-  enemyAttackTimer = enemy.speed;
-  enemyAttackWarning = false;
-}
-
-function enemyDefeated() {
-  sfxEnemyDeath();
-  spawnParticles(200, 150, 20, enemyTypes[enemy.type].color);
-  shake(10);
-  
-  // Rewards
-  player.xp += enemy.xp;
-  player.gold += enemy.gold;
-  sfxCoin();
-  
-  // Check level up
-  const xpNeeded = player.level * 50;
-  if (player.xp >= xpNeeded) {
-    player.level++;
-    player.xp -= xpNeeded;
-    player.maxHp += 20;
-    player.hp = player.maxHp;
-    player.attack += 3;
-    player.defense += 2;
-    sfxLevelUp();
-    spawnParticles(180, 320, 30, '#ffd700');
-  }
-  
-  currentEncounter++;
-  
-  // Check zone completion (boss defeated)
-  if (enemy.isBoss) {
-    if (currentZone < zones.length - 1) {
-      setTimeout(() => {
-        gameState = 'shop';
-      }, 1500);
-    } else {
-      setTimeout(() => {
-        gameState = 'victory';
-        sfxVictory();
-      }, 1500);
-    }
-  } else {
-    setTimeout(() => {
-      startCombat();
-    }, 1000);
-  }
-  
-  enemy = null;
-}
-
-function playerDeath() {
-  player.hp = player.maxHp;
-  currentEncounter = Math.max(0, Math.floor(currentEncounter / 5) * 5);
-  shake(15);
-  
-  setTimeout(() => {
-    startCombat();
-  }, 1500);
-}
-
-function nextZone() {
-  currentZone++;
-  currentEncounter = 0;
-  player.hp = player.maxHp;
-  gameState = 'combat';
-  startCombat();
-}
-
-// ============================================================
-// UPDATE & DRAW
-// ============================================================
-
-function update() {
-  // Beat tracking
-  beatTime += deltaTime;
-  if (beatTime - lastBeatTime >= beatPeriod) {
-    lastBeatTime = beatTime;
-    sfxBeat();
-  }
-  
-  // Action timer
-  if (actionTimer > 0) {
-    actionTimer -= deltaTime;
-    if (actionTimer <= 0) {
-      combatState = 'waiting';
+function drawBG() {
+  const z = zones[currentZone];
+  // Sky gradient (2 colors)
+  px(0, 0, GW, 140, z.sky);
+  // Distant mountains
+  for (let i = 0; i < 6; i++) {
+    const mx = i * 35 - 10 + currentZone * 15;
+    const mh = 20 + Math.sin(i * 1.7) * 15;
+    const my = 140 - mh;
+    for (let dy = 0; dy < mh; dy++) {
+      const w = mh - dy;
+      px(mx + dy * 0.5, my + dy, w, 1, z.ground);
     }
   }
-  
-  updateParticles();
-  
-  if (gameState === 'combat' && enemy) {
-    // Enemy AI
-    enemyAttackTimer -= deltaTime;
-    
-    if (enemyAttackTimer < 0.8 && !enemyAttackWarning) {
-      enemyAttackWarning = true;
-    }
-    
-    if (enemyAttackTimer <= 0) {
-      enemyAttack();
-    }
-  }
-  
-  // Process input
-  for (const ev of inputQueue) {
-    if (gameState === 'title') {
-      startGame();
-    } else if (gameState === 'combat') {
-      handleCombatInput(ev);
-    } else if (gameState === 'shop') {
-      handleShopInput(ev);
-    } else if (gameState === 'victory') {
-      gameState = 'title';
-      currentZone = 0;
-      currentEncounter = 0;
-    }
-  }
-  inputQueue = [];
-}
-
-function handleCombatInput(ev) {
-  if (!enemy || actionTimer > 0) return;
-  
-  const tapY = ev.y / pixelScale;
-  
-  // Determine action based on tap position
-  if (tapY > 500) {
-    // Bottom area - primary attack
-    playerAttack();
-  } else if (tapY < 200) {
-    // Top area - block
-    playerBlock();
-  } else if (ev.quick) {
-    // Double tap - dodge
-    playerDodge();
-  } else {
-    // Default - attack
-    playerAttack();
-  }
-}
-
-let lastTapTime = 0;
-function processInput(x, y) {
-  const now = gameTime;
-  const quick = (now - lastTapTime) < 0.3;
-  lastTapTime = now;
-  inputQueue.push({ x, y, quick });
-}
-
-function handleShopInput(ev) {
-  const tapX = ev.x / pixelScale;
-  const tapY = ev.y / pixelScale;
-  
-  // Shop items positioned vertically
-  const itemHeight = 70;
-  const startY = 150;
-  
-  shopItems.forEach((item, i) => {
-    const itemY = startY + i * itemHeight;
-    if (tapY > itemY && tapY < itemY + 60 && tapX > 40 && tapX < 320) {
-      if (player.gold >= item.cost) {
-        player.gold -= item.cost;
-        item.effect();
-        sfxPurchase();
-        spawnParticles(180, itemY + 30, 10, '#ffd700');
-      }
-    }
-  });
-  
-  // Continue button
-  if (tapY > 550 && tapY < 600) {
-    nextZone();
-  }
-}
-
-function draw() {
-  ctx.save();
-  applyShake();
-  
-  const zone = zones[currentZone];
-  
-  // Background
-  drawPixelRect(0, 0, 360, 640, zone.bg);
-  
   // Ground
-  drawPixelRect(0, 400, 360, 240, zone.fg);
+  px(0, 140, GW, GH - 140, z.ground);
+  // Path
+  px(30, 140, 20, GH - 140, z.path);
+  px(28, 140, 2, GH - 140, z.tree);
+  px(50, 140, 2, GH - 140, z.tree);
   
-  if (gameState === 'title') {
-    drawTitle();
-  } else if (gameState === 'combat') {
-    drawCombat();
-  } else if (gameState === 'shop') {
-    drawShop();
-  } else if (gameState === 'victory') {
-    drawVictory();
+  // Trees/decorations
+  if (currentZone === 0) { // Forest
+    for (let i = 0; i < 4; i++) {
+      const tx = 65 + i * 30;
+      const ty = 130 + Math.sin(i * 2.3) * 8;
+      // Trunk
+      px(tx, ty, 3, 12, '#432');
+      // Leaves
+      px(tx-4, ty-6, 11, 4, '#3a2');
+      px(tx-3, ty-10, 9, 4, '#4a3');
+      px(tx-1, ty-13, 5, 3, '#5a4');
+    }
+  } else if (currentZone === 1) { // Cave
+    // Stalactites
+    for (let i = 0; i < 6; i++) {
+      const sx = 10 + i * 30, sh = 8 + Math.sin(i*1.5) * 5;
+      px(sx, 0, 3, sh, '#654');
+      px(sx+1, 0, 1, sh+2, '#543');
+    }
+  } else { // Castle
+    // Columns
+    for (let i = 0; i < 3; i++) {
+      const cx = 70 + i * 40;
+      px(cx, 100, 6, 40, '#556');
+      px(cx-1, 98, 8, 3, '#667');
+      px(cx-1, 139, 8, 3, '#667');
+    }
   }
   
-  drawParticles();
-  ctx.restore();
-}
-
-function drawTitle() {
-  drawPixelText('ONE BUTTON', 180, 200, 24, '#ffd700');
-  drawPixelText('ODYSSEY', 180, 240, 24, '#ffd700');
-  
-  drawPixelText('TAP TO START', 180, 400, 12, '#fff');
-  
-  // Animated player
-  drawPlayer(180, 500, 20);
-  
-  drawPixelText('An RPG controlled with', 180, 540, 8, '#aaa');
-  drawPixelText('a single tap', 180, 555, 8, '#aaa');
-}
-
-function drawCombat() {
-  // UI Header
-  drawPixelRect(0, 0, 360, 40, '#1a1a2a');
-  
-  // Player HP
-  drawPixelText('HP', 30, 12, 8, '#fff');
-  drawHPBar(10, 20, 150, 12, player.hp, player.maxHp, '#4a9a4a', '#3a1a1a');
-  
-  // Enemy HP
-  if (enemy) {
-    drawPixelText(enemy.name, 290, 12, 8, '#fff');
-    const hpColor = enemy.isBoss ? '#aa3a3a' : '#4a9a4a';
-    drawHPBar(200, 20, 150, 12, enemy.hp, enemy.maxHp, hpColor, '#3a1a1a');
+  // Ground texture (small dots)
+  for (let i = 0; i < 15; i++) {
+    const gx = (i * 13 + currentZone * 7) % GW;
+    const gy = 145 + (i * 11) % 30;
+    px(gx, gy, 1, 1, z.tree);
   }
-  
-  // Zone name
-  drawPixelText(zones[currentZone].name, 180, 50, 10, zones[currentZone].accent);
-  
-  // Enemy
-  if (enemy) {
-    const enemySize = enemy.isBoss ? 40 : 24;
-    drawEnemy(enemy, 200, 150, enemySize);
-  }
-  
-  // Player
-  drawPlayer(180, 320, 20);
-  
-  // Beat indicator
-  drawBeatIndicator(180, 530, 35);
-  
-  // Stats footer
-  drawPixelText(`LV ${player.level}  XP ${player.xp}  GOLD ${player.gold}`, 180, 610, 8, '#aaa');
-  
-  // Combat hints
-  const hintY = 360;
-  ctx.globalAlpha = 0.5;
-  drawPixelText('Bottom: ATTACK', 180, hintY, 7, '#ff8888');
-  drawPixelText('Top: BLOCK', 180, hintY + 12, 7, '#8888ff');
-  drawPixelText('Double-tap: DODGE', 180, hintY + 24, 7, '#88ff88');
-  ctx.globalAlpha = 1;
-}
-
-function drawShop() {
-  drawPixelRect(0, 0, 360, 640, '#2a1a3a');
-  
-  drawPixelText('SHOP', 180, 50, 20, '#ffd700');
-  drawPixelText(`Gold: ${player.gold}`, 180, 90, 12, '#ffdd88');
-  
-  // Draw merchant
-  drawPixelRect(160, 100, 40, 30, '#8a6a4a');
-  drawPixelRect(165, 110, 10, 10, '#faa');
-  drawPixelRect(185, 110, 10, 10, '#faa');
-  
-  // Items
-  const startY = 150;
-  const itemHeight = 70;
-  
-  shopItems.forEach((item, i) => {
-    const itemY = startY + i * itemHeight;
-    const canAfford = player.gold >= item.cost;
-    
-    drawPixelRect(40, itemY, 280, 60, canAfford ? '#3a4a5a' : '#2a2a3a');
-    ctx.strokeStyle = canAfford ? '#6a7a8a' : '#4a4a4a';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(40, itemY, 280, 60);
-    
-    drawPixelText(item.name, 180, itemY + 20, 10, canAfford ? '#fff' : '#666');
-    drawPixelText(`${item.cost} Gold`, 180, itemY + 40, 8, canAfford ? '#ffd700' : '#664400');
-  });
-  
-  // Continue button
-  drawPixelRect(80, 550, 200, 40, '#4a6a4a');
-  drawPixelText('CONTINUE', 180, 570, 12, '#fff');
-  
-  drawPixelText(`HP: ${player.hp}/${player.maxHp}  ATK: ${player.attack}  DEF: ${player.defense}`, 180, 620, 8, '#aaa');
-}
-
-function drawVictory() {
-  drawPixelRect(0, 0, 360, 640, '#1a1a3a');
-  
-  drawPixelText('VICTORY!', 180, 200, 24, '#ffd700');
-  drawPixelText('You completed the', 180, 260, 12, '#fff');
-  drawPixelText('One Button Odyssey!', 180, 280, 12, '#fff');
-  
-  drawPixelText(`Final Level: ${player.level}`, 180, 340, 10, '#aaa');
-  drawPixelText(`Total Gold: ${player.gold}`, 180, 360, 10, '#aaa');
-  
-  // Trophy
-  drawPixelRect(165, 400, 30, 40, '#ffd700');
-  drawPixelRect(160, 390, 40, 15, '#ffd700');
-  drawPixelRect(170, 440, 20, 10, '#8a6a4a');
-  
-  drawPixelText('TAP TO RESTART', 180, 550, 12, '#888');
 }
 
 // ============================================================
 // INPUT
 // ============================================================
-canvas.addEventListener('touchstart', (e) => {
-  e.preventDefault();
+let tapped = false;
+function handleTap() {
   ensureAudio();
-  const touch = e.touches[0];
-  processInput(touch.clientX, touch.clientY);
-}, { passive: false });
-
-canvas.addEventListener('mousedown', (e) => {
-  ensureAudio();
-  processInput(e.clientX, e.clientY);
-});
+  tapped = true;
+}
+canvas.addEventListener('touchstart', (e) => { e.preventDefault(); handleTap(); }, { passive: false });
+canvas.addEventListener('mousedown', handleTap);
 
 // ============================================================
-// GAME LOOP
+// COMBAT LOGIC
 // ============================================================
-function gameLoop(currentTime) {
-  deltaTime = Math.min(0.05, (currentTime - lastTime) / 1000);
-  lastTime = currentTime;
+function spawnEnemy(type, isBoss) {
+  const d = enemyDefs[type];
+  const hpMult = isBoss ? 1 : 1 + currentZone * 0.2;
+  enemy = {
+    type, def: d, hp: Math.floor(d.hp * hpMult), maxHp: Math.floor(d.hp * hpMult),
+    atk: d.atk, spd: d.spd, isBoss
+  };
+  enemyAnim.hurt = false;
+  enemyAnim.x = 135;
+  combatPhase = 'player';
+  wheelTimer = 0;
+  currentAction = 0;
+  comboCount = 0;
+  enemyAttacking = false;
+  enemyAttackTimer = 0;
+  turnDelay = 0;
+}
+
+function startEncounter() {
+  const z = zones[currentZone];
+  if (encounter > 0 && encounter % 5 === 0) {
+    spawnEnemy(z.boss, true);
+  } else {
+    const type = z.enemies[Math.floor(Math.random() * z.enemies.length)];
+    spawnEnemy(type, false);
+  }
+  gameState = 'combat';
+}
+
+function executeAction() {
+  if (combatPhase !== 'player' || !enemy || turnDelay > 0) return;
+  
+  const action = currentAction;
+  sfxSelect();
+  
+  if (action === 0) { // ATTACK
+    combatPhase = 'animating';
+    playerAnim.attacking = true;
+    
+    setTimeout(() => {
+      const crit = Math.random() < 0.15 + comboCount * 0.05;
+      const dmg = Math.floor(player.atk * (crit ? 1.8 : 1) * (1 + comboCount * 0.1));
+      enemy.hp -= dmg;
+      enemyAnim.hurt = true;
+      setTimeout(() => enemyAnim.hurt = false, 200);
+      
+      if (crit) {
+        sfxCrit();
+        floatText(`CRIT ${dmg}!`, enemyAnim.x, enemyAnim.y - 20, '#ff4', 8);
+        shake(6);
+        flash('#ff4');
+        spawnP(enemyAnim.x, enemyAnim.y, 12, '#ff4');
+        comboCount++;
+      } else {
+        sfxHit();
+        floatText(`${dmg}`, enemyAnim.x, enemyAnim.y - 15, '#faa', 7);
+        shake(3);
+        spawnP(enemyAnim.x, enemyAnim.y, 6, '#f66');
+        comboCount++;
+      }
+      
+      if (comboCount > 1) floatText(`x${comboCount}`, enemyAnim.x + 12, enemyAnim.y - 8, '#fa0', 6);
+      
+      playerAnim.attacking = false;
+      
+      if (enemy.hp <= 0) {
+        enemyDefeated();
+      } else {
+        combatPhase = 'enemy';
+        enemyAttackTimer = 0.6;
+      }
+    }, 150);
+    
+  } else if (action === 1) { // BLOCK
+    combatPhase = 'blocking';
+    playerAnim.blocking = true;
+    comboCount = 0;
+    sfxBlock();
+    floatText('BLOCK!', playerAnim.x, playerAnim.y - 20, '#8af', 7);
+    spawnP(playerAnim.x + 8, playerAnim.y - 5, 4, '#8af');
+    
+    // Enemy attacks but blocked
+    setTimeout(() => {
+      const blocked = Math.floor(enemy.atk * 0.7);
+      const dmg = Math.max(1, enemy.atk - blocked - player.def);
+      player.hp -= dmg;
+      if (dmg > 2) floatText(`-${dmg}`, playerAnim.x, playerAnim.y - 10, '#f88', 6);
+      playerAnim.blocking = false;
+      if (player.hp <= 0) { playerDied(); return; }
+      combatPhase = 'player';
+      wheelTimer = 0;
+      turnDelay = 0.3;
+    }, 600);
+    
+  } else { // POWER ATTACK
+    combatPhase = 'animating';
+    playerAnim.attacking = true;
+    comboCount = 0;
+    sfxPower();
+    
+    setTimeout(() => {
+      const dmg = Math.floor(player.atk * 2.5);
+      enemy.hp -= dmg;
+      enemyAnim.hurt = true;
+      setTimeout(() => enemyAnim.hurt = false, 300);
+      
+      floatText(`💥${dmg}!`, enemyAnim.x, enemyAnim.y - 22, '#f84', 9);
+      shake(8);
+      flash('#f84');
+      spawnP(enemyAnim.x, enemyAnim.y, 20, '#f84', { speed: 1.5 });
+      
+      playerAnim.attacking = false;
+      
+      if (enemy.hp <= 0) {
+        enemyDefeated();
+      } else {
+        // Power leaves you open — enemy counter-attacks hard
+        combatPhase = 'enemy';
+        enemyAttackTimer = 0.3; // faster retaliation
+      }
+    }, 200);
+  }
+}
+
+function enemyTurn() {
+  if (!enemy || combatPhase !== 'enemy') return;
+  
+  enemyAttacking = true;
+  const dmg = Math.max(1, enemy.atk - Math.floor(player.def * 0.5));
+  player.hp -= dmg;
+  playerAnim.hurt = true;
+  setTimeout(() => playerAnim.hurt = false, 250);
+  
+  sfxHurt();
+  floatText(`-${dmg}`, playerAnim.x, playerAnim.y - 12, '#f44', 7);
+  shake(4);
+  flash('#f44');
+  spawnP(playerAnim.x, playerAnim.y, 8, '#f44');
+  
+  if (player.hp <= 0) {
+    playerDied();
+  } else {
+    setTimeout(() => {
+      enemyAttacking = false;
+      combatPhase = 'player';
+      wheelTimer = 0;
+      turnDelay = 0.3;
+    }, 400);
+  }
+}
+
+function enemyDefeated() {
+  sfxDeath();
+  shake(10);
+  flash('#fff');
+  spawnP(enemyAnim.x, enemyAnim.y, 25, enemy.def.col, { speed: 1.5 });
+  
+  const xpGain = enemy.def.xp;
+  const gpGain = enemy.def.gp;
+  player.xp += xpGain;
+  player.gold += gpGain;
+  
+  floatText(`+${xpGain} XP`, enemyAnim.x, enemyAnim.y - 30, '#af4', 7);
+  setTimeout(() => {
+    floatText(`+${gpGain} G`, enemyAnim.x, enemyAnim.y - 20, '#fd4', 7);
+    sfxCoin();
+  }, 300);
+  
+  // Level up check
+  const needed = player.level * 50;
+  if (player.xp >= needed) {
+    player.level++;
+    player.xp -= needed;
+    player.maxHp += 15;
+    player.hp = player.maxHp;
+    player.atk += 3;
+    player.def += 2;
+    setTimeout(() => {
+      sfxLevelUp();
+      floatText('LEVEL UP!', GW/2, GH/2 - 30, '#fd4', 10);
+      spawnP(playerAnim.x, playerAnim.y, 20, '#fd4', { rise: true });
+    }, 500);
+  }
+  
+  const wasBoss = enemy.isBoss;
+  enemy = null;
+  encounter++;
+  
+  setTimeout(() => {
+    if (wasBoss) {
+      if (currentZone < zones.length - 1) {
+        gameState = 'shop';
+      } else {
+        gameState = 'victory';
+        sfxWin();
+      }
+    } else {
+      startEncounter();
+    }
+  }, 1200);
+}
+
+function playerDied() {
+  sfxDeath();
+  shake(12);
+  flash('#f00');
+  gameState = 'dead';
+}
+
+function revive() {
+  player.hp = player.maxHp;
+  player.gold = Math.floor(player.gold * 0.5); // lose half gold
+  encounter = Math.max(0, Math.floor(encounter / 5) * 5); // restart zone segment
+  startEncounter();
+}
+
+// ============================================================
+// UPDATE
+// ============================================================
+function update() {
+  if (turnDelay > 0) { turnDelay -= deltaTime; tapped = false; return; }
+  
+  if (gameState === 'title') {
+    if (tapped) {
+      player = { hp: 100, maxHp: 100, xp: 0, level: 1, gold: 0, atk: 12, def: 5 };
+      currentZone = 0; encounter = 0;
+      startEncounter();
+    }
+  }
+  
+  else if (gameState === 'combat') {
+    // Wheel auto-cycling
+    if (combatPhase === 'player') {
+      wheelTimer += deltaTime;
+      const speed = wheelSpeed - currentZone * 0.15; // faster in later zones
+      if (wheelTimer >= speed) {
+        wheelTimer -= speed;
+        currentAction = (currentAction + 1) % actionWheel.length;
+        sfxTick();
+      }
+    }
+    
+    // Enemy attack timing
+    if (combatPhase === 'enemy') {
+      enemyAttackTimer -= deltaTime;
+      if (enemyAttackTimer <= 0) {
+        enemyTurn();
+      }
+    }
+    
+    // Tap to execute
+    if (tapped && combatPhase === 'player') {
+      executeAction();
+    }
+  }
+  
+  else if (gameState === 'shop') {
+    if (tapped) {
+      // Simple: tap cycles through items, auto-buy if affordable
+      // Actually let's just auto-heal and advance
+      // Better: show items, tap to cycle, hold... nah, keep it one-button
+      // Tap advances to next zone after brief shop
+      currentZone++;
+      encounter = 0;
+      player.hp = player.maxHp;
+      startEncounter();
+    }
+  }
+  
+  else if (gameState === 'victory') {
+    if (tapped) {
+      gameState = 'title';
+    }
+  }
+  
+  else if (gameState === 'dead') {
+    if (tapped) {
+      revive();
+    }
+  }
+  
+  tapped = false;
+  updateEffects();
+}
+
+// ============================================================
+// DRAW
+// ============================================================
+function draw() {
+  ctx.save();
+  if (shakeAmount > 0.3) {
+    ctx.translate(Math.floor((Math.random()-0.5)*shakeAmount), Math.floor((Math.random()-0.5)*shakeAmount));
+  }
+  
+  drawBG();
+  
+  if (gameState === 'title') drawTitle();
+  else if (gameState === 'combat') drawCombat();
+  else if (gameState === 'shop') drawShop();
+  else if (gameState === 'victory') drawVictory();
+  else if (gameState === 'dead') drawDead();
+  
+  drawEffects();
+  ctx.restore();
+}
+
+function drawTitle() {
+  // Darken bg
+  ctx.save(); ctx.globalAlpha = 0.5;
+  px(0, 0, GW, GH, '#000');
+  ctx.restore();
+  
+  txt('ONE BUTTON', GW/2, 100, 12, '#fd4');
+  txt('ODYSSEY', GW/2, 118, 12, '#fd4');
+  
+  // Hero
+  drawHero(GW/2, 180, false, false, false);
+  
+  // Pulsing prompt
+  const pulse = 0.5 + Math.sin(gameTime * 3) * 0.3;
+  ctx.save(); ctx.globalAlpha = pulse;
+  txt('TAP TO BEGIN', GW/2, 240, 8, '#fff');
+  ctx.restore();
+  
+  txt('An RPG with ONE button', GW/2, 275, 6, '#888');
+  txt('Tap when the right action', GW/2, 286, 6, '#888');
+  txt('is highlighted!', GW/2, 297, 6, '#888');
+}
+
+function drawCombat() {
+  if (!enemy) return;
+  
+  // Top bar
+  px(0, 0, GW, 32, 'rgba(0,0,0,0.7)');
+  
+  // Player HP
+  txt('HP', 4, 8, 6, '#8f8', 'left');
+  drawHPBar(14, 4, 55, 7, player.hp, player.maxHp, '#4a4', '#311');
+  txt(`${player.hp}`, 42, 8, 5, '#fff');
+  
+  // Enemy HP
+  const eDef = enemy.def;
+  txt(enemy.isBoss ? eDef.name : eDef.name, GW-4, 8, 6, eDef.col, 'right');
+  drawHPBar(GW-70, 4, 55, 7, enemy.hp, enemy.maxHp, enemy.isBoss ? '#a44' : '#4a4', '#311');
+  
+  // Zone + encounter
+  txt(zones[currentZone].name, GW/2, 22, 6, zones[currentZone].path);
+  txt(`${encounter+1}/6`, GW/2, 29, 5, '#666');
+  
+  // Draw characters
+  drawMonster(enemyAnim.x, enemyAnim.y, eDef, enemyAnim.hurt);
+  drawHero(playerAnim.x, playerAnim.y, playerAnim.attacking, playerAnim.hurt, playerAnim.blocking);
+  
+  // Enemy attack warning
+  if (combatPhase === 'enemy') {
+    const warn = Math.sin(gameTime * 10) > 0;
+    if (warn) {
+      txt('!', enemyAnim.x, enemyAnim.y - 25, 10, '#f44');
+    }
+  }
+  
+  // === ACTION WHEEL (bottom) ===
+  const wheelY = 265;
+  px(0, wheelY - 15, GW, 55, 'rgba(0,0,0,0.6)');
+  
+  // Draw 3 actions
+  const labels = ['⚔ ATK', '🛡 BLK', '⚡ PWR'];
+  const colors = ['#f66', '#68f', '#fa4'];
+  const bgCols = ['#411', '#114', '#441'];
+  
+  for (let i = 0; i < 3; i++) {
+    const ax = 10 + i * 58;
+    const ay = wheelY;
+    const active = (i === currentAction && combatPhase === 'player');
+    
+    // Background
+    px(ax, ay - 10, 52, 22, active ? bgCols[i] : '#222');
+    // Border
+    if (active) {
+      // Pulsing highlight
+      const p = 0.7 + Math.sin(gameTime * 8) * 0.3;
+      ctx.save(); ctx.globalAlpha = p;
+      ctx.strokeStyle = colors[i];
+      ctx.lineWidth = 2;
+      ctx.strokeRect(ax, ay - 10, 52, 22);
+      ctx.restore();
+      
+      // Arrow indicator
+      txt('▼', ax + 26, ay - 16, 6, colors[i]);
+    }
+    
+    txt(labels[i], ax + 26, ay, active ? 7 : 6, active ? colors[i] : '#555');
+  }
+  
+  // Combo counter
+  if (comboCount > 1) {
+    txt(`COMBO x${comboCount}`, GW/2, wheelY + 22, 7, '#fa0');
+  }
+  
+  // Instructions
+  if (combatPhase === 'player') {
+    const p2 = 0.4 + Math.sin(gameTime * 4) * 0.2;
+    ctx.save(); ctx.globalAlpha = p2;
+    txt('TAP!', GW/2, wheelY + 35, 8, '#fff');
+    ctx.restore();
+  }
+  
+  // Stats bar
+  px(0, GH - 14, GW, 14, 'rgba(0,0,0,0.5)');
+  txt(`LV${player.level}  ATK${player.atk}  DEF${player.def}  ${player.gold}G`, GW/2, GH - 7, 5, '#888');
+}
+
+function drawShop() {
+  px(0, 0, GW, GH, '#1a1a2a');
+  
+  txt('ZONE CLEARED!', GW/2, 40, 10, '#fd4');
+  txt(zones[currentZone].name, GW/2, 55, 7, '#aaa');
+  
+  // Auto-heal
+  txt('HP fully restored!', GW/2, 90, 7, '#8f8');
+  txt(`Gold: ${player.gold}`, GW/2, 110, 7, '#fd4');
+  
+  // Stats
+  txt(`LV ${player.level}`, GW/2, 140, 8, '#fff');
+  txt(`HP ${player.hp}/${player.maxHp}`, GW/2, 155, 7, '#8f8');
+  txt(`ATK ${player.atk}  DEF ${player.def}`, GW/2, 170, 7, '#aaf');
+  
+  // Next zone preview
+  if (currentZone < zones.length - 1) {
+    txt('Next:', GW/2, 210, 7, '#888');
+    txt(zones[currentZone + 1].name, GW/2, 225, 8, zones[currentZone + 1].path);
+  }
+  
+  const p = 0.5 + Math.sin(gameTime * 3) * 0.3;
+  ctx.save(); ctx.globalAlpha = p;
+  txt('TAP TO CONTINUE', GW/2, 280, 8, '#fff');
+  ctx.restore();
+}
+
+function drawVictory() {
+  px(0, 0, GW, GH, '#0a0a1a');
+  
+  // Confetti
+  if (Math.random() < 0.1) {
+    spawnP(Math.random() * GW, 0, 1, ['#f44','#4f4','#44f','#fd4','#f4f'][Math.floor(Math.random()*5)], { speed: 0.5 });
+  }
+  
+  txt('VICTORY!', GW/2, 80, 14, '#fd4');
+  txt('The Dark Lord is slain!', GW/2, 105, 7, '#fff');
+  txt('Peace returns to the land.', GW/2, 118, 7, '#aaa');
+  
+  // Trophy
+  px(GW/2-6, 145, 12, 20, '#fd4');
+  px(GW/2-8, 140, 16, 6, '#fd4');
+  px(GW/2-3, 165, 6, 4, '#864');
+  px(GW/2-5, 169, 10, 3, '#864');
+  
+  txt(`Level: ${player.level}`, GW/2, 200, 8, '#fff');
+  txt(`Gold: ${player.gold}`, GW/2, 215, 7, '#fd4');
+  
+  const p = 0.5 + Math.sin(gameTime * 2) * 0.3;
+  ctx.save(); ctx.globalAlpha = p;
+  txt('TAP TO PLAY AGAIN', GW/2, 270, 7, '#888');
+  ctx.restore();
+}
+
+function drawDead() {
+  px(0, 0, GW, GH, '#1a0a0a');
+  
+  txt('DEFEATED', GW/2, 100, 12, '#f44');
+  txt('Your journey ends here...', GW/2, 125, 7, '#aaa');
+  txt('but heroes never truly die.', GW/2, 138, 7, '#888');
+  
+  txt(`Lost: ${Math.floor(player.gold * 0.5)}G`, GW/2, 175, 7, '#f88');
+  
+  const p = 0.5 + Math.sin(gameTime * 3) * 0.3;
+  ctx.save(); ctx.globalAlpha = p;
+  txt('TAP TO REVIVE', GW/2, 240, 8, '#fff');
+  ctx.restore();
+}
+
+// ============================================================
+// LOOP
+// ============================================================
+function gameLoop(ts) {
+  deltaTime = Math.min((ts - lastTime) / 1000, 0.1);
+  lastTime = ts;
   gameTime += deltaTime;
   
   update();
   draw();
-  
   requestAnimationFrame(gameLoop);
 }
 
-// Start
-lastTime = performance.now();
 requestAnimationFrame(gameLoop);
-
 </script>
 </body>
 </html>
