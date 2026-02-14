@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>Word Architect</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#1a1025;font-family:-apple-system,system-ui,sans-serif;touch-action:none;user-select:none}
+#game{display:flex;flex-direction:column;height:100%;padding:8px}
+#top-bar{display:flex;justify-content:space-between;padding:8px 12px;color:#fff;font-weight:700}
+.stat-val{font-size:1.3rem}
+.stat-lbl{font-size:0.65rem;color:#888;text-transform:uppercase}
+#timer-bar{height:4px;background:#333;border-radius:2px;margin:4px 12px;overflow:hidden}
+#timer-fill{height:100%;background:linear-gradient(90deg,#e94560,#ffd700);transition:width 0.3s;width:100%}
+#board{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;overflow:hidden}
+#word-display{min-height:50px;display:flex;align-items:center;justify-content:center;gap:4px;margin:8px 0;flex-wrap:wrap}
+.word-letter{width:36px;height:42px;background:#2a1a3a;border:2px solid #4a2a6a;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:900;color:#fff;animation:popIn 0.15s ease-out}
+.word-letter.double{border-color:#ffd700;box-shadow:0 0 8px rgba(255,215,0,0.3)}
+.word-letter.wild{border-color:#0ff;box-shadow:0 0 8px rgba(0,255,255,0.3)}
+@keyframes popIn{from{transform:scale(0.5);opacity:0}to{transform:scale(1);opacity:1}}
+#tile-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;padding:8px;max-width:380px;width:100%}
+.tile{aspect-ratio:1;background:#2a1a3a;border:2px solid #3a2a5a;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all 0.15s;position:relative}
+.tile:active{transform:scale(0.92)}
+.tile.selected{border-color:#e94560;background:#3a1a3a;box-shadow:0 0 12px rgba(233,69,96,0.3)}
+.tile .letter{font-size:1.3rem;font-weight:900;color:#fff}
+.tile .pts{font-size:0.55rem;color:#888;position:absolute;bottom:3px;right:5px}
+.tile.double{border-color:#ffd700;background:#2a2a1a}.tile.double .letter{color:#ffd700}
+.tile.wild{border-color:#0ff;background:#1a2a2a}.tile.wild .letter{color:#0ff}
+.tile.falling{animation:tilefall 0.3s ease-out}
+@keyframes tilefall{from{transform:translateY(-60px);opacity:0}to{transform:translateY(0);opacity:1}}
+#actions{display:flex;gap:8px;padding:8px 12px;justify-content:center}
+.action-btn{flex:1;max-width:160px;padding:12px;border-radius:12px;border:none;font-weight:800;font-size:0.9rem;cursor:pointer;letter-spacing:0.5px}
+.action-btn:active{transform:scale(0.95)}
+#submit-btn{background:linear-gradient(135deg,#e94560,#7b2ff7);color:#fff}
+#submit-btn:disabled{opacity:0.3}
+#clear-btn{background:rgba(255,255,255,0.08);color:#aaa;border:1px solid rgba(255,255,255,0.1)}
+#found-words{display:flex;gap:6px;flex-wrap:wrap;padding:4px 12px;max-height:60px;overflow-y:auto;justify-content:center}
+.found-word{background:rgba(233,69,96,0.15);color:#e94560;padding:2px 10px;border-radius:50px;font-size:0.7rem;font-weight:700}
+#feedback{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-size:1.5rem;font-weight:900;pointer-events:none;z-index:20;opacity:0;transition:all 0.3s}
+.overlay{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(26,16,37,0.95);z-index:20}
+.overlay h1{font-size:clamp(2rem,7vw,3.5rem);font-weight:900;background:linear-gradient(135deg,#e94560,#ffd700);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:8px}
+.overlay .sub{color:#888;margin-bottom:20px;font-size:0.9rem}
+.btn{background:linear-gradient(135deg,#e94560,#7b2ff7);border:none;color:#fff;font-weight:800;font-size:1rem;padding:14px 36px;border-radius:50px;cursor:pointer;margin:6px}
+.btn:active{transform:scale(0.95)}
+.btn.sec{background:rgba(255,255,255,0.1)}
+.final-score{font-size:2.5rem;font-weight:900;color:#ffd700;margin:8px 0}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<div id="game" class="hidden">
+  <div id="top-bar">
+    <div><div class="stat-val" id="score-val">0</div><div class="stat-lbl">Score</div></div>
+    <div style="text-align:center"><div class="stat-val" id="round-val">1</div><div class="stat-lbl">Round</div></div>
+    <div style="text-align:right"><div class="stat-val" id="words-val">0</div><div class="stat-lbl">Words</div></div>
+  </div>
+  <div id="timer-bar"><div id="timer-fill"></div></div>
+  <div id="found-words"></div>
+  <div id="board">
+    <div id="word-display"></div>
+    <div id="tile-grid"></div>
+  </div>
+  <div id="actions">
+    <button class="action-btn" id="clear-btn" onclick="clearWord()">CLEAR</button>
+    <button class="action-btn" id="submit-btn" onclick="submitWord()" disabled>SUBMIT</button>
+  </div>
+</div>
+<div id="feedback"></div>
+
+<div class="overlay" id="menu">
+  <h1>WORD<br>ARCHITECT</h1>
+  <div class="sub">Build words from letter tiles</div>
+  <div style="color:#666;font-size:0.75rem;margin-bottom:16px;max-width:280px;text-align:center;line-height:1.5">
+    Tap tiles to spell words. Longer words = more points.<br>
+    🟡 Double tiles = 2× score<br>
+    🔵 Wild tiles = any letter
+  </div>
+  <button class="btn" onclick="startGame()">PLAY</button>
+</div>
+
+<div class="overlay hidden" id="results">
+  <div style="color:#888">TIME'S UP!</div>
+  <div class="final-score" id="r-score">0</div>
+  <div style="color:#aaa;margin:4px 0" id="r-words">0 words found</div>
+  <div style="color:#aaa;font-size:0.85rem" id="r-best"></div>
+  <div style="color:#aaa;font-size:0.85rem;margin:4px 0" id="r-longest"></div>
+  <button class="btn" onclick="startGame()">PLAY AGAIN</button>
+  <button class="btn sec" onclick="showMenu()">MENU</button>
+</div>
+
+<script>
+// Compact dictionary — common English words 3-8 letters
+// We'll use a trie-based approach with a hardcoded word list
+const WORDS=new Set();
+const COMMON_WORDS="the,and,for,are,but,not,you,all,can,had,her,was,one,our,out,day,get,has,him,his,how,its,may,new,now,old,see,way,who,boy,did,let,put,say,she,too,use,dad,mom,act,add,age,ago,air,also,any,arm,art,ask,ate,away,back,bad,bag,ball,bank,base,bath,bear,beat,bed,been,bell,best,big,bird,bit,black,blood,blow,blue,boat,body,bone,book,born,both,box,bring,brown,build,burn,bus,busy,buy,call,came,camp,car,card,care,carry,case,cat,catch,cell,change,check,child,city,class,clean,clear,close,cold,come,common,cook,cool,copy,corn,cost,could,count,cover,cross,cry,cup,cut,dark,dead,deal,dear,deep,does,dog,dollar,done,door,down,draw,dream,dress,drink,drive,drop,dry,during,each,ear,early,earth,east,eat,edge,egg,eight,else,end,enough,even,ever,every,eye,face,fact,fair,fall,family,far,farm,fast,fat,feel,feet,fell,field,fill,find,fine,fire,first,fish,five,flat,floor,fly,follow,food,foot,form,four,free,fresh,friend,from,front,full,fun,game,garden,gave,girl,give,glad,glass,goes,gold,gone,good,got,grand,grass,great,green,grew,ground,group,grow,guess,gun,guy,hair,half,hall,hand,hang,happen,happy,hard,hat,have,head,hear,heart,heat,heavy,held,help,here,high,hill,hit,hold,hole,home,hope,horse,hot,hotel,house,how,huge,hundred,hunt,hurry,hurt,ice,idea,inch,inside,iron,island,job,join,joy,jump,just,keep,kept,key,kid,kill,kind,king,kitchen,knew,know,land,large,last,late,laugh,law,lay,lead,learn,least,leave,left,less,letter,life,lift,light,like,line,list,listen,live,long,look,lord,lose,lost,lot,love,low,luck,made,main,make,man,many,map,mark,master,matter,mean,meet,men,middle,might,mile,milk,mind,mine,miss,modern,moment,money,month,moon,more,morning,most,mother,mouth,move,much,music,must,name,near,need,never,next,nice,night,nine,nor,north,nose,note,nothing,notice,number,offer,often,once,only,open,order,other,over,own,page,paid,paint,pair,paper,part,party,pass,past,pay,people,pick,picture,piece,place,plan,plant,play,please,point,poor,power,press,pretty,print,problem,product,pull,push,quick,quite,rain,raise,ran,reach,read,ready,real,reason,red,remember,rest,rich,ride,right,ring,rise,river,road,rock,roll,room,round,rule,run,safe,said,salt,same,sand,sat,save,saw,school,sea,seat,second,seem,self,sell,send,serve,set,seven,several,shall,shape,share,she,ship,shoe,short,shot,should,show,shut,side,sight,sign,since,sing,sister,sit,six,size,skin,sleep,small,smell,smile,smoke,snow,soft,soil,some,son,song,soon,sort,sound,south,space,speak,speed,spend,spoke,spot,spring,stand,star,start,state,stay,step,still,stock,stone,stood,stop,store,storm,story,strange,street,strong,student,such,sudden,sugar,summer,sun,sure,table,tail,take,talk,tall,taste,teach,team,tell,ten,tend,term,test,than,thank,that,their,them,then,there,these,they,thick,thin,thing,think,third,this,those,though,thought,three,through,throw,tie,till,time,tiny,today,told,ton,tone,tonight,took,tool,top,total,touch,toward,town,trade,train,travel,tree,trip,trouble,true,trust,try,turn,twelve,twenty,two,type,uncle,under,unit,until,upon,usual,valley,value,very,visit,voice,wait,walk,wall,want,warm,wash,watch,water,wave,wear,weather,week,weight,well,went,were,west,what,wheel,when,where,which,while,white,whole,whom,wide,wife,wild,will,win,wind,window,winter,wish,with,without,woman,wonder,wood,word,work,world,worry,worst,worth,would,write,wrong,wrote,yard,year,yes,yet,young,your,able,above,accept,across,ahead,allow,alone,along,already,among,amount,appear,baby,band,basic,battle,beat,beauty,became,become,begin,behind,believe,below,beside,better,between,beyond,blank,block,board,body,bomb,brain,break,breath,bridge,bright,broke,brother,brought,build,built,burn,busy,calm,capital,captain,carry,caught,cause,central,certain,chair,chair,chance,charge,chart,chief,choice,choose,church,circle,claim,class,climb,club,coach,coast,coffee,collect,color,column,combine,common,company,compare,concern,condition,connect,consider,contain,content,context,control,corner,correct,cotton,count,country,couple,course,court,cousin,crowd,current,curve,daily,dance,danger,daughter,debate,decide,demand,depend,depth,desert,design,detail,develop,differ,direct,discover,discuss,disease,divide,doctor,double,doubt,dozen,draft,drama,dream,drive,driver,dust,duty,earn,east,effect,effort,either,election,energy,engine,enjoy,entire,equal,escape,evening,event,exact,examine,example,except,excite,exercise,exist,expect,express,extra,extreme,famous,fashion,father,fault,favor,fear,feature,feeling,female,fewer,fight,figure,final,finger,finish,firm,flight,flower,follow,force,foreign,forest,forget,formal,former,forth,forward,found,fourth,frame,freedom,front,fruit,fully,further,future,gather,general,gentle,gift,glass,global,goes,golden,grade,grain,grand,grant,grass,grave,great,grown,guard,guess,guide,habit,happen,hardly,health,heart,heaven,heavy,hello,hence,herself,hide,highway,himself,history,honest,honor,horse,household,human,humor,husband,ignore,image,imagine,impact,import,impose,improve,indeed,index,indicate,industry,inform,initial,inner,input,insect,insert,instead,intend,interest,invest,issue,item,itself,jacket,journey,judge,juice,junior,justice,label,labor,lady,large,launch,layer,leader,league,least,leather,legal,lesson,level,light,likely,limit,list,little,local,lonely,loose,lower,lucky,lunch,machine,magic,major,manage,manner,march,market,marry,mass,match,material,maybe,mayor,meal,measure,media,medium,member,memory,mental,merely,message,metal,method,middle,might,military,million,minor,minute,mirror,mission,mistake,model,modern,moment,moral,mostly,motor,mount,murder,muscle,museum,music,narrow,nation,native,nature,nearby,nearly,neither,nerve,never,noise,none,normal,northern,novel,nurse,object,observe,obtain,obvious,occur,ocean,officer,official,operate,opinion,option,orange,ordinary,organ,origin,other,otherwise,ought,outer,output,overall,owner,package,palace,panel,parent,park,passage,patient,pattern,pause,peace,perfect,perform,perhaps,period,permit,person,phrase,pick,pilot,pitch,plain,planet,player,plenty,plus,pocket,poem,poet,popular,position,positive,possible,potato,pound,poverty,powerful,practical,prayer,prefer,prepare,present,pressure,prevent,primary,prince,princess,prison,private,probably,produce,professor,profit,program,project,promise,proper,protect,prove,provide,public,purpose,quarter,queen,quick,quiet,quote,race,radio,range,rapid,rare,rather,reaction,reality,realize,receive,recent,record,reduce,refer,reflect,reform,regard,region,reject,relate,release,relief,remain,remove,repeat,replace,report,require,research,resource,respond,result,retain,retire,return,reveal,review,revolution,ride,river,rough,route,royal,rule,rural,sample,satisfy,scale,scene,season,secure,select,senior,sense,separate,series,serious,settle,severe,shadow,shake,shall,shape,sharp,sheet,shelter,shift,shine,shoot,shoulder,sight,signal,silence,silly,silver,similar,simple,simply,single,sister,skill,sleep,slight,slow,smile,smooth,social,society,soldier,solid,solution,somebody,somewhere,sorry,soul,source,southern,spare,spirit,split,sport,spread,square,stable,stage,standard,status,steady,steel,stick,stiff,stock,stomach,storm,straight,strange,strength,stretch,strike,string,strip,stroke,struggle,study,stuff,stupid,style,subject,submit,succeed,succeed,suffer,sugar,suggest,suit,supply,support,suppose,surface,surprise,surround,survive,sweet,swing,switch,symbol,system,target,taste,teach,technique,temple,throat,ticket,tight,tissue,title,tomorrow,topic,total,touch,tough,tower,track,tradition,traffic,trail,transfer,travel,treat,trend,trial,trick,troop,trouble,truly,trust,truth,twice,typical,unable,union,unique,universe,unless,upper,urban,useful,usual,valley,vast,vehicle,version,victim,village,virtue,vision,visitor,vital,volume,voyage,wage,waste,wealth,weapon,weather,weigh,welcome,western,whatever,wheel,whereas,whisper,widely,willing,winner,winter,within,wonder,wooden,worker,writing,yellow,youth";
+COMMON_WORDS.split(',').forEach(w=>{if(w.length>=3)WORDS.add(w.toUpperCase())});
+// Add more 3-letter words
+"ace,ape,axe,bay,bee,bow,bud,bug,cab,cad,cam,cap,cob,cod,cog,cow,cub,cud,cue,cur,dab,dam,den,dew,dig,dim,din,dip,doe,dot,dub,dud,due,dug,dun,duo,dye,eel,ego,elk,elm,emu,era,eve,ewe,fan,fad,fag,fax,fed,fee,fen,fer,few,fib,fig,fin,fir,fit,fix,foe,fog,fop,for,fox,fry,fur,gab,gag,gal,gap,gas,gel,gem,gin,gnu,gob,god,gum,gut,gym,gyp,had,hag,ham,hap,hay,hem,hen,hew,hex,hid,hob,hog,hop,hub,hue,hug,hum,hut,icy,ilk,ill,imp,ink,inn,ion,ire,irk,ivy,jab,jag,jam,jar,jaw,jay,jet,jig,job,jog,jot,joy,jug,jut,keg,ken,kid,kin,kit,lab,lad,lag,lap,law,lax,lay,lea,led,leg,lid,lip,lit,log,lop,lot,low,lug,lye,mad,mat,maw,max,mob,mod,mop,mow,mud,mug,nab,nag,nap,nay,net,nil,nip,nit,nod,nor,not,now,nun,nut,oak,oar,oat,odd,ode,off,oft,ohm,ore,orb,ore,our,out,owe,owl,own,pad,pal,pan,pap,par,pat,paw,pay,pea,peg,pen,per,pet,pew,pie,pig,pin,pit,ply,pod,pop,pot,pow,pro,pry,pub,pug,pun,pup,pus,put,rag,ram,ran,rap,rat,raw,ray,red,ref,rib,rid,rig,rim,rip,rob,rod,roe,rot,row,rub,rug,rum,run,rut,rye,sac,sad,sag,sap,sat,saw,say,sea,set,sew,shy,sin,sip,sir,sis,sit,six,ski,sky,sly,sob,sod,son,sop,sot,sow,soy,spa,spy,sty,sub,sue,sum,sun,sup,tab,tad,tag,tan,tap,tar,tax,tea,ten,the,thy,tic,tie,tin,tip,toe,ton,too,top,tot,tow,toy,try,tub,tug,two,urn,use,van,vat,vet,vex,via,vie,vim,vow,wad,wag,war,was,wax,way,web,wed,wet,wig,win,wit,woe,wok,won,woo,wow,yak,yam,yap,yaw,yea,yep,yes,yet,yew,yin,you,zap,zen,zig,zip,zoo".split(',').forEach(w=>WORDS.add(w.toUpperCase()));
+
+const LETTER_FREQ={A:9,B:2,C:2,D:4,E:12,F:2,G:3,H:2,I:9,J:1,K:1,L:4,M:2,N:6,O:8,P:2,Q:1,R:6,S:4,T:6,U:4,V:2,W:2,X:1,Y:2,Z:1};
+const LETTER_PTS={A:1,B:3,C:3,D:2,E:1,F:4,G:2,H:4,I:1,J:8,K:5,L:1,M:3,N:1,O:1,P:3,Q:10,R:1,S:1,T:1,U:1,V:4,W:4,X:8,Y:4,Z:10};
+let letterBag=[];
+for(const[l,f]of Object.entries(LETTER_FREQ))for(let i=0;i<f;i++)letterBag.push(l);
+
+let audioCtx;
+function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)()}
+function playTone(f,d=0.08,v=0.08){
+  if(!audioCtx)return;const o=audioCtx.createOscillator(),g=audioCtx.createGain();
+  o.type='sine';o.frequency.value=f;g.gain.setValueAtTime(v,audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);
+  o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+d);
+}
+
+let tiles=[],selected=[],score,wordCount,roundTime,timerInterval,foundWords,longestWord;
+const GRID_SIZE=14; // 2 rows of 7
+const ROUND_SECONDS=90;
+
+function randomLetter(){return letterBag[Math.floor(Math.random()*letterBag.length)]}
+
+function showMenu(){
+  document.getElementById('menu').classList.remove('hidden');
+  document.getElementById('game').classList.add('hidden');
+  document.getElementById('results').classList.add('hidden');
+}
+
+function startGame(){
+  initAudio();
+  document.getElementById('menu').classList.add('hidden');
+  document.getElementById('results').classList.add('hidden');
+  document.getElementById('game').classList.remove('hidden');
+  
+  score=0;wordCount=0;foundWords=[];longestWord='';
+  roundTime=ROUND_SECONDS;
+  
+  // Generate tiles
+  tiles=[];
+  for(let i=0;i<GRID_SIZE;i++){
+    const letter=randomLetter();
+    const r=Math.random();
+    let type='normal';
+    if(r<0.07)type='wild';
+    else if(r<0.18)type='double';
+    tiles.push({letter,type,id:i});
+  }
+  
+  selected=[];
+  renderTiles();updateUI();renderWordDisplay();
+  document.getElementById('found-words').innerHTML='';
+  
+  if(timerInterval)clearInterval(timerInterval);
+  timerInterval=setInterval(()=>{
+    roundTime--;
+    document.getElementById('timer-fill').style.width=(roundTime/ROUND_SECONDS*100)+'%';
+    if(roundTime<=10)document.getElementById('timer-fill').style.background='#e94560';
+    if(roundTime<=0){clearInterval(timerInterval);endGame()}
+  },1000);
+}
+
+function renderTiles(){
+  const grid=document.getElementById('tile-grid');
+  grid.innerHTML='';
+  tiles.forEach((t,i)=>{
+    const el=document.createElement('div');
+    el.className=`tile ${t.type} ${selected.includes(i)?'selected':''}`;
+    el.innerHTML=`<span class="letter">${t.type==='wild'?'★':t.letter}</span><span class="pts">${t.type==='wild'?'*':LETTER_PTS[t.letter]}</span>`;
+    el.addEventListener('click',()=>toggleTile(i));
+    grid.appendChild(el);
+  });
+}
+
+function toggleTile(idx){
+  const si=selected.indexOf(idx);
+  if(si>=0){selected.splice(si,1);playTone(300,0.05)}
+  else{selected.push(idx);playTone(500+selected.length*50,0.05)}
+  renderTiles();renderWordDisplay();
+  document.getElementById('submit-btn').disabled=selected.length<3;
+}
+
+function renderWordDisplay(){
+  const wd=document.getElementById('word-display');
+  wd.innerHTML='';
+  selected.forEach(i=>{
+    const t=tiles[i];
+    const el=document.createElement('div');
+    el.className=`word-letter ${t.type}`;
+    el.textContent=t.type==='wild'?'★':t.letter;
+    wd.appendChild(el);
+  });
+}
+
+function getWord(){
+  return selected.map(i=>{
+    const t=tiles[i];
+    return t.type==='wild'?'*':t.letter;
+  }).join('');
+}
+
+function clearWord(){
+  selected=[];renderTiles();renderWordDisplay();
+  document.getElementById('submit-btn').disabled=true;
+}
+
+function submitWord(){
+  if(selected.length<3)return;
+  const word=getWord();
+  
+  // For wild cards, try all possible letters
+  const validWord=findValidWord(word);
+  
+  if(validWord&&!foundWords.includes(validWord)){
+    // Score: sum of letter points × word length bonus × special multipliers
+    let pts=0;let multiplier=1;
+    selected.forEach(i=>{
+      const t=tiles[i];
+      if(t.type==='wild')pts+=0;
+      else pts+=LETTER_PTS[t.letter];
+      if(t.type==='double')multiplier*=2;
+    });
+    const lengthBonus=Math.max(1,selected.length-2);
+    const totalPts=Math.ceil(pts*lengthBonus*multiplier);
+    
+    score+=totalPts;wordCount++;
+    foundWords.push(validWord);
+    if(validWord.length>(longestWord||'').length)longestWord=validWord;
+    
+    showFeedback(`+${totalPts}`,selected.length>=5?'#ffd700':'#0f0');
+    playTone(660,0.1);setTimeout(()=>playTone(880,0.1),80);
+    
+    // Add found word badge
+    const badge=document.createElement('span');
+    badge.className='found-word';badge.textContent=validWord;
+    document.getElementById('found-words').prepend(badge);
+    
+    // Replace used tiles
+    selected.forEach(i=>{
+      const r=Math.random();let type='normal';
+      if(r<0.06)type='wild';else if(r<0.16)type='double';
+      tiles[i]={letter:randomLetter(),type,id:tiles[i].id};
+    });
+    selected=[];renderTiles();renderWordDisplay();
+    document.getElementById('submit-btn').disabled=true;
+    // Bonus time for long words
+    if(validWord.length>=5)roundTime=Math.min(ROUND_SECONDS,roundTime+3);
+    if(validWord.length>=7)roundTime=Math.min(ROUND_SECONDS,roundTime+5);
+  }else if(foundWords.includes(validWord)){
+    showFeedback('ALREADY FOUND','#ff0');playTone(200,0.15);
+  }else{
+    showFeedback('NOT A WORD','#f00');playTone(150,0.2);
+  }
+  updateUI();
+}
+
+function findValidWord(pattern){
+  if(!pattern.includes('*'))return WORDS.has(pattern)?pattern:null;
+  // Try all letters for wildcards
+  const wildcardIdx=pattern.indexOf('*');
+  for(let c=65;c<=90;c++){
+    const attempt=pattern.substring(0,wildcardIdx)+String.fromCharCode(c)+pattern.substring(wildcardIdx+1);
+    const result=findValidWord(attempt);
+    if(result)return result;
+  }
+  return null;
+}
+
+function showFeedback(text,color){
+  const el=document.getElementById('feedback');
+  el.textContent=text;el.style.color=color;el.style.opacity=1;el.style.transform='translate(-50%,-50%) scale(1.2)';
+  setTimeout(()=>{el.style.opacity=0;el.style.transform='translate(-50%,-50%) scale(0.8)'},600);
+}
+
+function updateUI(){
+  document.getElementById('score-val').textContent=score;
+  document.getElementById('words-val').textContent=wordCount;
+}
+
+function endGame(){
+  const key='wordarchitect_best';
+  const best=parseInt(localStorage.getItem(key))||0;
+  if(score>best)localStorage.setItem(key,score);
+  
+  document.getElementById('r-score').textContent=score;
+  document.getElementById('r-words').textContent=`${wordCount} words found`;
+  document.getElementById('r-best').textContent=score>best?'🎉 NEW HIGH SCORE!':`Best: ${Math.max(best,score)}`;
+  document.getElementById('r-longest').textContent=longestWord?`Longest: ${longestWord}`:'';
+  document.getElementById('results').classList.remove('hidden');
+}
+
+// Keyboard shortcut
+document.addEventListener('keydown',e=>{
+  if(e.key==='Enter')submitWord();
+  if(e.key==='Escape')clearWord();
+});
+</script>
+</body>
+</html>
