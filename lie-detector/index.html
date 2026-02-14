@@ -1,0 +1,1500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Lie Detector Party 🎭</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #1a1a1a;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: 'Impact', 'Arial Black', sans-serif;
+}
+canvas {
+  display: block;
+  width: 100%; height: 100%;
+  image-rendering: auto;
+}
+#videoContainer {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  z-index: 5;
+  display: none;
+}
+#cameraFeed {
+  position: absolute;
+  object-fit: cover;
+  transform: scaleX(-1); /* Mirror effect */
+}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="videoContainer">
+  <video id="cameraFeed" playsinline autoplay></video>
+</div>
+<script>
+'use strict';
+
+// ============================================================
+// LIE DETECTOR PARTY — Mobile Party Game
+// ============================================================
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const videoContainer = document.getElementById('videoContainer');
+const cameraFeed = document.getElementById('cameraFeed');
+
+// --- GLOBALS ---
+let W, H, scale, centerX, centerY;
+let gameTime = 0, deltaTime = 0, lastTime = 0;
+let inputEvents = [];
+let particles = [];
+let shakeAmount = 0;
+
+// Game state
+let gameState = 'SPLASH'; // SPLASH, SETUP, HOT_SEAT, QUESTION, ANALYSIS, VERDICT, ACCUSATION, CONFESSION, RESULTS, GAME_OVER
+let players = [];
+let currentPlayerIndex = 0;
+let currentQuestion = null;
+let currentRound = 1;
+let maxRounds = 3;
+let aiVerdict = null;
+let playerVotes = {};
+let truthRevealed = false;
+let analysisTimer = 0;
+let accusationTimer = 30;
+let cameraActive = false;
+let cameraAvailable = false;
+let usingAvatar = true;
+
+// UI state
+let setupPlayerCount = 3;
+let setupNames = [];
+let setupCurrentInput = 0;
+let keyboardInput = '';
+
+// Animations
+let titlePulse = 0;
+let scanProgress = 0;
+let scanPhase = 0;
+let glitchTimer = 0;
+let confettiTimer = 0;
+
+// ============================================================
+// RESIZE
+// ============================================================
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  scale = Math.min(W / 400, H / 700);
+  centerX = W / 2;
+  centerY = H / 2;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ============================================================
+// AUDIO ENGINE
+// ============================================================
+let audioCtx = null;
+let masterGain = null;
+let musicGain = null;
+let sfxGain = null;
+let audioMuted = false;
+let bgMusicNodes = [];
+
+function ensureAudio() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = audioMuted ? 0 : 1;
+    masterGain.connect(audioCtx.destination);
+    
+    musicGain = audioCtx.createGain();
+    musicGain.gain.value = 0.15;
+    musicGain.connect(masterGain);
+    
+    sfxGain = audioCtx.createGain();
+    sfxGain.gain.value = 1;
+    sfxGain.connect(masterGain);
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playTone(freq, duration, type = 'sine', vol = 0.15) {
+  if (audioMuted) return;
+  ensureAudio();
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  osc.connect(gain);
+  gain.connect(sfxGain);
+  osc.start();
+  osc.stop(audioCtx.currentTime + duration);
+}
+
+function sfxClick() { playTone(800, 0.05, 'sine', 0.1); }
+function sfxBuzzer() { 
+  playTone(120, 0.3, 'sawtooth', 0.2);
+  setTimeout(() => playTone(100, 0.3, 'sawtooth', 0.15), 150);
+}
+function sfxDing() { playTone(1200, 0.1, 'sine', 0.2); }
+function sfxDramatic() {
+  const notes = [200, 180, 160, 140];
+  notes.forEach((freq, i) => setTimeout(() => playTone(freq, 0.2, 'sawtooth', 0.15), i * 200));
+}
+function sfxWin() {
+  const notes = [523, 659, 784, 1047];
+  notes.forEach((freq, i) => setTimeout(() => playTone(freq, 0.15, 'sine', 0.12), i * 100));
+}
+function sfxHeartbeat() {
+  playTone(80, 0.1, 'sine', 0.3);
+  setTimeout(() => playTone(80, 0.1, 'sine', 0.25), 120);
+}
+function sfxScan() { playTone(600 + Math.random() * 400, 0.05, 'square', 0.05); }
+
+// Dramatic game show music
+function startDramaticMusic() {
+  if (audioMuted) return;
+  ensureAudio();
+  stopBackgroundMusic();
+  
+  const melody = [220, 247, 277, 311, 330]; // A, B, C#, D#, E
+  const melodyOsc = audioCtx.createOscillator();
+  melodyOsc.type = 'square';
+  melodyOsc.frequency.value = melody[0];
+  
+  const melodyGain = audioCtx.createGain();
+  melodyGain.gain.value = 0.08;
+  melodyOsc.connect(melodyGain);
+  melodyGain.connect(musicGain);
+  melodyOsc.start();
+  
+  bgMusicNodes.push({ osc: melodyOsc, gain: melodyGain });
+  
+  let step = 0;
+  function updateMelody() {
+    if (!bgMusicNodes.length) return;
+    const pattern = [0, 2, 4, 3, 2, 1, 2, 0];
+    melodyOsc.frequency.setValueAtTime(melody[pattern[step % 8]], audioCtx.currentTime + 0.01);
+    step++;
+    setTimeout(updateMelody, 250);
+  }
+  updateMelody();
+}
+
+function stopBackgroundMusic() {
+  bgMusicNodes.forEach(node => {
+    try { node.osc.stop(); } catch(e) {}
+  });
+  bgMusicNodes = [];
+}
+
+// ============================================================
+// DRAWING HELPERS
+// ============================================================
+function strokeText(text, x, y, size, fillColor, strokeColor = '#fff', strokeWidth = 4) {
+  ctx.save();
+  ctx.font = `bold ${size * scale}px Impact, 'Arial Black', sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.strokeStyle = strokeColor;
+  ctx.lineWidth = strokeWidth * scale;
+  ctx.lineJoin = 'round';
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = fillColor;
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+function drawBox(x, y, w, h, fillColor, borderColor = '#fff', borderWidth = 4) {
+  ctx.save();
+  ctx.fillStyle = fillColor;
+  ctx.fillRect(x - w/2, y - h/2, w, h);
+  ctx.strokeStyle = borderColor;
+  ctx.lineWidth = borderWidth * scale;
+  ctx.strokeRect(x - w/2, y - h/2, w, h);
+  ctx.restore();
+}
+
+function drawButton(x, y, w, h, label, bgColor, textColor = '#fff', highlight = false) {
+  ctx.save();
+  if (highlight) {
+    ctx.shadowColor = bgColor;
+    ctx.shadowBlur = 20 * scale;
+  }
+  drawBox(x, y, w, h, bgColor, '#fff', highlight ? 6 : 4);
+  strokeText(label, x, y, 18, textColor, '#000', 3);
+  ctx.restore();
+}
+
+function drawPlayerAvatar(x, y, size, color, name = '', isActive = false) {
+  ctx.save();
+  if (isActive) {
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 20 * scale;
+  }
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(x, y, size, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = (isActive ? 5 : 3) * scale;
+  ctx.stroke();
+  
+  if (name) {
+    strokeText(name.toUpperCase().substr(0, 2), x, y, 24, '#fff', '#000', 2);
+  }
+  ctx.restore();
+}
+
+function drawProgressBar(x, y, w, h, progress, color = '#ff5500', bgColor = '#000', label = '') {
+  drawBox(x, y, w, h, bgColor, '#fff', 4);
+  
+  const fillW = (w - 8 * scale) * progress;
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.fillRect(x - w/2 + 4 * scale, y - h/2 + 4 * scale, fillW, h - 8 * scale);
+  ctx.restore();
+  
+  if (label) {
+    strokeText(label, x, y - h/2 - 20 * scale, 14, '#00ff00', '#000', 3);
+  }
+}
+
+// ============================================================
+// PARTICLES
+// ============================================================
+function spawnParticles(x, y, count, color = '#ff0099', spread = 5) {
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * spread * scale,
+      vy: (Math.random() - 0.5) * spread * scale - 3 * scale,
+      life: 1,
+      decay: 0.015 + Math.random() * 0.015,
+      size: (3 + Math.random() * 5) * scale,
+      color
+    });
+  }
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.2 * scale;
+    p.life -= p.decay;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    ctx.save();
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+    ctx.restore();
+  }
+}
+
+// ============================================================
+// SCREEN SHAKE
+// ============================================================
+function shake(amount = 10) {
+  shakeAmount = amount * scale;
+}
+
+function applyShake() {
+  if (shakeAmount > 0.5) {
+    const sx = (Math.random() - 0.5) * shakeAmount;
+    const sy = (Math.random() - 0.5) * shakeAmount;
+    ctx.translate(sx, sy);
+    shakeAmount *= 0.9;
+  } else {
+    shakeAmount = 0;
+  }
+}
+
+// ============================================================
+// CAMERA
+// ============================================================
+async function requestCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+      video: { facingMode: 'user' }, 
+      audio: false 
+    });
+    cameraFeed.srcObject = stream;
+    cameraActive = true;
+    cameraAvailable = true;
+    usingAvatar = false;
+    return true;
+  } catch (err) {
+    console.warn('Camera access denied:', err);
+    cameraAvailable = false;
+    usingAvatar = true;
+    return false;
+  }
+}
+
+function stopCamera() {
+  if (cameraFeed.srcObject) {
+    cameraFeed.srcObject.getTracks().forEach(track => track.stop());
+    cameraFeed.srcObject = null;
+  }
+  cameraActive = false;
+  videoContainer.style.display = 'none';
+}
+
+function positionCamera(x, y, w, h) {
+  videoContainer.style.display = 'block';
+  cameraFeed.style.left = x - w/2 + 'px';
+  cameraFeed.style.top = y - h/2 + 'px';
+  cameraFeed.style.width = w + 'px';
+  cameraFeed.style.height = h + 'px';
+}
+
+// ============================================================
+// QUESTION BANK
+// ============================================================
+const questionBank = [
+  // Embarrassing
+  { text: "Have you ever stolen something from work?", category: "embarrassing" },
+  { text: "Have you ever lied on your resume?", category: "embarrassing" },
+  { text: "Have you ever pretended to be sick to skip work/school?", category: "embarrassing" },
+  { text: "Have you ever snooped through someone's phone?", category: "embarrassing" },
+  { text: "Have you ever ghosted someone?", category: "embarrassing" },
+  { text: "Have you ever faked an orgasm?", category: "embarrassing" },
+  { text: "Have you ever worn the same underwear two days in a row?", category: "embarrassing" },
+  { text: "Have you ever peed in the shower?", category: "embarrassing" },
+  { text: "Have you ever stalked an ex online?", category: "embarrassing" },
+  { text: "Have you ever cried during a kids' movie?", category: "embarrassing" },
+  { text: "Have you ever pretended to laugh at a joke you didn't understand?", category: "embarrassing" },
+  { text: "Have you ever blamed a fart on someone else?", category: "embarrassing" },
+  
+  // Hypothetical
+  { text: "Would you cheat on a test if you knew you wouldn't get caught?", category: "hypothetical" },
+  { text: "Would you read your partner's messages if they left their phone unlocked?", category: "hypothetical" },
+  { text: "Would you keep $100 you found on the street?", category: "hypothetical" },
+  { text: "Would you lie to a friend to avoid hurting their feelings?", category: "hypothetical" },
+  { text: "Would you date someone for money?", category: "hypothetical" },
+  { text: "Would you betray a friend for a million dollars?", category: "hypothetical" },
+  { text: "Would you fake being sick to get out of plans?", category: "hypothetical" },
+  { text: "Would you eat food that fell on the floor if no one saw?", category: "hypothetical" },
+  { text: "Would you lie about your age on a dating app?", category: "hypothetical" },
+  { text: "Would you pretend to like a gift you hated?", category: "hypothetical" },
+  
+  // Would You Rather
+  { text: "Would you rather always tell the truth or always lie?", category: "would-you-rather" },
+  { text: "Would you rather be famous or rich?", category: "would-you-rather" },
+  { text: "Would you rather lose all your memories or never make new ones?", category: "would-you-rather" },
+  { text: "Would you rather know when you die or how you die?", category: "would-you-rather" },
+  { text: "Would you rather be able to fly or be invisible?", category: "would-you-rather" },
+  { text: "Would you rather have no internet or no AC/heating?", category: "would-you-rather" },
+  { text: "Would you rather fight 100 duck-sized horses or 1 horse-sized duck?", category: "would-you-rather" },
+  { text: "Would you rather never eat pizza again or never eat tacos again?", category: "would-you-rather" },
+  { text: "Would you rather live without music or without movies?", category: "would-you-rather" },
+  { text: "Would you rather have to sing everything you say or dance everywhere you go?", category: "would-you-rather" },
+  
+  // Personal
+  { text: "Do you have a secret crush on someone in this room?", category: "personal" },
+  { text: "Have you ever bad-mouthed a friend behind their back?", category: "personal" },
+  { text: "Do you really like your current job/school?", category: "personal" },
+  { text: "Have you ever regretted a tattoo or piercing?", category: "personal" },
+  { text: "Do you judge people by their social media?", category: "personal" },
+  { text: "Have you ever lied about reading a book?", category: "personal" },
+  { text: "Do you fake-smile at people you don't like?", category: "personal" },
+  { text: "Have you ever kept a relationship secret?", category: "personal" },
+  { text: "Do you think you're better than most people?", category: "personal" },
+  { text: "Have you ever broken someone's trust?", category: "personal" },
+  
+  // Spicy
+  { text: "Have you ever had feelings for two people at the same time?", category: "spicy" },
+  { text: "Have you ever lied about your relationship status?", category: "spicy" },
+  { text: "Have you ever kissed someone in this room?", category: "spicy" },
+  { text: "Do you have a secret you've never told anyone?", category: "spicy" },
+  { text: "Have you ever pretended to be someone you're not to impress someone?", category: "spicy" },
+  { text: "Would you get back with an ex if they asked?", category: "spicy" },
+  { text: "Have you ever had a dream about someone here?", category: "spicy" },
+  { text: "Do you still think about 'the one that got away'?", category: "spicy" },
+  { text: "Have you ever lied to your parents about where you were?", category: "spicy" },
+  { text: "Do you have a fake social media account?", category: "spicy" },
+  
+  // Silly
+  { text: "Have you ever pretended to wash your hands?", category: "silly" },
+  { text: "Do you talk to yourself when alone?", category: "silly" },
+  { text: "Have you ever practiced conversations in the mirror?", category: "silly" },
+  { text: "Do you sing in the shower?", category: "silly" },
+  { text: "Have you ever Googled yourself?", category: "silly" },
+  { text: "Do you judge people by their ringtones?", category: "silly" },
+  { text: "Have you ever named an inanimate object?", category: "silly" },
+  { text: "Do you have a favorite spoon?", category: "silly" },
+  { text: "Have you ever had an imaginary friend?", category: "silly" },
+  { text: "Do you believe in ghosts?", category: "silly" }
+];
+
+function getRandomQuestion() {
+  return questionBank[Math.floor(Math.random() * questionBank.length)];
+}
+
+// ============================================================
+// PLAYER COLORS
+// ============================================================
+const playerColors = [
+  '#ff0099', // hot pink
+  '#00ffff', // cyan
+  '#ffff00', // yellow
+  '#00ff00', // green
+  '#ff5500', // orange
+  '#9933ff', // purple
+  '#ff3366', // red-pink
+  '#00ff99'  // mint
+];
+
+// ============================================================
+// GAME STATES
+// ============================================================
+
+function initSplash() {
+  titlePulse = 0;
+  startDramaticMusic();
+}
+
+function initSetup() {
+  setupPlayerCount = 3;
+  setupNames = [];
+  setupCurrentInput = 0;
+  keyboardInput = '';
+}
+
+function initHotSeat() {
+  analysisTimer = 0;
+  scanProgress = 0;
+  scanPhase = 0;
+  
+  // Shuffle current player (no back-to-back)
+  let newIndex = currentPlayerIndex;
+  while (newIndex === currentPlayerIndex && players.length > 1) {
+    newIndex = Math.floor(Math.random() * players.length);
+  }
+  currentPlayerIndex = newIndex;
+  
+  sfxDramatic();
+  shake(8);
+}
+
+function initQuestion() {
+  currentQuestion = getRandomQuestion();
+  analysisTimer = 0;
+  
+  // Try to start camera
+  if (!cameraActive) {
+    requestCamera();
+  }
+  
+  sfxDing();
+}
+
+function initAnalysis() {
+  scanProgress = 0;
+  scanPhase = 0;
+  analysisTimer = 0;
+  glitchTimer = 0;
+  
+  // Position camera feed
+  if (cameraActive) {
+    const camW = W * 0.8;
+    const camH = camW * 0.75;
+    positionCamera(centerX, centerY - 80 * scale, camW, camH);
+  }
+  
+  sfxScan();
+}
+
+function initVerdict() {
+  // Generate fake AI verdict (40-99%)
+  const truthScore = 40 + Math.floor(Math.random() * 60);
+  const isLying = truthScore < 65;
+  
+  aiVerdict = {
+    score: truthScore,
+    verdict: isLying ? 'LYING' : 'TRUTHFUL',
+    confidence: Math.floor(60 + Math.random() * 40),
+    microExpressions: [
+      'Pupil dilation detected',
+      'Micro-smile suppression',
+      'Eyebrow asymmetry',
+      'Lip compression',
+      'Blink rate anomaly',
+      'Gaze aversion pattern'
+    ].sort(() => Math.random() - 0.5).slice(0, 2)
+  };
+  
+  stopCamera();
+  sfxDramatic();
+  shake(10);
+  spawnParticles(centerX, centerY, 30, aiVerdict.verdict === 'LYING' ? '#ff0000' : '#00ff00');
+}
+
+function initAccusation() {
+  playerVotes = {};
+  accusationTimer = 30;
+  truthRevealed = false;
+  
+  players.forEach(p => {
+    if (p !== players[currentPlayerIndex]) {
+      playerVotes[p.name] = null;
+    }
+  });
+}
+
+function initConfession() {
+  // Current player reveals truth
+  const currentPlayer = players[currentPlayerIndex];
+  
+  // Randomize if they were lying (for demo)
+  const wasLying = Math.random() > 0.5;
+  currentPlayer.wasLying = wasLying;
+  truthRevealed = true;
+  
+  // Score points
+  Object.keys(playerVotes).forEach(voterName => {
+    const vote = playerVotes[voterName];
+    const voter = players.find(p => p.name === voterName);
+    
+    if (vote === null) return; // skip
+    
+    const guessedCorrectly = (vote === 'LIE' && wasLying) || (vote === 'TRUTH' && !wasLying);
+    
+    if (guessedCorrectly) {
+      voter.score += 50;
+      voter.correctGuesses++;
+    } else {
+      voter.wrongGuesses++;
+    }
+  });
+  
+  // Check AI accuracy
+  const aiWasRight = (aiVerdict.verdict === 'LYING' && wasLying) || 
+                     (aiVerdict.verdict === 'TRUTHFUL' && !wasLying);
+  
+  currentPlayer.aiCorrect = aiWasRight;
+  
+  sfxWin();
+  confettiTimer = 2;
+}
+
+function initResults() {
+  confettiTimer = 3;
+  sfxWin();
+}
+
+function initGameOver() {
+  // Calculate superlatives
+  players.sort((a, b) => b.score - a.score);
+  
+  // Find most suspicious (lowest avg truth score)
+  let mostSuspicious = players[0];
+  players.forEach(p => {
+    if ((p.wrongGuesses || 0) > (mostSuspicious.wrongGuesses || 0)) {
+      mostSuspicious = p;
+    }
+  });
+  
+  confettiTimer = 3;
+  sfxWin();
+  stopBackgroundMusic();
+}
+
+// ============================================================
+// UPDATE STATES
+// ============================================================
+
+function updateSplash() {
+  titlePulse += deltaTime * 3;
+  
+  for (const ev of inputEvents) {
+    if (ev.type === 'tap') {
+      sfxClick();
+      gameState = 'SETUP';
+      initSetup();
+    }
+  }
+}
+
+function updateSetup() {
+  for (const ev of inputEvents) {
+    if (ev.type === 'tap') {
+      // Player count buttons
+      for (let i = 2; i <= 8; i++) {
+        const btnX = centerX - 180 * scale + ((i-2) * 52) * scale;
+        const btnY = centerY - 80 * scale;
+        const btnSize = 45 * scale;
+        
+        if (hitTest(ev.x, ev.y, btnX, btnY, btnSize, btnSize)) {
+          setupPlayerCount = i;
+          sfxClick();
+        }
+      }
+      
+      // START button
+      const startY = centerY + 200 * scale;
+      if (hitTest(ev.x, ev.y, centerX, startY, 200 * scale, 50 * scale)) {
+        // Generate default names
+        for (let i = 0; i < setupPlayerCount; i++) {
+          setupNames[i] = setupNames[i] || `Player ${i+1}`;
+        }
+        
+        // Create players
+        players = setupNames.map((name, i) => ({
+          name,
+          color: playerColors[i],
+          score: 0,
+          correctGuesses: 0,
+          wrongGuesses: 0,
+          wasLying: false,
+          aiCorrect: false
+        }));
+        
+        sfxClick();
+        gameState = 'HOT_SEAT';
+        currentRound = 1;
+        initHotSeat();
+      }
+    }
+  }
+}
+
+function updateHotSeat() {
+  analysisTimer += deltaTime;
+  
+  if (analysisTimer > 2) {
+    gameState = 'QUESTION';
+    initQuestion();
+  }
+}
+
+function updateQuestion() {
+  analysisTimer += deltaTime;
+  
+  // Auto-advance after showing question
+  if (analysisTimer > 4) {
+    gameState = 'ANALYSIS';
+    initAnalysis();
+  }
+  
+  for (const ev of inputEvents) {
+    if (ev.type === 'tap') {
+      // Allow manual advance
+      const btnY = H - 40 * scale;
+      if (hitTest(ev.x, ev.y, centerX, btnY, 200 * scale, 50 * scale)) {
+        sfxClick();
+        gameState = 'ANALYSIS';
+        initAnalysis();
+      }
+    }
+  }
+}
+
+function updateAnalysis() {
+  analysisTimer += deltaTime;
+  scanProgress = Math.min(1, analysisTimer / 3);
+  scanPhase += deltaTime * 2;
+  glitchTimer += deltaTime;
+  
+  // Random scanning sounds
+  if (Math.random() < 0.1) {
+    sfxScan();
+  }
+  
+  // Heartbeat effect
+  if (Math.floor(analysisTimer) !== Math.floor(analysisTimer - deltaTime)) {
+    sfxHeartbeat();
+  }
+  
+  if (scanProgress >= 1) {
+    gameState = 'VERDICT';
+    initVerdict();
+  }
+}
+
+function updateVerdict() {
+  analysisTimer += deltaTime;
+  
+  if (analysisTimer > 3) {
+    gameState = 'ACCUSATION';
+    initAccusation();
+  }
+  
+  for (const ev of inputEvents) {
+    if (ev.type === 'tap' && analysisTimer > 1) {
+      sfxClick();
+      gameState = 'ACCUSATION';
+      initAccusation();
+    }
+  }
+}
+
+function updateAccusation() {
+  accusationTimer -= deltaTime;
+  
+  if (accusationTimer <= 0 || allVoted()) {
+    gameState = 'CONFESSION';
+    initConfession();
+    return;
+  }
+  
+  for (const ev of inputEvents) {
+    if (ev.type === 'tap') {
+      // Vote buttons
+      const currentPlayer = players[currentPlayerIndex];
+      
+      players.forEach((player, i) => {
+        if (player === currentPlayer) return; // skip hot seat player
+        
+        const col = i % 4;
+        const row = Math.floor(i / 4);
+        const px = centerX - 150 * scale + col * 100 * scale;
+        const py = centerY - 50 * scale + row * 140 * scale;
+        
+        // TRUTH button
+        const truthY = py + 50 * scale;
+        if (hitTest(ev.x, ev.y, px, truthY, 80 * scale, 35 * scale)) {
+          playerVotes[player.name] = 'TRUTH';
+          sfxDing();
+        }
+        
+        // LIE button
+        const lieY = py + 95 * scale;
+        if (hitTest(ev.x, ev.y, px, lieY, 80 * scale, 35 * scale)) {
+          playerVotes[player.name] = 'LIE';
+          sfxBuzzer();
+        }
+        
+        // SKIP button
+        const skipY = py + 140 * scale;
+        if (hitTest(ev.x, ev.y, px, skipY, 80 * scale, 35 * scale)) {
+          playerVotes[player.name] = 'SKIP';
+          sfxClick();
+        }
+      });
+    }
+  }
+}
+
+function updateConfession() {
+  analysisTimer += deltaTime;
+  
+  if (confettiTimer > 0) {
+    confettiTimer -= deltaTime;
+    if (Math.random() < 0.3) {
+      spawnParticles(
+        Math.random() * W,
+        -20,
+        1,
+        playerColors[Math.floor(Math.random() * playerColors.length)]
+      );
+    }
+  }
+  
+  if (analysisTimer > 4) {
+    // Check if game over
+    if (currentRound >= maxRounds * players.length) {
+      gameState = 'GAME_OVER';
+      initGameOver();
+    } else {
+      currentRound++;
+      gameState = 'RESULTS';
+      initResults();
+    }
+  }
+  
+  for (const ev of inputEvents) {
+    if (ev.type === 'tap' && analysisTimer > 2) {
+      sfxClick();
+      if (currentRound >= maxRounds * players.length) {
+        gameState = 'GAME_OVER';
+        initGameOver();
+      } else {
+        currentRound++;
+        gameState = 'RESULTS';
+        initResults();
+      }
+    }
+  }
+}
+
+function updateResults() {
+  analysisTimer += deltaTime;
+  
+  if (confettiTimer > 0) {
+    confettiTimer -= deltaTime;
+    if (Math.random() < 0.2) {
+      spawnParticles(
+        Math.random() * W,
+        -20,
+        1,
+        playerColors[Math.floor(Math.random() * playerColors.length)]
+      );
+    }
+  }
+  
+  for (const ev of inputEvents) {
+    if (ev.type === 'tap') {
+      const btnY = H - 40 * scale;
+      if (hitTest(ev.x, ev.y, centerX, btnY, 200 * scale, 50 * scale)) {
+        sfxClick();
+        gameState = 'HOT_SEAT';
+        initHotSeat();
+      }
+    }
+  }
+}
+
+function updateGameOver() {
+  analysisTimer += deltaTime;
+  
+  if (confettiTimer > 0) {
+    confettiTimer -= deltaTime;
+    if (Math.random() < 0.2) {
+      spawnParticles(
+        Math.random() * W,
+        -20,
+        1,
+        playerColors[Math.floor(Math.random() * playerColors.length)]
+      );
+    }
+  }
+  
+  for (const ev of inputEvents) {
+    if (ev.type === 'tap') {
+      // Play Again
+      const playY = H - 100 * scale;
+      if (hitTest(ev.x, ev.y, centerX, playY, 200 * scale, 50 * scale)) {
+        sfxClick();
+        gameState = 'SETUP';
+        initSetup();
+      }
+      
+      // Share button (placeholder)
+      const shareY = H - 40 * scale;
+      if (hitTest(ev.x, ev.y, centerX, shareY, 200 * scale, 50 * scale)) {
+        sfxClick();
+        // Share results
+        const winner = players[0];
+        const text = `🎭 Lie Detector Party!\n🏆 Winner: ${winner.name} (${winner.score} pts)\nCan you outsmart the AI?`;
+        if (navigator.share) {
+          navigator.share({ title: 'Lie Detector Party', text }).catch(() => {});
+        } else if (navigator.clipboard) {
+          navigator.clipboard.writeText(text).then(() => {
+            shake(3);
+          }).catch(() => {});
+        }
+      }
+    }
+  }
+}
+
+// ============================================================
+// DRAW STATES
+// ============================================================
+
+function drawSplash() {
+  // Background gradient
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#ff0099');
+  grad.addColorStop(1, '#6633cc');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  
+  // Title with pulse
+  const pulse = Math.sin(titlePulse) * 10 * scale;
+  strokeText('LIE DETECTOR', centerX, centerY - 100 * scale + pulse, 42, '#ffff00', '#000', 6);
+  strokeText('PARTY!', centerX, centerY - 40 * scale + pulse, 42, '#00ffff', '#000', 6);
+  
+  // Emoji
+  ctx.font = `${60 * scale}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillText('🎭', centerX, centerY + 40 * scale);
+  
+  // Tap to start
+  const alpha = 0.5 + Math.sin(titlePulse * 2) * 0.5;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  strokeText('TAP TO START', centerX, centerY + 140 * scale, 20, '#fff', '#000', 3);
+  ctx.restore();
+  
+  // Credit
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  strokeText('v1.0 • Made for Party Chaos', centerX, H - 20 * scale, 10, '#fff', '#000', 2);
+  ctx.restore();
+}
+
+function drawSetup() {
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(0, 0, W, H);
+  
+  strokeText('PLAYER SETUP', centerX, 50 * scale, 28, '#ff0099', '#000', 4);
+  
+  // Player count selector
+  strokeText('HOW MANY PLAYERS?', centerX, centerY - 120 * scale, 16, '#00ffff', '#000', 3);
+  
+  for (let i = 2; i <= 8; i++) {
+    const btnX = centerX - 180 * scale + ((i-2) * 52) * scale;
+    const btnY = centerY - 80 * scale;
+    const btnSize = 45 * scale;
+    const isSelected = setupPlayerCount === i;
+    
+    drawBox(btnX, btnY, btnSize, btnSize, 
+      isSelected ? '#ff0099' : '#333', 
+      isSelected ? '#ffff00' : '#666',
+      isSelected ? 5 : 3
+    );
+    strokeText(String(i), btnX, btnY, 20, '#fff', '#000', 2);
+  }
+  
+  // Name input placeholder (for now, just show default names)
+  strokeText('PLAYERS:', centerX, centerY - 20 * scale, 14, '#00ff00', '#000', 2);
+  
+  for (let i = 0; i < setupPlayerCount; i++) {
+    const name = setupNames[i] || `Player ${i+1}`;
+    const nameY = centerY + 20 * scale + i * 30 * scale;
+    strokeText(name, centerX, nameY, 12, playerColors[i], '#000', 2);
+  }
+  
+  // START button
+  const startY = centerY + 200 * scale;
+  drawButton(centerX, startY, 200 * scale, 50 * scale, 'START GAME', '#00ff00', '#000', true);
+}
+
+function drawHotSeat() {
+  // Dramatic spotlight background
+  const grad = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, W * 0.7);
+  grad.addColorStop(0, '#ff0099');
+  grad.addColorStop(1, '#000');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  
+  // Animated text
+  const bounce = Math.sin(analysisTimer * 4) * 10 * scale;
+  strokeText('HOT SEAT!', centerX, centerY - 100 * scale + bounce, 38, '#ffff00', '#000', 5);
+  
+  // Current player
+  const currentPlayer = players[currentPlayerIndex];
+  drawPlayerAvatar(centerX, centerY, 60 * scale, currentPlayer.color, currentPlayer.name, true);
+  
+  strokeText(currentPlayer.name.toUpperCase(), centerX, centerY + 100 * scale, 24, '#fff', '#000', 4);
+}
+
+function drawQuestion() {
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(0, 0, W, H);
+  
+  // Current player in corner
+  const currentPlayer = players[currentPlayerIndex];
+  
+  // Camera feed or avatar
+  if (cameraActive) {
+    const camW = W * 0.9;
+    const camH = camW * 0.75;
+    positionCamera(centerX, centerY - 80 * scale, camW, camH);
+    
+    // Border around camera
+    drawBox(centerX, centerY - 80 * scale, camW + 8 * scale, camH + 8 * scale, 'transparent', '#00ffff', 5);
+  } else {
+    // Show avatar
+    drawPlayerAvatar(centerX, centerY - 120 * scale, 80 * scale, currentPlayer.color, currentPlayer.name, false);
+  }
+  
+  strokeText(currentPlayer.name.toUpperCase(), centerX, centerY - 30 * scale, 20, '#fff', '#000', 3);
+  
+  // Question box
+  const qBoxY = centerY + 80 * scale;
+  drawBox(centerX, qBoxY, W * 0.9, 140 * scale, '#ff0099', '#ffff00', 6);
+  strokeText('QUESTION:', centerX, qBoxY - 45 * scale, 14, '#fff', '#000', 2);
+  
+  // Word wrap question
+  const words = currentQuestion.text.split(' ');
+  let lines = [];
+  let line = '';
+  ctx.font = `bold ${16 * scale}px Impact, 'Arial Black', sans-serif`;
+  
+  for (const word of words) {
+    const testLine = line + word + ' ';
+    const metrics = ctx.measureText(testLine);
+    if (metrics.width > W * 0.8 && line.length > 0) {
+      lines.push(line.trim());
+      line = word + ' ';
+    } else {
+      line = testLine;
+    }
+  }
+  lines.push(line.trim());
+  
+  lines.forEach((l, i) => {
+    strokeText(l, centerX, qBoxY - 10 * scale + i * 24 * scale, 16, '#fff', '#000', 3);
+  });
+  
+  // Continue button
+  const btnY = H - 40 * scale;
+  drawButton(centerX, btnY, 200 * scale, 50 * scale, 'START ANALYSIS', '#00ff00', '#000');
+}
+
+function drawAnalysis() {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  
+  // Glitch effect
+  if (Math.random() < 0.1) {
+    ctx.save();
+    ctx.translate((Math.random() - 0.5) * 5 * scale, 0);
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = '#00ff00';
+    ctx.fillRect(0, Math.random() * H, W, 3 * scale);
+    ctx.restore();
+  }
+  
+  // Camera feed with scan lines
+  if (cameraActive) {
+    const camW = W * 0.9;
+    const camH = camW * 0.75;
+    positionCamera(centerX, centerY - 60 * scale, camW, camH);
+    
+    // Scanning lines
+    const scanY = (centerY - 60 * scale - camH/2) + (scanProgress * camH);
+    ctx.save();
+    ctx.strokeStyle = '#00ff00';
+    ctx.lineWidth = 3 * scale;
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(centerX - camW/2, scanY);
+    ctx.lineTo(centerX + camW/2, scanY);
+    ctx.stroke();
+    ctx.restore();
+    
+    // Fake micro-expression markers
+    if (scanProgress > 0.3 && Math.random() < 0.05) {
+      const mx = centerX + (Math.random() - 0.5) * camW * 0.6;
+      const my = centerY - 60 * scale + (Math.random() - 0.5) * camH * 0.6;
+      ctx.save();
+      ctx.strokeStyle = '#ff0000';
+      ctx.lineWidth = 2 * scale;
+      ctx.beginPath();
+      ctx.arc(mx, my, 15 * scale, 0, Math.PI * 2);
+      ctx.stroke();
+      strokeText('!', mx, my, 10, '#ff0000', '#000', 2);
+      ctx.restore();
+    }
+  } else {
+    // Avatar with scan effect
+    const currentPlayer = players[currentPlayerIndex];
+    drawPlayerAvatar(centerX, centerY - 100 * scale, 80 * scale, currentPlayer.color, currentPlayer.name, false);
+  }
+  
+  // Progress bar
+  drawProgressBar(centerX, centerY + 80 * scale, W * 0.8, 40 * scale, scanProgress, '#00ff00', '#000', 'ANALYZING...');
+  
+  // Status messages
+  const messages = [
+    'Scanning facial micro-expressions...',
+    'Analyzing pupil dilation...',
+    'Measuring cortisol levels...',
+    'Detecting truth patterns...',
+    'Processing neural signals...'
+  ];
+  const msgIndex = Math.floor(scanProgress * messages.length);
+  strokeText(messages[Math.min(msgIndex, messages.length - 1)], centerX, centerY + 140 * scale, 12, '#00ffff', '#000', 2);
+  
+  // Heartbeat indicator
+  const beat = Math.floor(gameTime * 1.5) % 2 === 0 ? '❤️' : '🖤';
+  ctx.font = `${20 * scale}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillText(beat, centerX, centerY + 170 * scale);
+}
+
+function drawVerdict() {
+  // Dramatic reveal
+  const grad = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, W);
+  if (aiVerdict.verdict === 'LYING') {
+    grad.addColorStop(0, '#ff0000');
+    grad.addColorStop(1, '#000');
+  } else {
+    grad.addColorStop(0, '#00ff00');
+    grad.addColorStop(1, '#000');
+  }
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  
+  // AI SAYS banner
+  drawBox(centerX, 80 * scale, W * 0.9, 60 * scale, '#ff5500', '#000', 5);
+  strokeText('🤖 AI SAYS:', centerX, 80 * scale, 18, '#fff', '#000', 3);
+  
+  // Verdict
+  const verdictColor = aiVerdict.verdict === 'LYING' ? '#ff0000' : '#00ff00';
+  strokeText(aiVerdict.verdict === 'LYING' ? 'TOTALLY LYING' : 'PROBABLY TRUTHFUL', 
+    centerX, 150 * scale, 32, verdictColor, '#000', 5);
+  
+  strokeText(`Confidence: ${aiVerdict.confidence}%`, centerX, 190 * scale, 16, '#fff', '#000', 3);
+  
+  // Truth score circle
+  const circleY = centerY + 20 * scale;
+  ctx.save();
+  ctx.shadowColor = verdictColor;
+  ctx.shadowBlur = 30 * scale;
+  ctx.fillStyle = '#ffff00';
+  ctx.beginPath();
+  ctx.arc(centerX, circleY, 80 * scale, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 5 * scale;
+  ctx.stroke();
+  ctx.restore();
+  
+  strokeText(`${aiVerdict.score}%`, centerX, circleY - 10 * scale, 48, '#000', '#ffff00', 2);
+  strokeText(aiVerdict.verdict === 'LYING' ? 'LIE' : 'TRUTH', centerX, circleY + 30 * scale, 16, '#000', '#ffff00', 2);
+  
+  // Micro-expressions detected
+  strokeText('DETECTED:', centerX, centerY + 130 * scale, 12, '#00ffff', '#000', 2);
+  aiVerdict.microExpressions.forEach((exp, i) => {
+    strokeText(`• ${exp}`, centerX, centerY + 160 * scale + i * 22 * scale, 10, '#fff', '#000', 2);
+  });
+  
+  // Tap to continue
+  if (analysisTimer > 1) {
+    const alpha = 0.5 + Math.sin(gameTime * 4) * 0.5;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    strokeText('TAP TO CONTINUE', centerX, H - 40 * scale, 14, '#fff', '#000', 2);
+    ctx.restore();
+  }
+}
+
+function drawAccusation() {
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(0, 0, W, H);
+  
+  // Header
+  const grad = ctx.createLinearGradient(0, 0, W, 0);
+  grad.addColorStop(0, '#ff0099');
+  grad.addColorStop(0.5, '#ffff00');
+  grad.addColorStop(1, '#00ffff');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, 80 * scale);
+  
+  strokeText('ACCUSATION TIME!', centerX, 50 * scale, 26, '#ffff00', '#000', 5);
+  
+  // AI verdict reminder
+  const aiBoxY = 120 * scale;
+  drawBox(centerX, aiBoxY, W * 0.9, 50 * scale, '#ff5500', '#000', 4);
+  strokeText(`🤖 AI SAYS: ${aiVerdict.verdict}`, centerX, aiBoxY - 8 * scale, 14, '#fff', '#000', 2);
+  strokeText(`Confidence: ${aiVerdict.confidence}%`, centerX, aiBoxY + 12 * scale, 11, '#fff', '#000', 2);
+  
+  // Timer
+  const timerY = 190 * scale;
+  drawBox(centerX, timerY, 150 * scale, 40 * scale, '#ffff00', '#000', 4);
+  strokeText(`TIME: ${Math.max(0, Math.ceil(accusationTimer))}`, centerX, timerY, 16, '#000', '#ffff00', 2);
+  
+  // Players vote
+  const currentPlayer = players[currentPlayerIndex];
+  const otherPlayers = players.filter(p => p !== currentPlayer);
+  
+  const startY = 250 * scale;
+  const cols = Math.min(4, otherPlayers.length);
+  
+  otherPlayers.forEach((player, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const px = centerX - (cols - 1) * 50 * scale + col * 100 * scale;
+    const py = startY + row * 150 * scale;
+    
+    // Player avatar
+    drawPlayerAvatar(px, py, 30 * scale, player.color, player.name, false);
+    
+    // Vote buttons
+    const vote = playerVotes[player.name];
+    
+    // TRUTH
+    const truthBg = vote === 'TRUTH' ? '#6633cc' : '#555';
+    drawButton(px, py + 50 * scale, 80 * scale, 32 * scale, '👍 TRUTH', truthBg, '#fff', vote === 'TRUTH');
+    
+    // LIE
+    const lieBg = vote === 'LIE' ? '#6633cc' : '#555';
+    drawButton(px, py + 90 * scale, 80 * scale, 32 * scale, '👎 LIE!', lieBg, '#fff', vote === 'LIE');
+    
+    // SKIP
+    const skipBg = vote === 'SKIP' ? '#333' : '#222';
+    drawButton(px, py + 130 * scale, 80 * scale, 28 * scale, '🤷 SKIP', skipBg, '#999', vote === 'SKIP');
+  });
+  
+  // Drama meter
+  const dramaY = H - 100 * scale;
+  const voteCount = Object.values(playerVotes).filter(v => v !== null).length;
+  const dramaLevel = voteCount / Object.keys(playerVotes).length;
+  
+  drawProgressBar(centerX, dramaY, W * 0.9, 35 * scale, dramaLevel, '#ff0099', '#000', '🔥 DRAMA METER 🔥');
+  
+  // Cast vote prompt
+  strokeText('CAST YOUR VOTE!', centerX, H - 40 * scale, 16, '#00ff00', '#000', 3);
+}
+
+function drawConfession() {
+  // Background
+  const grad = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, W);
+  grad.addColorStop(0, players[currentPlayerIndex].wasLying ? '#ff3366' : '#00ff99');
+  grad.addColorStop(1, '#000');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  
+  // BUSTED or INNOCENT
+  const topText = players[currentPlayerIndex].wasLying ? 'BUSTED!' : 'INNOCENT!';
+  const topColor = players[currentPlayerIndex].wasLying ? '#ff0000' : '#00ff00';
+  strokeText(topText, centerX, 60 * scale, 38, topColor, '#000', 6);
+  
+  // Reveal box
+  const revealY = 150 * scale;
+  drawBox(centerX, revealY, W * 0.9, 100 * scale, '#ff0099', '#ffff00', 6);
+  
+  const currentPlayer = players[currentPlayerIndex];
+  strokeText(`${currentPlayer.name.toUpperCase()} was...`, centerX, revealY - 30 * scale, 16, '#fff', '#000', 3);
+  strokeText(currentPlayer.wasLying ? 'LYING!' : 'TELLING THE TRUTH!', centerX, revealY + 5 * scale, 24, '#ffff00', '#000', 4);
+  strokeText('(They confessed!)', centerX, revealY + 35 * scale, 12, '#fff', '#000', 2);
+  
+  // Points awarded
+  const pointsY = 280 * scale;
+  drawBox(centerX, pointsY, W * 0.9, 180 * scale, '#6633cc', '#00ff00', 5);
+  strokeText('POINTS:', centerX, pointsY - 60 * scale, 18, '#00ff00', '#000', 3);
+  
+  let lineY = pointsY - 30 * scale;
+  Object.keys(playerVotes).forEach(voterName => {
+    const vote = playerVotes[voterName];
+    const voter = players.find(p => p.name === voterName);
+    const guessedCorrectly = (vote === 'LIE' && currentPlayer.wasLying) || 
+                             (vote === 'TRUTH' && !currentPlayer.wasLying);
+    
+    const points = vote === 'SKIP' ? 0 : (guessedCorrectly ? 50 : 0);
+    const color = points > 0 ? '#00ff00' : (vote === 'SKIP' ? '#999' : '#ff5500');
+    
+    strokeText(`${voter.name}  +${points}`, centerX, lineY, 14, color, '#000', 2);
+    lineY += 24 * scale;
+  });
+  
+  // AI accuracy
+  const aiY = H - 120 * scale;
+  const aiAccuracy = currentPlayer.aiCorrect ? '100%' : '0%';
+  const aiColor = currentPlayer.aiCorrect ? '#00ff00' : '#ff0000';
+  strokeText(`AI Accuracy: ${aiAccuracy}`, centerX, aiY, 14, aiColor, '#000', 3);
+  
+  // Continue
+  if (analysisTimer > 2) {
+    const alpha = 0.5 + Math.sin(gameTime * 4) * 0.5;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    strokeText('TAP TO CONTINUE', centerX, H - 40 * scale, 14, '#fff', '#000', 2);
+    ctx.restore();
+  }
+}
+
+function drawResults() {
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(0, 0, W, H);
+  
+  strokeText(`ROUND ${currentRound - 1} COMPLETE!`, centerX, 50 * scale, 24, '#00ffff', '#000', 4);
+  
+  // Scoreboard
+  const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
+  
+  const startY = 120 * scale;
+  sortedPlayers.forEach((player, i) => {
+    const py = startY + i * 60 * scale;
+    
+    // Rank
+    const rankEmoji = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`;
+    ctx.font = `${20 * scale}px sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.fillText(rankEmoji, 30 * scale, py);
+    
+    // Avatar
+    drawPlayerAvatar(100 * scale, py, 25 * scale, player.color, '', false);
+    
+    // Name and score
+    strokeText(player.name, 160 * scale, py - 10 * scale, 16, '#fff', '#000', 2);
+    strokeText(`${player.score} pts`, 160 * scale, py + 12 * scale, 12, player.color, '#000', 2);
+    
+    // Stats
+    ctx.save();
+    ctx.fillStyle = '#999';
+    ctx.font = `${10 * scale}px sans-serif`;
+    ctx.textAlign = 'right';
+    ctx.fillText(`✓${player.correctGuesses || 0} ✗${player.wrongGuesses || 0}`, W - 30 * scale, py);
+    ctx.restore();
+  });
+  
+  // Next button
+  const btnY = H - 40 * scale;
+  drawButton(centerX, btnY, 200 * scale, 50 * scale, 'NEXT VICTIM!', '#ff0099', '#fff', true);
+}
+
+function drawGameOver() {
+  // Victory background
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#00ffff');
+  grad.addColorStop(1, '#6633cc');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  
+  strokeText('GAME OVER!', centerX, 60 * scale, 36, '#ffff00', '#000', 6);
+  
+  // Winner
+  const winner = players[0];
+  strokeText('🏆 WINNER 🏆', centerX, 130 * scale, 20, '#fff', '#000', 3);
+  drawPlayerAvatar(centerX, 190 * scale, 60 * scale, winner.color, winner.name, true);
+  strokeText(winner.name.toUpperCase(), centerX, 270 * scale, 24, '#fff', '#000', 4);
+  strokeText(`${winner.score} POINTS`, centerX, 300 * scale, 18, '#ffff00', '#000', 3);
+  
+  // Superlatives
+  const supsY = 360 * scale;
+  drawBox(centerX, supsY, W * 0.9, 140 * scale, 'rgba(0,0,0,0.5)', '#ff0099', 4);
+  strokeText('🎭 AWARDS 🎭', centerX, supsY - 50 * scale, 16, '#ff0099', '#000', 3);
+  
+  // Most Suspicious (most wrong guesses)
+  const mostSuspicious = [...players].sort((a, b) => (b.wrongGuesses || 0) - (a.wrongGuesses || 0))[0];
+  strokeText(`Most Suspicious: ${mostSuspicious.name}`, centerX, supsY - 15 * scale, 12, '#ff5500', '#000', 2);
+  
+  // Poker Face (least expression changes - random for demo)
+  const pokerFace = players[Math.floor(Math.random() * players.length)];
+  strokeText(`Poker Face Award: ${pokerFace.name}`, centerX, supsY + 10 * scale, 12, '#00ff00', '#000', 2);
+  
+  // Most Correct
+  const bestDetective = [...players].sort((a, b) => (b.correctGuesses || 0) - (a.correctGuesses || 0))[0];
+  strokeText(`Best Detective: ${bestDetective.name}`, centerX, supsY + 35 * scale, 12, '#00ffff', '#000', 2);
+  
+  // Buttons
+  drawButton(centerX, H - 100 * scale, 200 * scale, 50 * scale, '🔄 PLAY AGAIN', '#00ff00', '#000', true);
+  drawButton(centerX, H - 40 * scale, 200 * scale, 45 * scale, '📱 SHARE', '#9933ff', '#fff');
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+function getEventPos(e) {
+  if (e.touches) {
+    return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }
+  return { x: e.clientX, y: e.clientY };
+}
+
+function hitTest(px, py, x, y, w, h) {
+  return px >= x - w/2 && px <= x + w/2 && py >= y - h/2 && py <= y + h/2;
+}
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  ensureAudio();
+  const pos = getEventPos(e);
+  inputEvents.push({ type: 'tap', x: pos.x, y: pos.y });
+}, { passive: false });
+
+canvas.addEventListener('mousedown', (e) => {
+  ensureAudio();
+  inputEvents.push({ type: 'tap', x: e.clientX, y: e.clientY });
+});
+
+// ============================================================
+// HELPER FUNCTIONS
+// ============================================================
+function allVoted() {
+  return Object.values(playerVotes).every(v => v !== null);
+}
+
+// ============================================================
+// GAME LOOP
+// ============================================================
+function update() {
+  const now = performance.now() / 1000;
+  deltaTime = Math.min(0.1, now - lastTime);
+  lastTime = now;
+  gameTime = now;
+  
+  // Update particles
+  updateParticles();
+  
+  // Update current state
+  switch(gameState) {
+    case 'SPLASH': updateSplash(); break;
+    case 'SETUP': updateSetup(); break;
+    case 'HOT_SEAT': updateHotSeat(); break;
+    case 'QUESTION': updateQuestion(); break;
+    case 'ANALYSIS': updateAnalysis(); break;
+    case 'VERDICT': updateVerdict(); break;
+    case 'ACCUSATION': updateAccusation(); break;
+    case 'CONFESSION': updateConfession(); break;
+    case 'RESULTS': updateResults(); break;
+    case 'GAME_OVER': updateGameOver(); break;
+  }
+  
+  inputEvents = [];
+}
+
+function draw() {
+  ctx.save();
+  applyShake();
+  
+  // Draw current state
+  switch(gameState) {
+    case 'SPLASH': drawSplash(); break;
+    case 'SETUP': drawSetup(); break;
+    case 'HOT_SEAT': drawHotSeat(); break;
+    case 'QUESTION': drawQuestion(); break;
+    case 'ANALYSIS': drawAnalysis(); break;
+    case 'VERDICT': drawVerdict(); break;
+    case 'ACCUSATION': drawAccusation(); break;
+    case 'CONFESSION': drawConfession(); break;
+    case 'RESULTS': drawResults(); break;
+    case 'GAME_OVER': drawGameOver(); break;
+  }
+  
+  // Draw particles on top
+  drawParticles();
+  
+  ctx.restore();
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ============================================================
+// INIT
+// ============================================================
+initSplash();
+lastTime = performance.now() / 1000;
+loop();
+
+</script>
+</body>
+</html>
