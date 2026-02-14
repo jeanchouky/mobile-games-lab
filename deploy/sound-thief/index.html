@@ -549,6 +549,9 @@ function updatePlayer() {
   camera.x += (camera.targetX - camera.x) * 0.1;
   camera.y += (camera.targetY - camera.y) * 0.1;
   
+  // Invincibility frames
+  if (player.invincible > 0) player.invincible -= deltaTime;
+  
   // Update cooldowns
   for (const sound of soundInventory) {
     if (sound.cooldown > 0) {
@@ -561,8 +564,12 @@ function drawPlayer() {
   const px = player.x - camera.x;
   const py = player.y - camera.y;
   
-  // Player as concentric circles (like in mockup)
+  // Player as concentric circles
   ctx.save();
+  // Flash during invincibility
+  if (player.invincible > 0 && Math.floor(gameTime * 10) % 2 === 0) {
+    ctx.globalAlpha = 0.3;
+  }
   
   // Outer glow
   const grad = ctx.createRadialGradient(px + player.radius, py + player.radius, 0, 
@@ -640,13 +647,15 @@ function updateEnemies() {
     
     e.x += e.vx;
     
-    // Collision with player
-    if (checkCollision(player, e)) {
+    // Collision with player (with invincibility frames)
+    if (checkCollision(player, e) && (!player.invincible || player.invincible <= 0)) {
       player.hp -= 10;
-      spawnParticles(player.x, player.y, 5, '#ff6b6b');
+      player.invincible = 1.0; // 1 second invincibility
+      spawnParticles(player.x, player.y, 8, '#ff6b6b');
       playSfx('hit');
       // Knockback
-      player.vx = (player.x - e.x) > 0 ? 3 : -3;
+      player.vx = (player.x - e.x) > 0 ? 5 : -5;
+      player.vy = -4;
     }
     
     // Check projectile hits
@@ -766,10 +775,17 @@ function drawPlatforms() {
     const py = plat.y - camera.y;
     
     ctx.save();
-    ctx.fillStyle = '#556677';
+    // Platform gradient
+    const platGrad = ctx.createLinearGradient(px, py, px, py + plat.h);
+    platGrad.addColorStop(0, '#667788');
+    platGrad.addColorStop(1, '#445566');
+    ctx.fillStyle = platGrad;
     ctx.fillRect(px, py, plat.w, plat.h);
-    ctx.strokeStyle = '#778899';
-    ctx.lineWidth = 2;
+    // Top highlight
+    ctx.fillStyle = '#88aabb';
+    ctx.fillRect(px, py, plat.w, 3);
+    ctx.strokeStyle = '#556677';
+    ctx.lineWidth = 1;
     ctx.strokeRect(px, py, plat.w, plat.h);
     ctx.restore();
   }
@@ -784,8 +800,8 @@ function loadLevel(levelIndex) {
   platforms = [];
   projectiles = [];
   pickups = [];
-  player.x = 100;
-  player.y = 200;
+  player.x = 50;
+  player.y = 300;
   player.vx = 0;
   player.vy = 0;
   player.hp = player.maxHp;
@@ -794,11 +810,16 @@ function loadLevel(levelIndex) {
   
   // Level 1: Tutorial
   if (levelIndex === 0) {
-    platforms.push({ x: 0, y: 400, w: 800, h: 40 });
+    platforms.push({ x: -200, y: 400, w: 1200, h: 40 });
     platforms.push({ x: 300, y: 300, w: 150, h: 20 });
     platforms.push({ x: 550, y: 200, w: 150, h: 20 });
-    createEnemy(400, 360, 'silence');
-    createEnemy(600, 160, 'echo');
+    // Start with a procedural sound so player can fight
+    if (soundInventory.length === 0) {
+      soundInventory.push(createProceduralSound());
+      soundInventory.push(createProceduralSound());
+    }
+    createEnemy(500, 360, 'silence');
+    createEnemy(700, 160, 'echo');
   }
   // Level 2: Echo Chamber
   else if (levelIndex === 1) {
@@ -1357,6 +1378,15 @@ function handleInput(x, y, type) {
       const slotIndex = Math.floor((x - 10) / slotW);
       if (slotIndex >= 0 && slotIndex < 5 && soundInventory[slotIndex]) {
         playSound(soundInventory[slotIndex]);
+      }
+    }
+    
+    // Tap anywhere in game area to auto-shoot first available sound
+    if (y < invY && y > 60) {
+      // Set facing based on tap side
+      if (x > W / 2) player.facing = 1; else player.facing = -1;
+      for (const s of soundInventory) {
+        if (s.cooldown <= 0) { playSound(s); break; }
       }
     }
   } else if (gameState === 'GAME_OVER') {
