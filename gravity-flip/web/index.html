@@ -50,6 +50,30 @@ let menuPulse = 0;
 let tapPromptAlpha = 1;
 let victoryAnimTime = 0;
 let slowMo = 0; // slow motion effect on death/win
+let speedLines = [];
+let cameraZoom = 1;
+let cameraZoomTarget = 1;
+let levelColors = [
+  { accent: '#00ffff', bg1: '#0a001a', bg2: '#1a0033' },
+  { accent: '#00ff88', bg1: '#001a0a', bg2: '#003320' },
+  { accent: '#ff6644', bg1: '#1a0800', bg2: '#331500' },
+  { accent: '#ff44aa', bg1: '#1a000a', bg2: '#330020' },
+  { accent: '#ffaa00', bg1: '#1a0f00', bg2: '#332200' },
+  { accent: '#b464ff', bg1: '#0f001a', bg2: '#200033' },
+  { accent: '#44ddff', bg1: '#001018', bg2: '#002030' },
+  { accent: '#ff4444', bg1: '#1a0000', bg2: '#330000' },
+  { accent: '#66ff66', bg1: '#001a00', bg2: '#003300' },
+  { accent: '#ffd700', bg1: '#1a1000', bg2: '#332800' },
+  { accent: '#00ffff', bg1: '#0a001a', bg2: '#1a0033' },
+  { accent: '#ff66ff', bg1: '#1a001a', bg2: '#330033' },
+  { accent: '#44ff88', bg1: '#001a0a', bg2: '#003320' },
+  { accent: '#ffaa44', bg1: '#1a0f00', bg2: '#332200' },
+  { accent: '#ff2266', bg1: '#1a000a', bg2: '#330015' },
+];
+let currentAccent = '#00ffff';
+let totalScore = 0;
+try { const ts = localStorage.getItem('gflip3_score'); if (ts) totalScore = parseInt(ts) || 0; } catch(e) {}
+function saveTotalScore() { try { localStorage.setItem('gflip3_score', totalScore.toString()); } catch(e) {} }
 
 // Progress
 let progress = {};
@@ -323,10 +347,13 @@ function drawParticles() {
 // DRAWING HELPERS
 // ============================================================
 function drawBg() {
+  const lc = levelColors[lvl] || levelColors[0];
+  const bg1 = (screen === 'game' || screen === 'victory') ? lc.bg1 : '#0a001a';
+  const bg2 = (screen === 'game' || screen === 'victory') ? lc.bg2 : '#1a0033';
   const g = X.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, '#0a001a');
-  g.addColorStop(0.5, '#1a0033');
-  g.addColorStop(1, '#0d0020');
+  g.addColorStop(0, bg1);
+  g.addColorStop(0.5, bg2);
+  g.addColorStop(1, bg1);
   X.fillStyle = g;
   X.fillRect(0, 0, W, H);
   
@@ -1309,12 +1336,16 @@ function startLevel(index) {
   combo = 0; comboTimer = 0;
   particles = [];
   floatingTexts = [];
+  speedLines = [];
   screen = 'game';
   screenShake = 0;
   screenFlash = 0;
   deathTimer = 0;
   nearMissTimer = 0;
   slowMo = 0;
+  cameraZoom = 1;
+  cameraZoomTarget = 1;
+  currentAccent = (levelColors[index] || levelColors[0]).accent;
   
   ensureAudio();
   startMusic();
@@ -1365,14 +1396,20 @@ function updateGame() {
     if (o.check(p)) {
       gs.orbsCollected++;
       combo++;
-      comboTimer = 2;
+      comboTimer = 2.5;
       sfxCollect();
       if (combo > 1) {
         sfxCombo();
-        addFloatingText(o.x, o.y - 20 * S, `${combo}x`, '#ffd700', 24);
+        addFloatingText(o.x, o.y - 20 * S, `${combo}x COMBO!`, '#ffd700', 22 + combo * 2);
+        // Combo speed boost
+        p.vx *= 1 + combo * 0.05;
+        cameraZoomTarget = 1 + combo * 0.01;
+        setTimeout(() => { cameraZoomTarget = 1; }, 300);
       }
-      addFloatingText(o.x, o.y, '+1', '#4488ff', 16);
-      screenShake = Math.max(screenShake, 3 + combo);
+      const points = 10 * combo;
+      addFloatingText(o.x, o.y, `+${points}`, currentAccent, 16);
+      screenShake = Math.max(screenShake, 3 + combo * 1.5);
+      slowMo = 0.08; // tiny freeze frame on collect
     }
   });
   
@@ -1397,12 +1434,14 @@ function updateGame() {
   // Spike check
   for (const s of gs.spikes) {
     if (s.check(p)) { killPlayer(); return; }
-    // Near miss
+    // Near miss - dramatic slow-mo moment
     if (nearMissTimer <= 0 && s.nearMiss(p)) {
       nearMissTimer = 0.5;
       sfxNearMiss();
-      addFloatingText(p.x, p.y - 25 * S, 'CLOSE!', '#ff4488', 14);
-      emitSpark(p.x, p.y, '#ff4488', 3);
+      slowMo = 0.15; // brief time slowdown
+      addFloatingText(p.x, p.y - 25 * S, 'CLOSE!', '#ff4488', 16);
+      emitSpark(p.x, p.y, '#ff4488', 5);
+      screenShake = Math.max(screenShake, 3);
     }
   }
   
@@ -1427,16 +1466,21 @@ function killPlayer() {
   gs.dead = true;
   gs.deathCount++;
   sfxDeath();
-  screenShake = 18;
-  screenFlash = 0.3;
+  screenShake = 22;
+  screenFlash = 0.4;
   screenFlashColor = '#ff0044';
+  slowMo = 0.4; // dramatic slow-mo
+  cameraZoomTarget = 1.15; // zoom in on death
+  setTimeout(() => { cameraZoomTarget = 1; }, 600);
   
-  // Death explosion
-  emit(gs.player.x, gs.player.y, 35, '#ff0064', 6, 0.1, { shape: 'rect' });
-  emit(gs.player.x, gs.player.y, 20, '#00ffff', 5, 0.08, { shape: 'circle' });
-  emit(gs.player.x, gs.player.y, 10, '#ffffff', 3, 0.05, { size: 2, shape: 'circle' });
+  // Death explosion - bigger and more dramatic
+  emit(gs.player.x, gs.player.y, 45, '#ff0064', 7, 0.1, { shape: 'rect' });
+  emit(gs.player.x, gs.player.y, 25, currentAccent, 5, 0.08, { shape: 'circle' });
+  emit(gs.player.x, gs.player.y, 15, '#ffffff', 4, 0.05, { size: 2, shape: 'circle' });
+  // Shockwave ring
+  emit(gs.player.x, gs.player.y, 20, '#ff4488', 8, 0, { shape: 'circle', size: 1.5 });
   gs.player.alive = false;
-  deathTimer = 1.0;
+  deathTimer = 1.2;
 }
 
 function winLevel() {
@@ -1459,10 +1503,22 @@ function winLevel() {
     saveProgress();
   }
   
+  // Score calculation
+  const baseScore = 100 + lvl * 50;
+  const timeBonus = Math.max(0, Math.floor((L.stars[0] * 2 - time) * 10));
+  const deathPenalty = gs.deathCount * 20;
+  const levelScore = Math.max(10, baseScore + timeBonus - deathPenalty + stars * 50);
+  gs.levelScore = levelScore;
+  totalScore += levelScore;
+  saveTotalScore();
+  
   sfxWin();
-  screenShake = 10;
-  screenFlash = 0.3;
+  screenShake = 12;
+  screenFlash = 0.35;
   screenFlashColor = '#ffd700';
+  slowMo = 0.5;
+  cameraZoomTarget = 1.1;
+  setTimeout(() => { cameraZoomTarget = 1; }, 800);
   
   // Big win burst
   for (let i = 0; i < 5; i++) {
@@ -1718,15 +1774,20 @@ function drawMenu() {
   gs.btns.start = drawBtn(W/2 - bw/2, btnY, bw, bh, '▶  PLAY');
   gs.btns.select = drawBtn(W/2 - bw/2, btnY + bh + 15 * S, bw, bh, '📋  LEVELS', false);
   
-  // Stars display
-  if (bestTotalStars > 0) {
+  // Stars and score display
+  if (bestTotalStars > 0 || totalScore > 0) {
     X.save();
     X.fillStyle = '#ffd700';
     X.font = `bold ${15 * S}px sans-serif`;
     X.textAlign = 'center';
     X.shadowColor = '#ffd700';
     X.shadowBlur = 6 * S;
-    X.fillText(`⭐ ${bestTotalStars} / ${LEVELS.length * 3}`, W/2, H * 0.88);
+    X.fillText(`⭐ ${bestTotalStars} / ${LEVELS.length * 3}`, W/2, H * 0.85);
+    if (totalScore > 0) {
+      X.fillStyle = '#00ffff';
+      X.shadowColor = '#00ffff';
+      X.fillText(`Score: ${totalScore}`, W/2, H * 0.90);
+    }
     X.restore();
   }
   
@@ -1735,7 +1796,7 @@ function drawMenu() {
   X.fillStyle = 'rgba(255,255,255,0.2)';
   X.font = `${10 * S}px sans-serif`;
   X.textAlign = 'center';
-  X.fillText('v2.0', W/2, H - 12 * S);
+  X.fillText('v3.0', W/2, H - 12 * S);
   X.restore();
 }
 
@@ -1888,9 +1949,10 @@ function drawVictory() {
   const statBoxW = W * 0.35;
   const statBoxH = 55 * S;
   const stats = [
-    { label: 'TIME', value: `${(gs.victoryTime || 0).toFixed(1)}s`, x: W * 0.25 },
-    { label: 'ORBS', value: `${gs.orbsCollected}/${gs.totalOrbs}`, x: W * 0.5 },
-    { label: 'DEATHS', value: `${gs.deathCount}`, x: W * 0.75 },
+    { label: 'TIME', value: `${(gs.victoryTime || 0).toFixed(1)}s`, x: W * 0.2 },
+    { label: 'DEATHS', value: `${gs.deathCount}`, x: W * 0.4 },
+    { label: 'SCORE', value: `${gs.levelScore || 0}`, x: W * 0.6 },
+    { label: 'TOTAL', value: `${totalScore}`, x: W * 0.8 },
   ];
   
   stats.forEach((stat, i) => {
@@ -2027,18 +2089,82 @@ document.addEventListener('keydown', e => {
 // ============================================================
 // MAIN LOOP
 // ============================================================
+function updateSpeedLines() {
+  // Add new speed lines when in game
+  if (screen === 'game' && !gs.dead && !gs.won && gs.player.alive) {
+    const speed = Math.abs(gs.player.vx) + Math.abs(gs.player.vy);
+    if (speed > 3 * S && Math.random() > 0.6) {
+      speedLines.push({
+        x: gs.player.x + W * 0.3 + Math.random() * W * 0.7,
+        y: Math.random() * H,
+        len: (30 + Math.random() * 60) * S,
+        speed: (8 + Math.random() * 6) * S,
+        life: 1, decay: 0.03 + Math.random() * 0.02,
+        width: (1 + Math.random() * 2) * S
+      });
+    }
+  }
+  for (let i = speedLines.length - 1; i >= 0; i--) {
+    const l = speedLines[i];
+    l.x -= l.speed;
+    l.life -= l.decay;
+    if (l.life <= 0 || l.x + l.len < 0) speedLines.splice(i, 1);
+  }
+  if (speedLines.length > 30) speedLines.splice(0, speedLines.length - 30);
+}
+
+function drawSpeedLines() {
+  X.save();
+  for (const l of speedLines) {
+    X.globalAlpha = l.life * 0.15;
+    X.strokeStyle = currentAccent;
+    X.lineWidth = l.width;
+    X.beginPath();
+    X.moveTo(l.x, l.y);
+    X.lineTo(l.x + l.len, l.y);
+    X.stroke();
+  }
+  X.restore();
+}
+
 function loop(time) {
   time /= 1000;
   dt = Math.min(time - lt, 0.05);
   lt = time;
   gt = time;
   
+  // Apply slow motion
+  if (slowMo > 0) {
+    dt *= 0.3;
+    slowMo -= (time - lt + dt) || 0.016;
+    if (slowMo < 0) slowMo = 0;
+  }
+  
+  // Camera zoom lerp
+  cameraZoom += (cameraZoomTarget - cameraZoom) * 0.08;
+  
+  updateSpeedLines();
+  
   X.clearRect(0, 0, W, H);
   drawBg();
   
+  drawSpeedLines();
+  
   if (screen === 'menu') drawMenu();
   else if (screen === 'select') drawSelect();
-  else if (screen === 'game') { updateGame(); drawGame(); }
+  else if (screen === 'game') {
+    // Apply camera zoom
+    if (cameraZoom !== 1) {
+      X.save();
+      const cx = gs.player.alive ? gs.player.x : W/2;
+      const cy = gs.player.alive ? gs.player.y : H/2;
+      X.translate(cx, cy);
+      X.scale(cameraZoom, cameraZoom);
+      X.translate(-cx, -cy);
+    }
+    updateGame(); drawGame();
+    if (cameraZoom !== 1) X.restore();
+  }
   else if (screen === 'victory') drawVictory();
   
   // Transition overlay
