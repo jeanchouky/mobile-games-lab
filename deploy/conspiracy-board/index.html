@@ -256,26 +256,27 @@ function startCase(index) {
 // DRAWING - Cork Board Aesthetic
 // ============================================================
 
-function drawCorkTexture() {
-  // Cork background color with noise
-  const grad = ctx.createLinearGradient(0, 0, W, H);
-  grad.addColorStop(0, '#8b7355');
-  grad.addColorStop(0.5, '#9d8264');
-  grad.addColorStop(1, '#8b7355');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, W, H);
-  
-  // Cork grain texture
-  ctx.save();
-  ctx.globalAlpha = 0.15;
-  for (let i = 0; i < 500; i++) {
-    const x = Math.random() * W;
-    const y = Math.random() * H;
-    const size = Math.random() * 2;
-    ctx.fillStyle = Math.random() > 0.5 ? '#6d5a45' : '#a08060';
-    ctx.fillRect(x, y, size, size);
+let corkCanvas = null;
+function buildCorkTexture() {
+  corkCanvas = document.createElement('canvas');
+  corkCanvas.width = W * (window.devicePixelRatio || 1);
+  corkCanvas.height = H * (window.devicePixelRatio || 1);
+  const cc = corkCanvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  cc.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const grad = cc.createLinearGradient(0, 0, W, H);
+  grad.addColorStop(0, '#8b7355'); grad.addColorStop(0.5, '#9d8264'); grad.addColorStop(1, '#8b7355');
+  cc.fillStyle = grad; cc.fillRect(0, 0, W, H);
+  cc.globalAlpha = 0.15;
+  for (let i = 0; i < 800; i++) {
+    cc.fillStyle = Math.random() > 0.5 ? '#6d5a45' : '#a08060';
+    cc.fillRect(Math.random() * W, Math.random() * H, Math.random() * 3, Math.random() * 3);
   }
-  ctx.restore();
+}
+
+function drawCorkTexture() {
+  if (!corkCanvas || corkCanvas.width !== W * (window.devicePixelRatio || 1)) buildCorkTexture();
+  ctx.drawImage(corkCanvas, 0, 0, W, H);
 }
 
 function drawClue(clue) {
@@ -755,6 +756,14 @@ function drawUI() {
     ctx.fillText(`Time: ${mins}:${secs.toString().padStart(2, '0')}`, W - 10 * scale, 20 * scale);
     ctx.fillText(`Correct: ${correctConnections}`, W - 10 * scale, 38 * scale);
     
+    // Help hint
+    if (connections.length === 0) {
+      ctx.textAlign = 'center';
+      ctx.globalAlpha = 0.5 + Math.sin(gameTime * 3) * 0.2;
+      ctx.fillText('Drag clue tops to connect with string', W / 2, 55 * scale);
+      ctx.globalAlpha = 1;
+    }
+    
     // Bottom toolbar
     const toolY = H - 60 * scale;
     ctx.fillStyle = 'rgba(139, 115, 85, 0.9)';
@@ -938,6 +947,12 @@ function gameLoop(time) {
 canvas.addEventListener('click', (e) => {
   inputEvents.push({ type: 'tap', x: e.clientX, y: e.clientY });
 });
+
+canvas.addEventListener('touchstart', (e2) => {
+  if (gameState === 'menu' || gameState === 'solved') {
+    inputEvents.push({ type: 'tap', x: e2.touches[0].clientX, y: e2.touches[0].clientY });
+  }
+}, { passive: true });
 
 // ============================================================
 // START
