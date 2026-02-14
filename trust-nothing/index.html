@@ -68,6 +68,16 @@ let showingDeath = false;
 let stickFigure = { x: 0, y: 0, eyeState: 'normal', breathPhase: 0, lookDir: 0, visible: true, scale: 1 };
 let hintLevel = 0; // increases with deaths in room
 let audioMuted = false; // global mute state
+let highestRoom = 0;
+
+// Save/load progress
+try { 
+  const s = localStorage.getItem('trustnothing');
+  if (s) { const d = JSON.parse(s); highestRoom = d.highestRoom || 0; totalDeaths = d.totalDeaths || 0; }
+} catch(e) {}
+function saveGameProgress() { 
+  try { localStorage.setItem('trustnothing', JSON.stringify({ highestRoom, totalDeaths })); } catch(e) {} 
+}
 
 // --- RESIZE ---
 function resize() {
@@ -108,7 +118,7 @@ function ensureAudio() {
     masterGain.connect(audioCtx.destination);
     
     musicGain = audioCtx.createGain();
-    musicGain.gain.value = 0.15;
+    musicGain.gain.value = 0.06;
     musicGain.connect(masterGain);
     
     sfxGain = audioCtx.createGain();
@@ -147,7 +157,7 @@ function startBackgroundMusic() {
   melodyOsc.frequency.value = melody[0];
   
   const melodyGainNode = audioCtx.createGain();
-  melodyGainNode.gain.value = 0.08;
+  melodyGainNode.gain.value = 0.04;
   
   melodyOsc.connect(melodyGainNode);
   melodyGainNode.connect(musicGain);
@@ -159,7 +169,7 @@ function startBackgroundMusic() {
   bassOsc.frequency.value = bassNotes[0];
   
   const bassGainNode = audioCtx.createGain();
-  bassGainNode.gain.value = 0.12;
+  bassGainNode.gain.value = 0.06;
   
   bassOsc.connect(bassGainNode);
   bassGainNode.connect(musicGain);
@@ -187,7 +197,7 @@ function startBackgroundMusic() {
   const arpPattern = [0, 4, 2, 3, 1, 2, 4, 0];
   
   let step = 0;
-  const noteLength = 0.25; // quarter note
+  const noteLength = 0.4; // slower, more ambient feel
   
   function updateMelody() {
     if (!bgMusicNodes.length || audioMuted) return;
@@ -845,6 +855,8 @@ function fadeToRoom(roomIndex) {
     hintLevel = 0;
     roomState = {};
     showingDeath = false;
+    if (roomIndex > highestRoom) { highestRoom = roomIndex; }
+    saveGameProgress();
     initRoom(roomIndex);
     transitionDir = -1;
   };
@@ -917,12 +929,15 @@ function drawDeathOverlay() {
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   ctx.fillRect(0, 0, W, H);
   
-  // Skull
+  // Death icon (varied)
+  const deathIcons = ['💀', '☠️', '💥', '🪦', '😵', '🫠'];
+  const iconIdx = totalDeaths % deathIcons.length;
   const skullY = centerY - 40 * scale;
-  ctx.font = `${40 * scale}px sans-serif`;
+  const iconBounce = Math.sin(deathAnimTimer * 8) * 5 * scale * Math.max(0, 1 - deathAnimTimer);
+  ctx.font = `${(40 + iconBounce) * scale}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.fillStyle = '#fff';
-  ctx.fillText('💀', centerX, skullY);
+  ctx.fillText(deathIcons[iconIdx], centerX, skullY + iconBounce);
   
   // Death message
   ctx.font = `bold ${14 * scale}px 'Comic Sans MS', cursive, sans-serif`;
@@ -953,13 +968,29 @@ function drawDeathOverlay() {
   ctx.restore();
 }
 
-// Death counter skull (always visible)
+// Death counter skull + room progress (always visible)
 function drawDeathCounter() {
   ctx.save();
   ctx.font = `${12 * scale}px sans-serif`;
   ctx.textAlign = 'right';
-  ctx.fillStyle = '#666';
+  ctx.fillStyle = totalDeaths > 20 ? '#cc4444' : '#666';
   ctx.fillText(`💀 ${totalDeaths}`, W - 12 * scale, 24 * scale);
+  
+  // Room progress dots
+  if (!chapterComplete && currentRoom > 0) {
+    const dotSize = 4 * scale;
+    const dotGap = 10 * scale;
+    const totalRooms = 10;
+    const dotsWidth = totalRooms * dotGap;
+    const startX = centerX - dotsWidth / 2;
+    const dotY = H - 12 * scale;
+    for (let i = 0; i < totalRooms; i++) {
+      ctx.fillStyle = i < currentRoom ? '#22aa22' : (i === currentRoom ? '#ffd700' : 'rgba(0,0,0,0.15)');
+      ctx.beginPath();
+      ctx.arc(startX + i * dotGap, dotY, i === currentRoom ? dotSize * 1.3 : dotSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
   ctx.restore();
 }
 
@@ -1271,14 +1302,23 @@ rooms[0] = {
       );
     }
     
-    // Skip text (nearly invisible)
-    const skipAlpha = 0.15 + hintLevel * 0.08;
+    // Skip text — becomes more visible with deaths
+    const skipAlpha = 0.12 + hintLevel * 0.12 + (roomState.tapCount > 0 ? 0.15 : 0);
     ctx.save();
-    ctx.globalAlpha = Math.min(1, skipAlpha);
-    ctx.fillStyle = '#999';
-    ctx.font = `${8 * scale}px sans-serif`;
+    ctx.globalAlpha = Math.min(0.9, skipAlpha);
+    ctx.fillStyle = hintLevel >= 2 ? '#22aa22' : '#999';
+    const skipSize = hintLevel >= 3 ? 11 : 8;
+    ctx.font = `${skipSize * scale}px sans-serif`;
     ctx.textAlign = 'right';
-    ctx.fillText('skip →', W - 15 * scale, H - 25 * scale);
+    const skipBob = hintLevel >= 3 ? Math.sin(gameTime * 3) * 3 * scale : 0;
+    ctx.fillText('skip →', W - 15 * scale, H - 25 * scale + skipBob);
+    if (hintLevel >= 5) {
+      ctx.globalAlpha = 0.3 + Math.sin(gameTime * 4) * 0.2;
+      ctx.beginPath();
+      ctx.arc(W - 35 * scale, H - 28 * scale, 20 * scale, 0, Math.PI * 2);
+      ctx.fillStyle = '#44ff44';
+      ctx.fill();
+    }
     ctx.restore();
   }
 };
