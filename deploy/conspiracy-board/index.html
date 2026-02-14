@@ -376,7 +376,7 @@ function drawClue(clue) {
   
   // Description text
   ctx.fillStyle = '#333';
-  ctx.font = `${8 * scale}px 'Courier New', monospace`;
+  ctx.font = `${10 * scale}px 'Courier New', monospace`;
   const descLines = clue.desc.split('\n');
   const descStartY = clue.type === 'photo' ? clue.height * 0.55 : 20*scale;
   descLines.forEach((line, i) => {

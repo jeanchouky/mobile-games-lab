@@ -125,8 +125,8 @@ const allShopItems = [
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
   // Use a low-res feel but fill the screen
-  const targetPx = 240; // target width in game pixels
-  pixelScale = Math.max(1, Math.floor(w / targetPx));
+  const targetPx = 200; // target width in game pixels
+  pixelScale = Math.max(1, Math.round(w / targetPx));
   GW = Math.ceil(w / pixelScale);
   GH = Math.ceil(h / pixelScale);
   canvas.width = GW;

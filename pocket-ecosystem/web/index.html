@@ -1049,7 +1049,7 @@ function drawUI() {
 function drawMuteButton() {
   const btnX = W - 30 * scale;
   const btnY = 30 * scale;
-  const btnSize = 20 * scale;
+  const btnSize = 24 * scale;
   
   const isHovering = Math.hypot(lastMouseX - btnX, lastMouseY - btnY) < btnSize;
   
@@ -1067,7 +1067,7 @@ function drawMuteButton() {
 function drawJournalButton() {
   const btnX = W - 65 * scale;
   const btnY = 30 * scale;
-  const btnSize = 20 * scale;
+  const btnSize = 24 * scale;
   
   const isHovering = Math.hypot(lastMouseX - btnX, lastMouseY - btnY) < btnSize;
   
@@ -1139,7 +1139,7 @@ function drawJournal() {
     ctx.restore();
     
     // Day label
-    drawText(`Day ${entry.day}`, panelX + 20 * scale, entryY + 12 * scale, 9, '#999', 'left');
+    drawText(`Day ${entry.day}`, panelX + 20 * scale, entryY + 12 * scale, 11, '#999', 'left');
     
     // Entry text
     drawText(entry.text, panelX + 20 * scale, entryY + 24 * scale, 11, '#333', 'left');
