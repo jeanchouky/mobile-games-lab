@@ -31,45 +31,54 @@ const ctx = canvas.getContext('2d');
 let W, H, dpr, centerX, centerY;
 let gameTime = 0, deltaTime = 0, lastTime = 0;
 let gameState = 'menu';
-let playerWins = 0, playerLosses = 0;
 let inputEvents = [];
 let shakeAmount = 0;
 
-// Load progress
-try { const s = localStorage.getItem('emojiwars'); if (s) { const d = JSON.parse(s); playerWins = d.w||0; playerLosses = d.l||0; } } catch(e){}
-function saveProgress() { try { localStorage.setItem('emojiwars', JSON.stringify({w:playerWins,l:playerLosses})); } catch(e){} }
+// Progression
+let wave = 1;
+let maxWave = 1;
+let playerWins = 0, playerLosses = 0;
+let unlockedEmojis = new Set();
+try {
+  const s = localStorage.getItem('emojiwars2');
+  if (s) { const d = JSON.parse(s); playerWins = d.w||0; playerLosses = d.l||0; maxWave = d.mw||1; unlockedEmojis = new Set(d.u||[]); }
+} catch(e){}
+function saveProgress() {
+  try { localStorage.setItem('emojiwars2', JSON.stringify({w:playerWins,l:playerLosses,mw:maxWave,u:[...unlockedEmojis]})); } catch(e){}
+}
 
 // --- EMOJI DATABASE ---
 const emojiDB = {
-  '⚔️': { name: 'Sword', type: 'melee', hp: 120, atk: 15, def: 8, spd: 1.5, cost: 3, desc: 'Balanced fighter' },
-  '🗡️': { name: 'Dagger', type: 'melee', hp: 70, atk: 12, def: 3, spd: 2.5, cost: 2, desc: 'Fast & fragile' },
-  '🛡️': { name: 'Shield', type: 'melee', hp: 200, atk: 5, def: 25, spd: 0.8, cost: 3, desc: 'Tanky wall' },
-  '🦁': { name: 'Lion', type: 'melee', hp: 150, atk: 18, def: 10, spd: 2.0, cost: 4, desc: 'King of beasts' },
-  '🐺': { name: 'Wolf', type: 'melee', hp: 90, atk: 14, def: 6, spd: 2.2, cost: 2, desc: 'Pack bonus' },
-  '💀': { name: 'Reaper', type: 'melee', hp: 80, atk: 22, def: 3, spd: 1.2, cost: 3, desc: 'Glass cannon' },
-  '🏹': { name: 'Archer', type: 'ranged', hp: 60, atk: 13, def: 3, spd: 1.0, cost: 3, desc: 'Shoots from afar' },
-  '🎯': { name: 'Sniper', type: 'ranged', hp: 50, atk: 28, def: 2, spd: 0.6, cost: 4, desc: 'Critical hits' },
-  '💣': { name: 'Bomber', type: 'ranged', hp: 40, atk: 8, def: 2, spd: 1.0, cost: 3, desc: 'Explodes on death' },
-  '🦅': { name: 'Eagle', type: 'ranged', hp: 70, atk: 10, def: 6, spd: 2.5, cost: 2, desc: 'Flying attacker' },
-  '🧙': { name: 'Wizard', type: 'magic', hp: 80, atk: 20, def: 5, spd: 1.0, cost: 4, desc: 'Area damage' },
-  '⚡': { name: 'Lightning', type: 'magic', hp: 60, atk: 16, def: 3, spd: 3.0, cost: 3, desc: 'Chain strikes' },
-  '🔥': { name: 'Fire', type: 'magic', hp: 70, atk: 14, def: 5, spd: 1.5, cost: 3, desc: 'Burn damage' },
-  '❄️': { name: 'Ice', type: 'magic', hp: 90, atk: 8, def: 12, spd: 1.0, cost: 3, desc: 'Slows enemies' },
-  '🐉': { name: 'Dragon', type: 'creature', hp: 300, atk: 30, def: 20, spd: 1.2, cost: 7, desc: 'Legendary!' },
-  '🤖': { name: 'Robot', type: 'creature', hp: 180, atk: 15, def: 18, spd: 1.0, cost: 4, desc: 'Self-heals' },
-  '👻': { name: 'Ghost', type: 'creature', hp: 50, atk: 12, def: 2, spd: 2.5, cost: 2, desc: 'Dodges 50%' },
-  '🐍': { name: 'Snake', type: 'creature', hp: 80, atk: 16, def: 5, spd: 1.8, cost: 3, desc: 'Poison bite' },
-  '🌟': { name: 'Star', type: 'special', hp: 60, atk: 5, def: 5, spd: 1.5, cost: 2, desc: 'Buffs allies' },
-  '🌪️': { name: 'Tornado', type: 'special', hp: 40, atk: 20, def: 0, spd: 3.0, cost: 4, desc: 'Hits all lanes' },
+  '⚔️': { name: 'Sword', type: 'melee', hp: 120, atk: 15, def: 8, spd: 1.5, cost: 3, desc: 'Balanced fighter', unlock: 0 },
+  '🗡️': { name: 'Dagger', type: 'melee', hp: 70, atk: 12, def: 3, spd: 2.5, cost: 2, desc: 'Fast & fragile', unlock: 0 },
+  '🛡️': { name: 'Shield', type: 'melee', hp: 200, atk: 5, def: 25, spd: 0.8, cost: 3, desc: 'Tanky wall', unlock: 0 },
+  '🦁': { name: 'Lion', type: 'melee', hp: 150, atk: 18, def: 10, spd: 2.0, cost: 4, desc: 'King of beasts', unlock: 2 },
+  '🐺': { name: 'Wolf', type: 'melee', hp: 90, atk: 14, def: 6, spd: 2.2, cost: 2, desc: 'Pack hunter', unlock: 0 },
+  '💀': { name: 'Reaper', type: 'melee', hp: 80, atk: 22, def: 3, spd: 1.2, cost: 3, desc: 'Glass cannon', unlock: 3 },
+  '🏹': { name: 'Archer', type: 'ranged', hp: 60, atk: 13, def: 3, spd: 1.0, cost: 3, desc: 'Shoots from afar', unlock: 0 },
+  '🎯': { name: 'Sniper', type: 'ranged', hp: 50, atk: 28, def: 2, spd: 0.6, cost: 4, desc: 'Critical hits', unlock: 3 },
+  '💣': { name: 'Bomber', type: 'ranged', hp: 40, atk: 8, def: 2, spd: 1.0, cost: 3, desc: 'Explodes on death', unlock: 1 },
+  '🦅': { name: 'Eagle', type: 'ranged', hp: 70, atk: 10, def: 6, spd: 2.5, cost: 2, desc: 'Flying attacker', unlock: 1 },
+  '🧙': { name: 'Wizard', type: 'magic', hp: 80, atk: 20, def: 5, spd: 1.0, cost: 4, desc: 'Area damage', unlock: 2 },
+  '⚡': { name: 'Lightning', type: 'magic', hp: 60, atk: 16, def: 3, spd: 3.0, cost: 3, desc: 'Chain strikes', unlock: 1 },
+  '🔥': { name: 'Fire', type: 'magic', hp: 70, atk: 14, def: 5, spd: 1.5, cost: 3, desc: 'Burn damage', unlock: 0 },
+  '❄️': { name: 'Ice', type: 'magic', hp: 90, atk: 8, def: 12, spd: 1.0, cost: 3, desc: 'Slows enemies', unlock: 2 },
+  '🐉': { name: 'Dragon', type: 'creature', hp: 300, atk: 30, def: 20, spd: 1.2, cost: 7, desc: 'Legendary!', unlock: 5 },
+  '🤖': { name: 'Robot', type: 'creature', hp: 180, atk: 15, def: 18, spd: 1.0, cost: 4, desc: 'Self-heals', unlock: 4 },
+  '👻': { name: 'Ghost', type: 'creature', hp: 50, atk: 12, def: 2, spd: 2.5, cost: 2, desc: 'Dodges 50%', unlock: 2 },
+  '🐍': { name: 'Snake', type: 'creature', hp: 80, atk: 16, def: 5, spd: 1.8, cost: 3, desc: 'Poison bite', unlock: 3 },
+  '🌟': { name: 'Star', type: 'special', hp: 60, atk: 5, def: 5, spd: 1.5, cost: 2, desc: 'Buffs allies', unlock: 4 },
+  '🌪️': { name: 'Tornado', type: 'special', hp: 40, atk: 20, def: 0, spd: 3.0, cost: 4, desc: 'Hits all lanes', unlock: 5 },
 };
 
-const emojiCategories = {
-  melee: ['⚔️', '🗡️', '🛡️', '🦁', '🐺', '💀'],
-  ranged: ['🏹', '🎯', '💣', '🦅'],
-  magic: ['🧙', '⚡', '🔥', '❄️'],
-  creature: ['🐉', '🤖', '👻', '🐍'],
-  special: ['🌟', '🌪️']
-};
+const emojiList = Object.keys(emojiDB);
+const typeColors = { melee: '#ff6b6b', ranged: '#4ecdc4', magic: '#a29bfe', creature: '#fd79a8', special: '#fdcb6e' };
+const typeIcons = { melee: '⚔️', ranged: '🏹', magic: '✨', creature: '🐉', special: '⭐' };
+
+function isUnlocked(emoji) {
+  const d = emojiDB[emoji];
+  return d.unlock <= maxWave || unlockedEmojis.has(emoji);
+}
 
 // --- BATTLE STATE ---
 let playerArmy = [];
@@ -82,12 +91,21 @@ let playerHP = 100;
 let enemyHP = 100;
 let playerEnergy = 5;
 let enemyEnergy = 5;
-let energyRate = 1; // per second
+let energyRate = 1;
 let selectedCard = -1;
 let difficulty = 'medium';
-let selectedCategory = 'melee';
 let dragState = { active: false, emoji: null, x: 0, y: 0 };
 let combatFlashes = [];
+let playerHand = [];
+let enemyHand = [];
+let battleMessages = [];
+let killCount = 0;
+let killStreak = 0;
+let lastKillTime = 0;
+
+// Army builder state
+let builderScroll = 0;
+let selectedCategory = 'all';
 
 // --- AUDIO ---
 let audioCtx = null;
@@ -96,7 +114,7 @@ function ensureAudio() {
   if (audioCtx.state === 'suspended') audioCtx.resume();
 }
 
-function playTone(freq, dur, type = 'square', vol = 0.08) {
+function playTone(freq, dur, type = 'square', vol = 0.06) {
   if (!audioCtx) return;
   const o = audioCtx.createOscillator();
   const g = audioCtx.createGain();
@@ -107,14 +125,16 @@ function playTone(freq, dur, type = 'square', vol = 0.08) {
   o.start(); o.stop(audioCtx.currentTime + dur);
 }
 
-function sfxClick() { playTone(800, 0.05, 'sine', 0.06); }
-function sfxDeploy() { playTone(500, 0.08, 'square', 0.08); playTone(700, 0.06, 'sine', 0.05); }
-function sfxHit() { playTone(200 + Math.random()*200, 0.08, 'sawtooth', 0.05); }
-function sfxDeath() { playTone(150, 0.2, 'triangle', 0.06); playTone(80, 0.15, 'sawtooth', 0.04); }
-function sfxVictory() { [523,659,784,1047].forEach((f,i) => setTimeout(() => playTone(f, 0.2, 'sine', 0.1), i*120)); }
-function sfxDefeat() { playTone(400, 0.3, 'sawtooth', 0.08); setTimeout(() => playTone(200, 0.5, 'sawtooth', 0.06), 300); }
-function sfxExplosion() { playTone(80, 0.3, 'sawtooth', 0.12); playTone(150, 0.2, 'square', 0.06); }
-function sfxBuff() { playTone(1000, 0.1, 'sine', 0.06); playTone(1200, 0.1, 'sine', 0.04); }
+function sfxClick() { playTone(800, 0.05, 'sine', 0.05); }
+function sfxDeploy() { playTone(500, 0.08, 'square', 0.06); playTone(700, 0.06, 'sine', 0.04); }
+function sfxHit() { playTone(200 + Math.random()*200, 0.06, 'sawtooth', 0.04); }
+function sfxDeath() { playTone(150, 0.15, 'triangle', 0.05); playTone(80, 0.12, 'sawtooth', 0.03); }
+function sfxVictory() { [523,659,784,1047].forEach((f,i) => setTimeout(() => playTone(f, 0.15, 'sine', 0.08), i*120)); }
+function sfxDefeat() { playTone(400, 0.3, 'sawtooth', 0.06); setTimeout(() => playTone(200, 0.4, 'sawtooth', 0.05), 300); }
+function sfxExplosion() { playTone(80, 0.25, 'sawtooth', 0.1); playTone(150, 0.15, 'square', 0.05); }
+function sfxBuff() { playTone(1000, 0.08, 'sine', 0.05); playTone(1200, 0.06, 'sine', 0.03); }
+function sfxStreak() { playTone(660, 0.06, 'sine', 0.06); playTone(880, 0.08, 'sine', 0.05); }
+function sfxWave() { playTone(400, 0.1, 'triangle', 0.06); setTimeout(() => playTone(600, 0.15, 'triangle', 0.05), 150); }
 
 // --- RESIZE ---
 function resize() {
@@ -176,84 +196,137 @@ function drawEmoji(emoji, x, y, size) {
 function spawnP(x, y, emoji, vx = 0, vy = 0, size = 20) {
   particles.push({ x, y, emoji, vx, vy, life: 1, decay: 0.025, size });
 }
+function spawnDots(x, y, count, color) {
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const sp = 1 + Math.random() * 3;
+    particles.push({ x, y, emoji: null, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp, life: 1, decay: 0.03 + Math.random()*0.02, size: 2 + Math.random()*3, color });
+  }
+}
 function addFloat(x, y, text, color = '#fff', size = 16) {
   floatingTexts.push({ x, y, text, color, size, vy: -1.5, life: 1, decay: 0.02 });
+}
+function addBattleMsg(text, color = '#fff') {
+  battleMessages.push({ text, color, life: 2, y: centerY - 80 });
 }
 
 function updateParticles() {
   for (let i = particles.length - 1; i >= 0; i--) {
-    const p = particles[i]; p.x += p.vx; p.y += p.vy; p.vy += 0.2; p.life -= p.decay;
+    const p = particles[i]; p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life -= p.decay;
     if (p.life <= 0) particles.splice(i, 1);
   }
-  if (particles.length > 200) particles.splice(0, particles.length - 200);
+  if (particles.length > 300) particles.splice(0, particles.length - 300);
   for (let i = floatingTexts.length - 1; i >= 0; i--) {
     const f = floatingTexts[i]; f.y += f.vy; f.life -= f.decay;
     if (f.life <= 0) floatingTexts.splice(i, 1);
   }
+  for (let i = battleMessages.length - 1; i >= 0; i--) {
+    const m = battleMessages[i]; m.life -= deltaTime; m.y -= 0.3;
+    if (m.life <= 0) battleMessages.splice(i, 1);
+  }
 }
 function drawParticles() {
-  for (const p of particles) { ctx.save(); ctx.globalAlpha = p.life; drawEmoji(p.emoji, p.x, p.y, p.size); ctx.restore(); }
+  for (const p of particles) {
+    ctx.save(); ctx.globalAlpha = p.life;
+    if (p.emoji) { drawEmoji(p.emoji, p.x, p.y, p.size * p.life); }
+    else { ctx.fillStyle = p.color || '#fff'; ctx.beginPath(); ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI*2); ctx.fill(); }
+    ctx.restore();
+  }
   for (const f of floatingTexts) {
     ctx.save(); ctx.globalAlpha = f.life;
-    ctx.fillStyle = f.color; ctx.font = `bold ${f.size}px sans-serif`;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.shadowColor = f.color; ctx.shadowBlur = 4;
-    ctx.fillText(f.text, f.x, f.y); ctx.restore();
+    drawText(f.text, f.x, f.y, f.size, f.color, 'center', '700');
+    ctx.restore();
+  }
+  for (const m of battleMessages) {
+    ctx.save(); ctx.globalAlpha = Math.min(1, m.life);
+    ctx.shadowColor = m.color; ctx.shadowBlur = 8;
+    drawText(m.text, centerX, m.y, 22, m.color, 'center', '900');
+    ctx.restore();
   }
 }
 
-// --- SHAKE ---
 function shake(amt = 5) { shakeAmount = Math.max(shakeAmount, amt); }
 
 // ============================================================
 // MENU
 // ============================================================
 function drawMenu() {
+  // Animated gradient background
   const grad = ctx.createLinearGradient(0, 0, 0, H);
-  grad.addColorStop(0, '#2d1b69'); grad.addColorStop(1, '#1a0a3e');
+  grad.addColorStop(0, '#2d1b69'); grad.addColorStop(0.5, '#1a0a3e'); grad.addColorStop(1, '#0d0520');
   ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
   
-  // Animated emoji ring
-  const emojis = ['⚔️', '🏹', '🧙', '🐉', '💥', '⚡', '🔥', '🛡️', '🦁', '👻'];
-  for (let i = 0; i < emojis.length; i++) {
-    const a = (i / emojis.length) * Math.PI * 2 + gameTime * 0.5;
-    const r = Math.min(W, H) * 0.28;
+  // Floating battle emoji background
+  const bgEmojis = ['⚔️','🏹','🧙','🐉','💥','⚡','🔥','🛡️','🦁','👻','💣','🎯','❄️','🐍','🌟'];
+  for (let i = 0; i < bgEmojis.length; i++) {
+    const a = (i / bgEmojis.length) * Math.PI * 2 + gameTime * 0.4;
+    const r = Math.min(W, H) * 0.3;
     const x = centerX + Math.cos(a) * r;
-    const y = centerY - 50 + Math.sin(a) * r * 0.5;
-    ctx.save(); ctx.globalAlpha = 0.4 + Math.sin(gameTime * 2 + i) * 0.2;
-    drawEmoji(emojis[i], x, y, 36); ctx.restore();
+    const y = centerY - 30 + Math.sin(a) * r * 0.4;
+    ctx.save(); ctx.globalAlpha = 0.3 + Math.sin(gameTime * 2 + i) * 0.15;
+    drawEmoji(bgEmojis[i], x, y, 30 + Math.sin(gameTime + i) * 4);
+    ctx.restore();
   }
   
-  drawText('⚔️ EMOJI WARS ⚔️', centerX, centerY - 120, 42, '#ffd700', 'center', '900');
-  drawText('Build armies. Deploy tactics. Win!', centerX, centerY - 75, 15, '#b8a0d4');
+  // Title with shadow
+  ctx.save(); ctx.shadowColor = '#ff4444'; ctx.shadowBlur = 20;
+  drawText('EMOJI WARS', centerX, centerY - 130, 48, '#ffd700', 'center', '900');
+  ctx.restore();
+  drawText('⚔️', centerX - 130, centerY - 130, 40, '#fff');
+  drawText('⚔️', centerX + 130, centerY - 130, 40, '#fff');
+  
+  drawText('Build armies • Deploy tactics • Win!', centerX, centerY - 85, 15, '#b8a0d4');
+  
+  // Wave indicator
+  drawRR(centerX, centerY - 50, 200, 30, 12, 'rgba(255,255,255,0.08)');
+  drawText(`🏆 Wave ${maxWave} reached`, centerX, centerY - 50, 13, '#aaa');
   
   // Start button
-  drawRR(centerX, centerY + 10, 260, 65, 16, '#ff4444', '#ff6666');
-  drawText('⚔️ BUILD & BATTLE', centerX, centerY + 10, 22, '#fff', 'center', '800');
+  const pulse = Math.sin(gameTime * 4) * 4;
+  drawRR(centerX, centerY + 20, 280 + pulse, 65, 16, '#ff4444', '#ff6666');
+  drawText('⚔️ BATTLE!', centerX, centerY + 20, 24, '#fff', 'center', '800');
+  
+  // Wave selector
+  drawText(`Wave: ${wave}`, centerX, centerY + 85, 16, '#fff', 'center', '600');
+  if (wave > 1) {
+    drawRR(centerX - 80, centerY + 85, 40, 30, 8, '#333', '#555');
+    drawText('◀', centerX - 80, centerY + 85, 16, '#ccc');
+  }
+  if (wave < maxWave) {
+    drawRR(centerX + 80, centerY + 85, 40, 30, 8, '#333', '#555');
+    drawText('▶', centerX + 80, centerY + 85, 16, '#ccc');
+  }
   
   // Difficulty
-  drawText('Difficulty:', centerX, centerY + 70, 13, '#888');
   const diffs = ['easy', 'medium', 'hard'];
   const diffColors = { easy: '#4CAF50', medium: '#FF9800', hard: '#f44336' };
   const diffLabels = { easy: '😊 Easy', medium: '😤 Medium', hard: '💀 Hard' };
   diffs.forEach((d, i) => {
     const x = centerX + (i - 1) * 100;
-    drawRR(x, centerY + 110, 85, 40, 10, difficulty === d ? diffColors[d] : '#333', difficulty === d ? null : '#555');
-    drawText(diffLabels[d], x, centerY + 110, 13, difficulty === d ? '#fff' : '#888', 'center', '600');
+    drawRR(x, centerY + 135, 85, 36, 10, difficulty === d ? diffColors[d] : '#222', difficulty === d ? null : '#444');
+    drawText(diffLabels[d], x, centerY + 135, 12, difficulty === d ? '#fff' : '#777', 'center', '600');
   });
   
   // Record
   if (playerWins + playerLosses > 0) {
-    drawText(`🏆 ${playerWins}W - ${playerLosses}L`, centerX, H - 50, 16, '#888');
+    drawText(`Record: ${playerWins}W - ${playerLosses}L`, centerX, H - 40, 14, '#555');
   }
+  
+  drawText('v2.0', centerX, H - 18, 11, '#333');
 }
 
 function updateMenu() {
   for (const ev of inputEvents) {
     if (ev.type !== 'tap') continue;
-    if (hit(ev.x, ev.y, centerX, centerY + 10, 260, 65)) { sfxClick(); gameState = 'armyBuilder'; initArmyBuilder(); return; }
+    // Start
+    if (hit(ev.x, ev.y, centerX, centerY + 20, 280, 65)) { sfxClick(); gameState = 'armyBuilder'; initArmyBuilder(); return; }
+    // Wave selector
+    if (wave > 1 && hit(ev.x, ev.y, centerX - 80, centerY + 85, 40, 30)) { wave--; sfxClick(); }
+    if (wave < maxWave && hit(ev.x, ev.y, centerX + 80, centerY + 85, 40, 30)) { wave++; sfxClick(); }
+    // Difficulty
     ['easy','medium','hard'].forEach((d, i) => {
-      if (hit(ev.x, ev.y, centerX + (i-1)*100, centerY + 110, 85, 40)) { difficulty = d; sfxClick(); }
+      if (hit(ev.x, ev.y, centerX + (i-1)*100, centerY + 135, 85, 36)) { difficulty = d; sfxClick(); }
     });
   }
 }
@@ -262,44 +335,60 @@ function updateMenu() {
 // ARMY BUILDER
 // ============================================================
 function initArmyBuilder() {
-  if (playerArmy.length === 0) playerArmy = ['⚔️', '🏹', '🧙', '🛡️', '🐉', '⚔️', '🗡️', '🔥'];
-  selectedCategory = 'melee';
+  if (playerArmy.length === 0) playerArmy = ['⚔️', '🏹', '🔥', '🛡️', '⚔️', '🐺', '🗡️', '⚡'];
+  selectedCategory = 'all';
+}
+
+function getAvailableEmojis() {
+  if (selectedCategory === 'all') return emojiList.filter(e => isUnlocked(e));
+  return emojiList.filter(e => emojiDB[e].type === selectedCategory && isUnlocked(e));
 }
 
 function updateArmyBuilder() {
   for (const ev of inputEvents) {
     if (ev.type !== 'tap') continue;
     
+    // Back button
+    if (hit(ev.x, ev.y, 40, 22, 60, 30)) { sfxClick(); gameState = 'menu'; return; }
+    
     // Category tabs
-    const cats = Object.keys(emojiCategories);
+    const cats = ['all', 'melee', 'ranged', 'magic', 'creature', 'special'];
+    const tabW = W / cats.length;
     cats.forEach((cat, i) => {
-      const tabX = (i + 0.5) * (W / cats.length);
-      if (hit(ev.x, ev.y, tabX, 160, W/cats.length - 8, 40)) { selectedCategory = cat; sfxClick(); }
+      if (hit(ev.x, ev.y, i * tabW + tabW/2, 70, tabW - 4, 32)) { selectedCategory = cat; sfxClick(); }
     });
     
     // Emoji grid
-    const emojis = emojiCategories[selectedCategory];
-    const cols = Math.min(emojis.length, 4);
-    const cellW = Math.min(W / cols, 110);
-    const startX = centerX - (cols * cellW) / 2 + cellW / 2;
+    const emojis = getAvailableEmojis();
+    const cols = Math.min(4, Math.max(2, Math.floor(W / 100)));
+    const cellW = (W - 20) / cols;
+    const cellH = 90;
+    const startY = 105;
     emojis.forEach((emoji, i) => {
       const col = i % cols;
       const row = Math.floor(i / cols);
-      const x = startX + col * cellW;
-      const y = 230 + row * 100;
-      if (hit(ev.x, ev.y, x, y, cellW - 8, 90)) {
+      const x = 10 + col * cellW + cellW / 2;
+      const y = startY + row * cellH + cellH / 2;
+      if (y > H - 160) return; // Don't overlap bottom panel
+      if (hit(ev.x, ev.y, x, y, cellW - 8, cellH - 6)) {
         if (playerArmy.length < 8) { playerArmy.push(emoji); sfxDeploy(); }
       }
     });
     
     // Army slots (tap to remove)
-    const slotW = W / 8;
+    const slotW = (W - 20) / 8;
     playerArmy.forEach((_, i) => {
-      if (hit(ev.x, ev.y, i * slotW + slotW / 2, 65, slotW - 6, 80)) { playerArmy.splice(i, 1); sfxClick(); }
+      const x = 10 + i * slotW + slotW / 2;
+      if (hit(ev.x, ev.y, x, H - 110, slotW - 4, 65)) { playerArmy.splice(i, 1); sfxClick(); }
     });
     
     // Battle button
-    if (playerArmy.length > 0 && hit(ev.x, ev.y, centerX, H - 50, 280, 60)) { sfxClick(); gameState = 'battle'; initBattle(); }
+    if (playerArmy.length >= 3 && hit(ev.x, ev.y, centerX, H - 35, 280, 50)) {
+      sfxClick(); gameState = 'battle'; initBattle();
+    }
+    
+    // Clear button
+    if (hit(ev.x, ev.y, W - 45, 22, 70, 30)) { playerArmy = []; sfxClick(); }
   }
 }
 
@@ -308,58 +397,105 @@ function drawArmyBuilder() {
   grad.addColorStop(0, '#1a0a3e'); grad.addColorStop(1, '#0d0520');
   ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
   
-  drawText('BUILD YOUR ARMY', centerX, 22, 22, '#ffd700', 'center', '800');
-  
-  // Army slots
-  const slotW = W / 8;
-  for (let i = 0; i < 8; i++) {
-    const x = i * slotW + slotW / 2;
-    drawRR(x, 65, slotW - 6, 80, 8, 'rgba(255,255,255,0.05)', playerArmy[i] ? '#4FC3F7' : '#333');
-    if (playerArmy[i]) {
-      drawEmoji(playerArmy[i], x, 55, 28);
-      const d = emojiDB[playerArmy[i]];
-      drawText(`${d.cost}⚡`, x, 90, 9, '#ffd700', 'center', '600');
-    }
-  }
-  drawText(`${playerArmy.length}/8 units`, centerX, 115, 12, '#888');
+  // Header
+  drawRR(40, 22, 60, 30, 8, '#333', '#555');
+  drawText('← Back', 40, 22, 11, '#ccc');
+  drawText('BUILD YOUR ARMY', centerX, 22, 18, '#ffd700', 'center', '800');
+  drawRR(W - 45, 22, 70, 30, 8, '#333', '#555');
+  drawText('Clear', W - 45, 22, 11, '#ccc');
   
   // Category tabs
-  const cats = Object.keys(emojiCategories);
-  const tabColors = { melee: '#ff6b6b', ranged: '#4ecdc4', magic: '#a29bfe', creature: '#fd79a8', special: '#fdcb6e' };
-  const tabIcons = { melee: '⚔️', ranged: '🏹', magic: '✨', creature: '🐉', special: '⭐' };
+  const cats = ['all', 'melee', 'ranged', 'magic', 'creature', 'special'];
+  const catLabels = { all: '📋 All', melee: '⚔️ Melee', ranged: '🏹 Range', magic: '✨ Magic', creature: '🐉 Beast', special: '⭐ Spec' };
+  const tabW = W / cats.length;
   cats.forEach((cat, i) => {
-    const tabX = (i + 0.5) * (W / cats.length);
+    const x = i * tabW + tabW/2;
     const active = selectedCategory === cat;
-    drawRR(tabX, 160, W/cats.length - 8, 40, 8, active ? tabColors[cat] : '#222', active ? null : '#444');
-    drawText(`${tabIcons[cat]} ${cat.charAt(0).toUpperCase() + cat.slice(1)}`, tabX, 160, 11, active ? '#fff' : '#888', 'center', '600');
+    drawRR(x, 70, tabW - 4, 32, 6, active ? (typeColors[cat] || '#555') : '#181818', active ? null : '#333');
+    drawText(catLabels[cat], x, 70, 10, active ? '#fff' : '#777', 'center', '600');
   });
   
-  // Emoji grid with stats
-  const emojis = emojiCategories[selectedCategory];
-  const cols = Math.min(emojis.length, 4);
-  const cellW = Math.min(W / cols, 110);
-  const startX = centerX - (cols * cellW) / 2 + cellW / 2;
+  // Emoji grid
+  const emojis = getAvailableEmojis();
+  const cols = Math.min(4, Math.max(2, Math.floor(W / 100)));
+  const cellW = (W - 20) / cols;
+  const cellH = 90;
+  const startY = 105;
+  
   emojis.forEach((emoji, i) => {
-    const col = i % cols; const row = Math.floor(i / cols);
-    const x = startX + col * cellW; const y = 230 + row * 100;
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = 10 + col * cellW + cellW / 2;
+    const y = startY + row * cellH + cellH / 2;
+    if (y > H - 170) return;
+    
     const d = emojiDB[emoji];
-    drawRR(x, y, cellW - 8, 90, 10, '#1a1a2e', tabColors[d.type]);
-    drawEmoji(emoji, x, y - 15, 30);
-    drawText(d.name, x, y + 15, 10, '#ccc', 'center', '600');
-    drawText(`⚔${d.atk} 🛡${d.def} ⚡${d.cost}`, x, y + 30, 8, '#888', 'center');
+    const inArmy = playerArmy.filter(e => e === emoji).length;
+    
+    drawRR(x, y, cellW - 8, cellH - 6, 10, inArmy > 0 ? '#1a2a3e' : '#111', typeColors[d.type] || '#555', inArmy > 0 ? 2 : 1);
+    drawEmoji(emoji, x, y - 16, 28);
+    drawText(d.name, x, y + 10, 10, '#ccc', 'center', '600');
+    
+    // Stats bar
+    const barY = y + 24;
+    drawText(`⚔${d.atk}`, x - 22, barY, 8, '#f88', 'center');
+    drawText(`🛡${d.def}`, x, barY, 8, '#88f', 'center');
+    drawText(`${d.cost}⚡`, x + 22, barY, 8, '#fd4', 'center');
+    
+    // Count in army
+    if (inArmy > 0) {
+      drawRR(x + cellW/2 - 14, y - cellH/2 + 10, 18, 18, 9, typeColors[d.type]);
+      drawText(`${inArmy}`, x + cellW/2 - 14, y - cellH/2 + 10, 10, '#fff', 'center', '700');
+    }
   });
   
-  // Type advantages
-  drawText('⚔️ beats 🏹 • 🏹 beats ✨ • ✨ beats ⚔️', centerX, H - 100, 11, '#666');
+  // Locked emojis preview
+  const locked = emojiList.filter(e => !isUnlocked(e));
+  if (locked.length > 0 && emojis.length < 8) {
+    const lockedRow = Math.ceil(emojis.length / cols);
+    const ly = startY + lockedRow * cellH + 20;
+    if (ly < H - 170) {
+      drawText(`🔒 ${locked.length} units unlock at higher waves`, centerX, ly, 11, '#555');
+    }
+  }
+  
+  // Bottom panel - army slots
+  const panelY = H - 145;
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, panelY, W, 145);
+  
+  drawText(`Army: ${playerArmy.length}/8`, centerX, panelY + 10, 12, '#aaa');
+  
+  const slotW = (W - 20) / 8;
+  for (let i = 0; i < 8; i++) {
+    const x = 10 + i * slotW + slotW / 2;
+    const y = panelY + 45;
+    const emoji = playerArmy[i];
+    
+    drawRR(x, y, slotW - 4, 55, 8, emoji ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)', emoji ? '#4FC3F7' : '#333');
+    if (emoji) {
+      drawEmoji(emoji, x, y - 6, 24);
+      drawText(`${emojiDB[emoji].cost}⚡`, x, y + 18, 8, '#fd4', 'center', '600');
+    } else {
+      drawText('+', x, y, 18, '#333');
+    }
+  }
+  
+  // Total cost
+  const totalCost = playerArmy.reduce((s, e) => s + emojiDB[e].cost, 0);
+  drawText(`Total cost: ${totalCost}⚡`, centerX, panelY + 82, 11, '#888');
+  
+  // Type advantage reminder
+  drawText('⚔️→🏹→✨→⚔️  (type beats type)', centerX, panelY + 96, 10, '#555');
   
   // Battle button
-  if (playerArmy.length > 0) {
+  if (playerArmy.length >= 3) {
     const pulse = Math.sin(gameTime * 5) * 3;
-    drawRR(centerX, H - 50, 280 + pulse, 60, 16, '#44ff44', '#2d2');
-    drawText('⚔️ BATTLE!', centerX, H - 50, 24, '#000', 'center', '800');
+    drawRR(centerX, H - 35, 280 + pulse, 50, 14, '#44ff44', '#2d2');
+    drawText(`⚔️ WAVE ${wave} BATTLE!`, centerX, H - 35, 18, '#000', 'center', '800');
   } else {
-    drawRR(centerX, H - 50, 280, 60, 16, '#333');
-    drawText('Add units to battle', centerX, H - 50, 16, '#666');
+    drawRR(centerX, H - 35, 280, 50, 14, '#222');
+    drawText('Add at least 3 units', centerX, H - 35, 14, '#555');
   }
 }
 
@@ -371,33 +507,29 @@ function initBattle() {
   battleTimer = 90;
   playerHP = 100; enemyHP = 100;
   playerEnergy = 5; enemyEnergy = 5;
-  units = []; particles = []; floatingTexts = []; combatFlashes = [];
+  units = []; particles = []; floatingTexts = []; combatFlashes = []; battleMessages = [];
   selectedCard = -1;
-  
-  // Build hand from army
+  killCount = 0; killStreak = 0; lastKillTime = 0;
   playerHand = [...playerArmy];
   enemyHand = [...enemyArmy];
 }
 
-let playerHand = [];
-let enemyHand = [];
-
 function generateEnemyArmy() {
-  const all = Object.keys(emojiDB);
+  const available = emojiList.filter(e => emojiDB[e].unlock <= wave);
   const army = [];
-  const budget = difficulty === 'easy' ? 18 : difficulty === 'hard' ? 28 : 24;
+  const budget = (difficulty === 'easy' ? 16 : difficulty === 'hard' ? 28 : 22) + wave * 2;
   let spent = 0;
   
   while (army.length < 8 && spent < budget) {
-    let pool = all;
-    if (difficulty === 'easy') pool = all.filter(e => emojiDB[e].cost <= 3);
+    let pool = available;
     if (difficulty === 'hard') {
-      // Counter player types
+      // Smart counter-picking
       const types = {};
       playerArmy.forEach(e => { const t = emojiDB[e].type; types[t] = (types[t]||0)+1; });
       const dom = Object.keys(types).sort((a,b) => types[b]-types[a])[0];
       const counter = { melee: 'magic', ranged: 'melee', magic: 'ranged' }[dom] || 'creature';
-      if (Math.random() < 0.6) pool = all.filter(e => emojiDB[e].type === counter);
+      if (Math.random() < 0.5) pool = available.filter(e => emojiDB[e].type === counter);
+      if (pool.length === 0) pool = available;
     }
     const e = pool[Math.floor(Math.random() * pool.length)];
     if (spent + emojiDB[e].cost <= budget) { army.push(e); spent += emojiDB[e].cost; }
@@ -420,51 +552,66 @@ function deployUnit(emoji, lane, owner) {
   
   const laneW = (W * 0.8) / 3;
   const laneX = W * 0.1 + lane * laneW + laneW / 2;
-  const battleTop = 90; const battleBot = H - 130;
-  const y = owner === 'player' ? battleBot - 20 : battleTop + 20;
+  const battleTop = 80; const battleBot = H - 140;
+  const y = owner === 'player' ? battleBot - 15 : battleTop + 15;
+  
+  // Wave scaling for enemies
+  const waveMult = owner === 'enemy' ? 1 + (wave - 1) * 0.12 : 1;
   
   units.push({
     emoji, owner, lane, x: laneX, y,
-    hp: d.hp, maxHp: d.hp,
+    hp: Math.floor(d.hp * waveMult), maxHp: Math.floor(d.hp * waveMult),
     combatTimer: 0, hitFlash: 0,
-    poisoned: false, slowed: false, buffed: false
+    poisoned: false, slowed: false, buffed: false,
+    spawnTime: gameTime
   });
   
   sfxDeploy();
-  spawnP(laneX, y, emoji, 0, owner === 'player' ? -2 : 2, 24);
-  addFloat(laneX, y - 20, `-${d.cost}⚡`, '#ffd700', 14);
+  spawnP(laneX, y, emoji, 0, owner === 'player' ? -2 : 2, 22);
+  addFloat(laneX, y - 20, `-${d.cost}⚡`, '#ffd700', 12);
   return true;
 }
 
 function updateBattle() {
   battleTimer -= deltaTime;
   
-  // Energy regen
-  const rate = energyRate * (1 + (90 - battleTimer) * 0.005); // Accelerates over time
+  const rate = energyRate * (1 + (90 - battleTimer) * 0.005);
   playerEnergy = Math.min(10, playerEnergy + rate * deltaTime);
   enemyEnergy = Math.min(10, enemyEnergy + rate * deltaTime);
   
-  // End conditions
   if (battleTimer <= 0 || playerHP <= 0 || enemyHP <= 0) {
     const won = playerHP > enemyHP;
+    if (won) {
+      playerWins++;
+      if (wave >= maxWave) { maxWave = wave + 1; }
+      // Unlock check
+      const newUnlocks = emojiList.filter(e => emojiDB[e].unlock === wave && !unlockedEmojis.has(e));
+      newUnlocks.forEach(e => unlockedEmojis.add(e));
+      sfxVictory();
+    } else {
+      playerLosses++;
+      sfxDefeat();
+    }
     gameState = won ? 'victory' : 'defeat';
-    if (won) { playerWins++; sfxVictory(); } else { playerLosses++; sfxDefeat(); }
     saveProgress();
     return;
   }
   
   // AI deployment
-  const aiRate = difficulty === 'easy' ? 0.008 : difficulty === 'hard' ? 0.025 : 0.015;
+  const aiRate = difficulty === 'easy' ? 0.007 : difficulty === 'hard' ? 0.02 : 0.012;
   if (enemyHand.length > 0 && Math.random() < aiRate) {
     const affordable = enemyHand.filter(e => emojiDB[e].cost <= enemyEnergy);
     if (affordable.length > 0) {
       const emoji = affordable[Math.floor(Math.random() * affordable.length)];
-      const lane = Math.floor(Math.random() * 3);
-      deployUnit(emoji, lane, 'enemy');
+      // Smart lane choice: deploy where there are fewer friendly units
+      const laneCounts = [0,0,0];
+      units.filter(u => u.owner === 'enemy').forEach(u => laneCounts[u.lane]++);
+      const minLane = laneCounts.indexOf(Math.min(...laneCounts));
+      deployUnit(emoji, minLane, 'enemy');
     }
   }
   
-  const battleTop = 90; const battleBot = H - 130;
+  const battleTop = 80; const battleBot = H - 140;
   
   // Update units
   for (let i = units.length - 1; i >= 0; i--) {
@@ -472,62 +619,60 @@ function updateBattle() {
     const d = emojiDB[u.emoji];
     const spdMod = u.slowed ? 0.5 : (u.buffed ? 1.3 : 1);
     
-    // Self-heal (Robot)
     if (u.emoji === '🤖' && u.hp < u.maxHp) u.hp = Math.min(u.maxHp, u.hp + 3 * deltaTime);
-    
-    // Poison damage
     if (u.poisoned) { u.hp -= 5 * deltaTime; u.poisoned = Math.max(0, u.poisoned - deltaTime); if (u.poisoned <= 0) u.poisoned = false; }
-    
     u.hitFlash = Math.max(0, u.hitFlash - deltaTime * 5);
     
-    // Find nearest enemy in lane
     let nearestEnemy = null; let nearestDist = Infinity;
     for (const u2 of units) {
       if (u2.owner === u.owner) continue;
-      if (u.emoji === '🌪️' || u2.emoji === '🌪️' || u.lane === u2.lane) { // Tornado hits any lane
+      if (u.emoji === '🌪️' || u2.emoji === '🌪️' || u.lane === u2.lane) {
         const dist = Math.abs(u.y - u2.y);
         if (dist < nearestDist) { nearestDist = dist; nearestEnemy = u2; }
       }
     }
     
-    // Combat range check
-    const range = d.type === 'ranged' ? 120 : (d.type === 'magic' ? 80 : 40);
+    const range = d.type === 'ranged' ? 140 : (d.type === 'magic' ? 100 : 45);
     
     if (nearestEnemy && nearestDist < range) {
-      // Fight!
       u.combatTimer += deltaTime;
       if (u.combatTimer >= 1 / d.spd) {
         u.combatTimer = 0;
         
-        // Calculate damage
         const ed = emojiDB[nearestEnemy.emoji];
         let dmg = d.atk;
         
         // Type advantage
+        let typeAdv = false;
         if ((d.type === 'melee' && ed.type === 'ranged') ||
             (d.type === 'ranged' && ed.type === 'magic') ||
-            (d.type === 'magic' && ed.type === 'melee')) { dmg *= 1.5; }
+            (d.type === 'magic' && ed.type === 'melee')) { dmg *= 1.5; typeAdv = true; }
         else if ((ed.type === 'melee' && d.type === 'ranged') ||
                  (ed.type === 'ranged' && d.type === 'magic') ||
                  (ed.type === 'magic' && d.type === 'melee')) { dmg *= 0.7; }
         
-        // Defense reduction
         dmg = Math.max(1, dmg - ed.def * 0.3);
         
         // Ghost dodge
         if (nearestEnemy.emoji === '👻' && Math.random() < 0.5) {
-          addFloat(nearestEnemy.x, nearestEnemy.y - 20, 'DODGE!', '#aaa', 12);
+          addFloat(nearestEnemy.x, nearestEnemy.y - 20, 'DODGE', '#aaa', 10);
           dmg = 0;
         }
         
         // Sniper crit
-        if (u.emoji === '🎯' && Math.random() < 0.3) { dmg *= 2; addFloat(u.x, u.y - 15, 'CRIT!', '#ff4444', 14); }
+        if (u.emoji === '🎯' && Math.random() < 0.3) { dmg *= 2; addFloat(u.x, u.y - 15, 'CRIT!', '#ff4444', 12); }
+        
+        // Wolf pack bonus
+        if (u.emoji === '🐺') {
+          const packSize = units.filter(u2 => u2.owner === u.owner && u2.emoji === '🐺' && u2 !== u).length;
+          dmg *= 1 + packSize * 0.2;
+        }
         
         // Star buff
         if (u.emoji === '🌟') {
           units.filter(u2 => u2.owner === u.owner && u2.lane === u.lane && u2 !== u).forEach(ally => {
             ally.buffed = true;
-            if (Math.random() < 0.1) { ally.hp = Math.min(ally.maxHp, ally.hp + 5); addFloat(ally.x, ally.y - 10, '+5', '#4CAF50', 10); }
+            if (Math.random() < 0.1) { ally.hp = Math.min(ally.maxHp, ally.hp + 5); addFloat(ally.x, ally.y - 10, '+5', '#4CAF50', 9); sfxBuff(); }
           });
         }
         
@@ -536,20 +681,25 @@ function updateBattle() {
           nearestEnemy.hitFlash = 1;
           sfxHit();
           
-          // Poison (Snake)
           if (u.emoji === '🐍') nearestEnemy.poisoned = 3;
-          // Slow (Ice)
           if (u.emoji === '❄️') nearestEnemy.slowed = true;
-          // Burn (Fire)
           if (u.emoji === '🔥') nearestEnemy.poisoned = Math.max(nearestEnemy.poisoned || 0, 2);
           
-          addFloat(nearestEnemy.x + (Math.random()-0.5)*20, nearestEnemy.y - 15, `-${Math.floor(dmg)}`, '#ff4444', 12);
-          combatFlashes.push({ x: nearestEnemy.x, y: nearestEnemy.y, life: 0.3 });
+          const dmgStr = Math.floor(dmg);
+          addFloat(nearestEnemy.x + (Math.random()-0.5)*16, nearestEnemy.y - 15, 
+            typeAdv ? `${dmgStr}!` : `${dmgStr}`, typeAdv ? '#ff8' : '#ff4444', typeAdv ? 13 : 11);
+          
+          spawnDots(nearestEnemy.x, nearestEnemy.y, 3, typeColors[d.type] || '#fff');
+          combatFlashes.push({ x: (u.x + nearestEnemy.x)/2, y: (u.y + nearestEnemy.y)/2, life: 0.2 });
+          
+          // Ranged projectile trail
+          if (d.type === 'ranged' || d.type === 'magic') {
+            spawnDots(u.x, u.y, 2, typeColors[d.type]);
+          }
         }
       }
     } else {
-      // March forward
-      const speed = d.spd * spdMod * deltaTime * 35;
+      const speed = d.spd * spdMod * deltaTime * 40;
       u.y += u.owner === 'player' ? -speed : speed;
     }
     
@@ -557,18 +707,18 @@ function updateBattle() {
     if (u.owner === 'player' && u.y < battleTop) {
       const dmg = Math.max(3, d.atk * 0.5);
       enemyHP -= dmg;
-      addFloat(centerX, battleTop, `-${Math.floor(dmg)}HP`, '#ff4444', 16);
+      addFloat(centerX, battleTop + 10, `-${Math.floor(dmg)}%`, '#ff4444', 14);
       shake(6);
-      spawnP(u.x, u.y, '💥', 0, -2);
+      spawnDots(u.x, u.y, 8, '#f44');
       sfxHit();
       units.splice(i, 1); continue;
     }
     if (u.owner === 'enemy' && u.y > battleBot) {
       const dmg = Math.max(3, d.atk * 0.5);
       playerHP -= dmg;
-      addFloat(centerX, battleBot, `-${Math.floor(dmg)}HP`, '#ff4444', 16);
+      addFloat(centerX, battleBot - 10, `-${Math.floor(dmg)}%`, '#ff4444', 14);
       shake(6);
-      spawnP(u.x, u.y, '💥', 0, 2);
+      spawnDots(u.x, u.y, 8, '#f44');
       sfxHit();
       units.splice(i, 1); continue;
     }
@@ -576,24 +726,33 @@ function updateBattle() {
     // Death
     if (u.hp <= 0) {
       sfxDeath();
-      spawnP(u.x, u.y, u.emoji, (Math.random()-0.5)*3, -4, 24);
-      spawnP(u.x, u.y, '💀', 0, -2, 16);
+      spawnP(u.x, u.y, u.emoji, (Math.random()-0.5)*3, -4, 22);
+      spawnP(u.x, u.y, '💥', 0, -1, 14);
+      spawnDots(u.x, u.y, 6, typeColors[d.type] || '#fff');
+      
+      // Kill tracking
+      if (u.owner === 'enemy') {
+        killCount++;
+        if (gameTime - lastKillTime < 2) { killStreak++; } else { killStreak = 1; }
+        lastKillTime = gameTime;
+        if (killStreak >= 3) { addBattleMsg(`🔥 ${killStreak}x STREAK!`, '#ff8800'); sfxStreak(); }
+      }
       
       // Bomber explosion
       if (u.emoji === '💣') {
-        sfxExplosion(); shake(8);
-        units.filter(u2 => u2.owner !== u.owner && Math.abs(u2.x - u.x) < 80 && Math.abs(u2.y - u.y) < 80).forEach(u2 => {
-          u2.hp -= 30;
-          addFloat(u2.x, u2.y - 10, '-30', '#ff8800', 14);
+        sfxExplosion(); shake(10);
+        units.filter(u2 => u2.owner !== u.owner && Math.abs(u2.x - u.x) < 90 && Math.abs(u2.y - u.y) < 90).forEach(u2 => {
+          u2.hp -= 35; u2.hitFlash = 1;
+          addFloat(u2.x, u2.y - 10, '-35', '#ff8800', 12);
         });
-        for (let k = 0; k < 8; k++) spawnP(u.x, u.y, '💥', (Math.random()-0.5)*5, (Math.random()-0.5)*5, 20);
+        for (let k = 0; k < 12; k++) spawnP(u.x, u.y, '💥', (Math.random()-0.5)*6, (Math.random()-0.5)*6, 16);
+        spawnDots(u.x, u.y, 15, '#ff8800');
       }
       
       units.splice(i, 1);
     }
   }
   
-  // Update combat flashes
   for (let i = combatFlashes.length - 1; i >= 0; i--) {
     combatFlashes[i].life -= deltaTime;
     if (combatFlashes[i].life <= 0) combatFlashes.splice(i, 1);
@@ -605,15 +764,14 @@ function updateBattle() {
   // Player input
   for (const ev of inputEvents) {
     if (ev.type === 'tap') {
-      // Tap a card
-      const cardY = H - 65;
+      const cardY = H - 70;
       const cardCount = playerHand.length;
       if (cardCount > 0) {
-        const cardW = Math.min(90, (W - 20) / cardCount);
-        const startX2 = centerX - (cardCount * cardW) / 2;
+        const cardW = Math.min(80, (W - 20) / cardCount);
+        const startX = centerX - (cardCount * cardW) / 2;
         for (let i = 0; i < cardCount; i++) {
-          const cx = startX2 + i * cardW + cardW / 2;
-          if (hit(ev.x, ev.y, cx, cardY, cardW - 4, 85)) {
+          const cx = startX + i * cardW + cardW / 2;
+          if (hit(ev.x, ev.y, cx, cardY, cardW - 4, 80)) {
             selectedCard = i;
             dragState.emoji = playerHand[i];
             sfxClick();
@@ -622,10 +780,11 @@ function updateBattle() {
       }
     }
     if (ev.type === 'release' && dragState.emoji) {
-      const battleTop2 = 90; const battleBot2 = H - 130;
+      const battleTop2 = 80; const battleBot2 = H - 140;
       if (ev.y >= battleTop2 && ev.y <= battleBot2) {
-        const lane = Math.min(2, Math.floor((ev.x - W * 0.1) / ((W * 0.8) / 3)));
-        if (lane >= 0 && lane <= 2) deployUnit(dragState.emoji, lane, 'player');
+        const laneW = (W * 0.8) / 3;
+        const lane = Math.min(2, Math.max(0, Math.floor((ev.x - W * 0.1) / laneW)));
+        deployUnit(dragState.emoji, lane, 'player');
       }
       dragState.emoji = null; selectedCard = -1;
     }
@@ -633,7 +792,7 @@ function updateBattle() {
 }
 
 function drawBattle() {
-  // Background
+  // Background with subtle animation
   const grad = ctx.createLinearGradient(0, 0, 0, H);
   grad.addColorStop(0, '#1a0a3e'); grad.addColorStop(1, '#0d0520');
   ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
@@ -641,41 +800,56 @@ function drawBattle() {
   ctx.save();
   if (shakeAmount > 0.5) ctx.translate((Math.random()-0.5)*shakeAmount, (Math.random()-0.5)*shakeAmount);
   
-  const battleTop = 90; const battleBot = H - 130;
+  const battleTop = 80; const battleBot = H - 140;
   
-  // Timer
+  // Timer + wave
   const secs = Math.max(0, Math.ceil(battleTimer));
   const timerColor = secs <= 15 ? '#ff4444' : '#fff';
-  drawRR(centerX, 20, 80, 32, 10, '#222');
-  drawText(`⏱ ${secs}s`, centerX, 20, 16, timerColor, 'center', '700');
+  drawRR(centerX, 18, 100, 28, 10, '#111', '#333');
+  drawText(`⏱ ${secs}s • W${wave}`, centerX, 18, 13, timerColor, 'center', '700');
   
   // Enemy HP bar
   const ehpRatio = Math.max(0, enemyHP / 100);
-  drawRR(centerX, 55, W - 40, 28, 8, '#333');
-  ctx.fillStyle = '#ff4444';
-  ctx.beginPath(); ctx.roundRect(21, 55 - 14, (W - 42) * ehpRatio, 28, 8); ctx.fill();
-  drawText(`🏰 ${Math.max(0, Math.floor(enemyHP))}%`, centerX, 55, 14, '#fff', 'center', '700');
+  drawRR(centerX, 48, W - 30, 24, 8, '#222');
+  if (ehpRatio > 0) {
+    ctx.fillStyle = '#ff4444';
+    ctx.beginPath(); ctx.roundRect(16, 48 - 12, (W - 32) * ehpRatio, 24, 8); ctx.fill();
+  }
+  drawText(`🏰 ${Math.max(0, Math.floor(enemyHP))}%`, centerX, 48, 12, '#fff', 'center', '700');
   
-  // Battlefield lanes
+  // Battlefield
   const laneW = (W * 0.8) / 3;
   for (let i = 0; i < 3; i++) {
     const lx = W * 0.1 + i * laneW;
-    ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.02)';
+    // Lane gradient
+    const lg = ctx.createLinearGradient(lx, battleTop, lx, battleBot);
+    lg.addColorStop(0, 'rgba(255,50,50,0.06)');
+    lg.addColorStop(0.5, 'rgba(255,255,255,0.02)');
+    lg.addColorStop(1, 'rgba(50,255,50,0.06)');
+    ctx.fillStyle = lg;
     ctx.fillRect(lx, battleTop, laneW, battleBot - battleTop);
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1;
+    
+    // Lane borders
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1;
     ctx.strokeRect(lx, battleTop, laneW, battleBot - battleTop);
+    
+    // Center line
+    ctx.save(); ctx.globalAlpha = 0.1;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath(); ctx.moveTo(lx, (battleTop + battleBot)/2); ctx.lineTo(lx + laneW, (battleTop + battleBot)/2);
+    ctx.strokeStyle = '#fff'; ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
   }
-  
-  // Lane labels
-  drawText('Lane 1', W * 0.1 + laneW * 0.5, battleTop + 12, 9, 'rgba(255,255,255,0.2)');
-  drawText('Lane 2', W * 0.1 + laneW * 1.5, battleTop + 12, 9, 'rgba(255,255,255,0.2)');
-  drawText('Lane 3', W * 0.1 + laneW * 2.5, battleTop + 12, 9, 'rgba(255,255,255,0.2)');
   
   // Combat flashes
   for (const f of combatFlashes) {
-    ctx.save(); ctx.globalAlpha = f.life * 0.6;
-    ctx.fillStyle = '#fff';
-    ctx.beginPath(); ctx.arc(f.x, f.y, 15, 0, Math.PI * 2); ctx.fill();
+    ctx.save(); ctx.globalAlpha = f.life * 0.5;
+    const grad2 = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, 20);
+    grad2.addColorStop(0, '#fff');
+    grad2.addColorStop(1, 'transparent');
+    ctx.fillStyle = grad2;
+    ctx.fillRect(f.x - 20, f.y - 20, 40, 40);
     ctx.restore();
   }
   
@@ -684,27 +858,40 @@ function drawBattle() {
     const d = emojiDB[u.emoji];
     ctx.save();
     
-    // Hit flash
-    if (u.hitFlash > 0) { ctx.globalAlpha = 0.5 + u.hitFlash * 0.5; }
+    // Spawn animation
+    const age = gameTime - u.spawnTime;
+    if (age < 0.3) {
+      const scale = 0.5 + age / 0.3 * 0.5;
+      ctx.translate(u.x, u.y);
+      ctx.scale(scale, scale);
+      ctx.translate(-u.x, -u.y);
+    }
     
-    // Status effects
+    // Hit flash
+    if (u.hitFlash > 0) {
+      ctx.globalAlpha = 0.5 + u.hitFlash * 0.5;
+      ctx.shadowColor = '#fff';
+      ctx.shadowBlur = u.hitFlash * 10;
+    }
+    
+    // Status effects glow
     if (u.poisoned) { ctx.shadowColor = '#44ff44'; ctx.shadowBlur = 8; }
     if (u.slowed) { ctx.shadowColor = '#44aaff'; ctx.shadowBlur = 8; }
     if (u.buffed) { ctx.shadowColor = '#ffd700'; ctx.shadowBlur = 8; }
     
-    drawEmoji(u.emoji, u.x, u.y, 28);
+    drawEmoji(u.emoji, u.x, u.y, 26);
     ctx.restore();
     
     // HP bar
     const hpRatio = u.hp / u.maxHp;
-    const barW = 26;
-    ctx.fillStyle = '#333'; ctx.fillRect(u.x - barW/2, u.y - 20, barW, 3);
+    const barW = 24;
+    ctx.fillStyle = '#222'; ctx.fillRect(u.x - barW/2, u.y - 18, barW, 3);
     ctx.fillStyle = hpRatio > 0.6 ? '#4CAF50' : hpRatio > 0.3 ? '#FF9800' : '#f44336';
-    ctx.fillRect(u.x - barW/2, u.y - 20, barW * hpRatio, 3);
+    ctx.fillRect(u.x - barW/2, u.y - 18, barW * hpRatio, 3);
     
-    // Owner indicator
-    ctx.fillStyle = u.owner === 'player' ? 'rgba(68,255,68,0.4)' : 'rgba(255,68,68,0.4)';
-    ctx.beginPath(); ctx.arc(u.x, u.y + 16, 3, 0, Math.PI * 2); ctx.fill();
+    // Owner dot
+    ctx.fillStyle = u.owner === 'player' ? 'rgba(68,255,68,0.5)' : 'rgba(255,68,68,0.5)';
+    ctx.beginPath(); ctx.arc(u.x, u.y + 15, 2.5, 0, Math.PI * 2); ctx.fill();
   }
   
   drawParticles();
@@ -712,53 +899,58 @@ function drawBattle() {
   
   // Player HP bar
   const phpRatio = Math.max(0, playerHP / 100);
-  drawRR(centerX, battleBot + 22, W - 40, 28, 8, '#333');
-  ctx.fillStyle = '#4CAF50';
-  ctx.beginPath(); ctx.roundRect(21, battleBot + 22 - 14, (W - 42) * phpRatio, 28, 8); ctx.fill();
-  drawText(`🛡️ ${Math.max(0, Math.floor(playerHP))}%`, centerX, battleBot + 22, 14, '#fff', 'center', '700');
+  const phpY = battleBot + 15;
+  drawRR(centerX, phpY, W - 30, 24, 8, '#222');
+  if (phpRatio > 0) {
+    ctx.fillStyle = '#4CAF50';
+    ctx.beginPath(); ctx.roundRect(16, phpY - 12, (W - 32) * phpRatio, 24, 8); ctx.fill();
+  }
+  drawText(`🛡️ ${Math.max(0, Math.floor(playerHP))}%`, centerX, phpY, 12, '#fff', 'center', '700');
   
-  // Energy bar
-  const energyY = battleBot + 48;
-  drawText(`⚡ ${Math.floor(playerEnergy)}/10`, 40, energyY, 12, '#ffd700', 'left', '700');
-  ctx.fillStyle = '#333'; ctx.fillRect(90, energyY - 5, W - 110, 10);
-  ctx.fillStyle = '#ffd700'; ctx.fillRect(90, energyY - 5, (W - 110) * (playerEnergy / 10), 10);
+  // Energy
+  const ey = phpY + 18;
+  drawText(`⚡ ${Math.floor(playerEnergy)}`, 20, ey, 11, '#ffd700', 'left', '700');
+  ctx.fillStyle = '#222'; ctx.fillRect(60, ey - 4, W - 80, 8);
+  ctx.fillStyle = '#ffd700'; ctx.fillRect(60, ey - 4, (W - 80) * (playerEnergy / 10), 8);
+  
+  // Kill tracker
+  if (killCount > 0) {
+    drawText(`💀 ${killCount}`, W - 20, ey, 11, '#888', 'right');
+  }
   
   // Player hand
-  const cardY = H - 65;
+  const cardY = H - 70;
   const cardCount = playerHand.length;
   if (cardCount > 0) {
-    const cardW = Math.min(90, (W - 20) / cardCount);
-    const startX2 = centerX - (cardCount * cardW) / 2;
+    const cardW = Math.min(80, (W - 20) / cardCount);
+    const startX = centerX - (cardCount * cardW) / 2;
     for (let i = 0; i < cardCount; i++) {
-      const cx = startX2 + i * cardW + cardW / 2;
+      const cx = startX + i * cardW + cardW / 2;
       const emoji = playerHand[i];
       const d = emojiDB[emoji];
       const affordable = playerEnergy >= d.cost;
       const selected = selectedCard === i;
       
       ctx.save();
-      if (!affordable) ctx.globalAlpha = 0.4;
-      drawRR(cx, cardY, cardW - 4, 85, 8, selected ? '#334' : '#1a1a2e', affordable ? '#4FC3F7' : '#333');
-      drawEmoji(emoji, cx, cardY - 12, 26);
-      drawText(`${d.cost}⚡`, cx, cardY + 18, 10, affordable ? '#ffd700' : '#666', 'center', '700');
-      drawText(d.name, cx, cardY + 32, 8, '#888');
+      if (!affordable) ctx.globalAlpha = 0.35;
+      drawRR(cx, cardY, cardW - 4, 75, 8, selected ? '#223' : '#111', affordable ? typeColors[d.type] : '#333', affordable ? 2 : 1);
+      drawEmoji(emoji, cx, cardY - 12, 24);
+      drawText(`${d.cost}⚡`, cx, cardY + 14, 9, affordable ? '#ffd700' : '#555', 'center', '700');
+      drawText(d.name, cx, cardY + 28, 7, '#888');
       ctx.restore();
     }
   } else {
-    drawText('No units left!', centerX, cardY, 14, '#666');
+    drawText('No units left!', centerX, cardY, 13, '#555');
   }
   
   // Drag preview
   if (dragState.emoji && dragState.active) {
     ctx.save(); ctx.globalAlpha = 0.7;
     drawEmoji(dragState.emoji, dragState.x, dragState.y, 40);
-    // Lane highlight
     if (dragState.y >= battleTop && dragState.y <= battleBot) {
-      const lane = Math.min(2, Math.floor((dragState.x - W * 0.1) / laneW));
-      if (lane >= 0) {
-        ctx.fillStyle = 'rgba(68,255,68,0.15)';
-        ctx.fillRect(W * 0.1 + lane * laneW, battleTop, laneW, battleBot - battleTop);
-      }
+      const lane = Math.min(2, Math.max(0, Math.floor((dragState.x - W * 0.1) / laneW)));
+      ctx.fillStyle = 'rgba(68,255,68,0.12)';
+      ctx.fillRect(W * 0.1 + lane * laneW, battleTop, laneW, battleBot - battleTop);
     }
     ctx.restore();
   }
@@ -770,46 +962,90 @@ function drawBattle() {
 function drawVictoryDefeat() {
   const won = gameState === 'victory';
   const grad = ctx.createLinearGradient(0, 0, 0, H);
-  grad.addColorStop(0, won ? '#2d1b69' : '#3e0a0a'); grad.addColorStop(1, won ? '#1a0a3e' : '#1a0505');
+  grad.addColorStop(0, won ? '#1a2a1a' : '#3e0a0a'); grad.addColorStop(1, won ? '#0a1a0a' : '#1a0505');
   ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
   
-  // Confetti for victory
   if (won) {
-    for (let i = 0; i < 15; i++) {
-      const x = (W * (i / 15) + gameTime * 40) % W;
-      const y = (gameTime * 60 + i * 70) % H;
-      ctx.save(); ctx.globalAlpha = 0.5;
-      drawEmoji(['🎉','✨','⭐','👑','🏆'][i%5], x, y, 20); ctx.restore();
+    for (let i = 0; i < 20; i++) {
+      const x = (W * (i / 20) + gameTime * 50) % W;
+      const y = (gameTime * 70 + i * 60) % H;
+      ctx.save(); ctx.globalAlpha = 0.4;
+      drawEmoji(['🎉','✨','⭐','👑','🏆'][i%5], x, y, 18); ctx.restore();
     }
   }
   
-  drawText(won ? '👑 VICTORY! 👑' : '💀 DEFEAT 💀', centerX, 100, 40, won ? '#ffd700' : '#ff4444', 'center', '900');
+  // Title
+  drawText(won ? '👑 VICTORY! 👑' : '💀 DEFEAT 💀', centerX, 80, 38, won ? '#ffd700' : '#ff4444', 'center', '900');
   
-  drawRR(centerX, centerY, W - 60, 180, 16, 'rgba(255,255,255,0.08)');
+  // Stats card
+  drawRR(centerX, centerY - 10, W - 50, 200, 16, 'rgba(255,255,255,0.06)', '#333');
   
-  const hp = Math.max(0, Math.floor(playerHP));
-  const ehp = Math.max(0, Math.floor(enemyHP));
-  drawText(`🛡️ Your HP: ${hp}%`, centerX, centerY - 50, 18, '#4CAF50', 'center', '600');
-  drawText(`🏰 Enemy HP: ${ehp}%`, centerX, centerY - 20, 18, '#ff4444', 'center', '600');
-  drawText(`⏱️ Time: ${Math.floor(90 - battleTimer)}s`, centerX, centerY + 10, 16, '#888');
-  drawText(`🏆 Record: ${playerWins}W - ${playerLosses}L`, centerX, centerY + 40, 16, '#888');
+  drawText(`Wave ${wave}`, centerX, centerY - 70, 16, '#aaa');
+  drawText(`🛡️ Your HP: ${Math.max(0, Math.floor(playerHP))}%`, centerX, centerY - 40, 16, '#4CAF50', 'center', '600');
+  drawText(`🏰 Enemy HP: ${Math.max(0, Math.floor(enemyHP))}%`, centerX, centerY - 15, 16, '#ff4444', 'center', '600');
+  drawText(`💀 Kills: ${killCount}`, centerX, centerY + 10, 14, '#888');
+  drawText(`⏱️ Time: ${Math.floor(90 - battleTimer)}s`, centerX, centerY + 32, 14, '#888');
   
-  // Your army vs theirs
-  drawText('You: ' + playerArmy.join(''), centerX, centerY + 75, 14, '#aaa');
-  drawText('vs: ' + enemyArmy.join(''), centerX, centerY + 95, 14, '#aaa');
+  // Armies
+  drawText('You: ' + playerArmy.join(' '), centerX, centerY + 60, 12, '#aaa');
+  drawText('vs: ' + enemyArmy.join(' '), centerX, centerY + 78, 12, '#aaa');
   
-  drawRR(centerX, H - 120, 260, 55, 14, '#4CAF50');
-  drawText('⚔️ BATTLE AGAIN', centerX, H - 120, 20, '#fff', 'center', '700');
+  // Unlock notification
+  if (won) {
+    const newUnlocks = emojiList.filter(e => emojiDB[e].unlock === wave);
+    if (newUnlocks.length > 0) {
+      drawRR(centerX, centerY + 115, W - 60, 40, 10, '#224', '#4af');
+      drawText(`🔓 Unlocked: ${newUnlocks.map(e => `${e} ${emojiDB[e].name}`).join(', ')}`, centerX, centerY + 115, 12, '#4af');
+    }
+    
+    drawText(`🏆 Next: Wave ${wave + 1}`, centerX, centerY + 145, 13, '#888');
+  }
   
-  drawRR(centerX, H - 55, 200, 45, 12, '#333', '#555');
-  drawText('🏠 Menu', centerX, H - 55, 16, '#ccc', 'center', '600');
+  // Buttons
+  const btnY1 = H - 110;
+  const btnY2 = H - 50;
+  
+  if (won) {
+    drawRR(centerX, btnY1, 260, 50, 14, '#4CAF50');
+    drawText(`⚔️ WAVE ${wave + 1}`, centerX, btnY1, 18, '#fff', 'center', '700');
+  }
+  
+  drawRR(centerX, won ? btnY2 : btnY1, 200, 42, 12, '#333', '#555');
+  drawText('🔄 Rebuild Army', centerX, won ? btnY2 : btnY1, 14, '#ccc', 'center', '600');
+  
+  if (!won) {
+    drawRR(centerX, btnY2, 200, 42, 12, '#222', '#444');
+    drawText('🏠 Menu', centerX, btnY2, 14, '#888', 'center', '600');
+  }
 }
 
 function updateVictoryDefeat() {
+  const won = gameState === 'victory';
   for (const ev of inputEvents) {
     if (ev.type !== 'tap') continue;
-    if (hit(ev.x, ev.y, centerX, H - 120, 260, 55)) { sfxClick(); gameState = 'armyBuilder'; initArmyBuilder(); return; }
-    if (hit(ev.x, ev.y, centerX, H - 55, 200, 45)) { sfxClick(); gameState = 'menu'; return; }
+    const btnY1 = H - 110;
+    const btnY2 = H - 50;
+    
+    if (won && hit(ev.x, ev.y, centerX, btnY1, 260, 50)) {
+      wave++;
+      sfxWave();
+      gameState = 'armyBuilder';
+      initArmyBuilder();
+      return;
+    }
+    
+    if (hit(ev.x, ev.y, centerX, won ? btnY2 : btnY1, 200, 42)) {
+      sfxClick();
+      gameState = 'armyBuilder';
+      initArmyBuilder();
+      return;
+    }
+    
+    if (!won && hit(ev.x, ev.y, centerX, btnY2, 200, 42)) {
+      sfxClick();
+      gameState = 'menu';
+      return;
+    }
   }
 }
 
