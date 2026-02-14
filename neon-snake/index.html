@@ -9,17 +9,21 @@
 html,body{width:100%;height:100%;overflow:hidden;background:#0a0a1a;font-family:-apple-system,system-ui,sans-serif;touch-action:none;user-select:none}
 canvas{display:block;position:absolute;top:0;left:0}
 #ui{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10}
-#score{position:absolute;top:16px;left:16px;color:#0ff;font-size:1.2rem;font-weight:900;text-shadow:0 0 10px #0ff}
+#score{position:absolute;top:16px;left:16px;color:#0ff;font-size:1.4rem;font-weight:900;text-shadow:0 0 10px #0ff;transition:transform 0.1s}
+#score.bump{transform:scale(1.3)}
 #highscore{position:absolute;top:16px;right:16px;color:#f0f;font-size:0.9rem;font-weight:700;text-shadow:0 0 8px #f0f}
 #powerup-indicator{position:absolute;top:48px;left:16px;color:#ff0;font-size:0.8rem;font-weight:600}
+#pause-hint{position:absolute;bottom:16px;right:16px;color:rgba(255,255,255,0.2);font-size:0.7rem}
 .overlay{position:absolute;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(10,10,26,0.92);pointer-events:auto;z-index:20}
 .overlay h1{font-size:clamp(2rem,8vw,4rem);font-weight:900;background:linear-gradient(135deg,#0ff,#f0f,#ff0);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:8px}
 .overlay h2{color:#fff;font-size:1.2rem;margin-bottom:24px;font-weight:400}
 .overlay .sub{color:#888;font-size:0.85rem;margin-bottom:16px}
 .overlay .final-score{color:#0ff;font-size:2.5rem;font-weight:900;margin:8px 0;text-shadow:0 0 20px #0ff}
-.btn{pointer-events:auto;background:linear-gradient(135deg,#0ff,#f0f);border:none;color:#000;font-weight:900;font-size:1.1rem;padding:14px 40px;border-radius:50px;cursor:pointer;margin:8px;text-transform:uppercase;letter-spacing:2px}
+.overlay .score-breakdown{color:#aaa;font-size:0.8rem;margin:4px 0}
+.btn{pointer-events:auto;background:linear-gradient(135deg,#0ff,#f0f);border:none;color:#000;font-weight:900;font-size:1.1rem;padding:14px 40px;border-radius:50px;cursor:pointer;margin:8px;text-transform:uppercase;letter-spacing:2px;transition:transform 0.15s,box-shadow 0.15s}
+.btn:hover{box-shadow:0 0 30px rgba(0,255,255,0.3)}
 .btn:active{transform:scale(0.95)}
-.controls-hint{color:#666;font-size:0.75rem;margin-top:20px}
+.controls-hint{color:#666;font-size:0.75rem;margin-top:20px;line-height:1.6}
 .hidden{display:none!important}
 </style>
 </head>
@@ -29,18 +33,26 @@ canvas{display:block;position:absolute;top:0;left:0}
   <div id="score">0</div>
   <div id="highscore"></div>
   <div id="powerup-indicator"></div>
+  <div id="pause-hint">Space to pause</div>
 </div>
 
 <div class="overlay" id="menu">
   <h1>NEON SNAKE</h1>
   <h2>Slither through the void</h2>
   <button class="btn" onclick="startGame()">PLAY</button>
-  <div class="controls-hint">Swipe to move • Collect food • Avoid walls & yourself</div>
+  <div class="controls-hint">Arrow keys / WASD to move • Swipe on mobile<br>Collect food • Avoid walls & yourself<br>Space to pause</div>
+</div>
+
+<div class="overlay hidden" id="paused">
+  <h2>PAUSED</h2>
+  <button class="btn" onclick="resumeGame()">RESUME</button>
+  <button class="btn" onclick="showMenu()" style="background:rgba(255,255,255,0.1);color:#fff">QUIT</button>
 </div>
 
 <div class="overlay hidden" id="gameover">
   <h2>GAME OVER</h2>
   <div class="final-score" id="final-score">0</div>
+  <div class="score-breakdown" id="go-breakdown"></div>
   <div class="sub" id="go-highscore"></div>
   <button class="btn" onclick="startGame()">RETRY</button>
   <button class="btn" onclick="showMenu()" style="background:rgba(255,255,255,0.1);color:#fff">MENU</button>
@@ -49,12 +61,15 @@ canvas{display:block;position:absolute;top:0;left:0}
 <script>
 const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
 const scoreEl=document.getElementById('score'),hsEl=document.getElementById('highscore'),puEl=document.getElementById('powerup-indicator');
-const menuEl=document.getElementById('menu'),goEl=document.getElementById('gameover');
+const menuEl=document.getElementById('menu'),goEl=document.getElementById('gameover'),pauseEl=document.getElementById('paused');
 
 let W,H,CELL,COLS,ROWS;
-let snake,dir,nextDir,food,particles,score,highScore,gameLoop,speed,powerups,activeEffects,foodTypes;
+let snake,dir,nextDir,food,particles,score,highScore,gameLoop,speed,activeEffects;
 let shakeX=0,shakeY=0,shakeT=0;
+let paused=false,gameActive=false;
+let foodEaten=0,powerupsCollected=0,maxLength=3;
 let audioCtx;
+let bgPulse=0; // background pulse on eat
 
 function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)()}
 function playTone(f,d=0.1,t='sine',v=0.15){
@@ -64,9 +79,18 @@ function playTone(f,d=0.1,t='sine',v=0.15){
   g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);
   o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+d);
 }
-function playEat(){playTone(880,0.15,'square',0.1);setTimeout(()=>playTone(1100,0.1,'square',0.08),60)}
-function playDie(){playTone(200,0.4,'sawtooth',0.2);setTimeout(()=>playTone(100,0.5,'sawtooth',0.15),150)}
+function playEat(){
+  const base=440+Math.min(foodEaten*15,400);
+  playTone(base,0.12,'square',0.08);
+  setTimeout(()=>playTone(base*1.25,0.1,'square',0.06),50);
+}
+function playDie(){
+  playTone(200,0.4,'sawtooth',0.2);
+  setTimeout(()=>playTone(100,0.5,'sawtooth',0.15),150);
+  setTimeout(()=>playTone(60,0.6,'sawtooth',0.1),350);
+}
 function playPowerup(){playTone(660,0.1,'sine',0.12);setTimeout(()=>playTone(880,0.1,'sine',0.12),80);setTimeout(()=>playTone(1100,0.15,'sine',0.12),160)}
+function playMilestone(){playTone(523,0.12,'sine',0.1);setTimeout(()=>playTone(659,0.1,'sine',0.1),80);setTimeout(()=>playTone(784,0.1,'sine',0.1),160);setTimeout(()=>playTone(1047,0.2,'sine',0.12),240)}
 
 function resize(){
   W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight;
@@ -76,7 +100,7 @@ function resize(){
 window.addEventListener('resize',resize);resize();
 
 highScore=parseInt(localStorage.getItem('neonsnake_hs'))||0;
-hsEl.textContent='BEST: '+highScore;
+hsEl.textContent=highScore?'BEST: '+highScore:'';
 
 const FOOD_TYPES=[
   {color:'#0f0',glow:'#0f0',points:1,grow:1,name:'apple',emoji:'●'},
@@ -91,15 +115,14 @@ function spawnFood(){
   let x,y,attempts=0;
   do{x=Math.floor(Math.random()*COLS);y=Math.floor(Math.random()*ROWS);attempts++}
   while(snake.some(s=>s.x===x&&s.y===y)&&attempts<100);
-  // Higher chance of special food as score increases
   let typeIdx=0;
   const r=Math.random();
-  if(score>30&&r<0.08)typeIdx=5; // magnet
-  else if(score>20&&r<0.15)typeIdx=4; // ghost
-  else if(score>15&&r<0.22)typeIdx=3; // speed
-  else if(score>10&&r<0.3)typeIdx=2; // diamond
-  else if(score>5&&r<0.45)typeIdx=1; // star
-  food={x,y,...FOOD_TYPES[typeIdx],pulse:0};
+  if(score>30&&r<0.08)typeIdx=5;
+  else if(score>20&&r<0.15)typeIdx=4;
+  else if(score>15&&r<0.22)typeIdx=3;
+  else if(score>10&&r<0.3)typeIdx=2;
+  else if(score>5&&r<0.45)typeIdx=1;
+  food={x,y,...FOOD_TYPES[typeIdx],pulse:0,spawnTime:Date.now()};
 }
 
 function addParticles(x,y,color,count=12){
@@ -109,93 +132,117 @@ function addParticles(x,y,color,count=12){
   }
 }
 
-function shake(intensity=4){shakeT=8;shakeX=(Math.random()-0.5)*intensity;shakeY=(Math.random()-0.5)*intensity}
+function addScorePopup(x,y,text,color){
+  particles.push({x:x*CELL+CELL/2,y:y*CELL+CELL/2,vx:0,vy:-1.5,life:1,color,size:0,text});
+}
+
+function shake(intensity=4){shakeT=10;shakeX=(Math.random()-0.5)*intensity;shakeY=(Math.random()-0.5)*intensity}
 
 function startGame(){
   initAudio();
-  menuEl.classList.add('hidden');goEl.classList.add('hidden');
+  menuEl.classList.add('hidden');goEl.classList.add('hidden');pauseEl.classList.add('hidden');
   resize();
   const cx=Math.floor(COLS/2),cy=Math.floor(ROWS/2);
   snake=[{x:cx,y:cy},{x:cx-1,y:cy},{x:cx-2,y:cy}];
   dir={x:1,y:0};nextDir={x:1,y:0};
   score=0;speed=120;particles=[];activeEffects={};
+  foodEaten=0;powerupsCollected=0;maxLength=3;
+  paused=false;gameActive=true;
   scoreEl.textContent='0';
   spawnFood();
   if(gameLoop)clearInterval(gameLoop);
   gameLoop=setInterval(tick,speed);
 }
 
-function showMenu(){goEl.classList.add('hidden');menuEl.classList.remove('hidden')}
+function showMenu(){
+  if(gameLoop){clearInterval(gameLoop);gameLoop=null}
+  gameActive=false;paused=false;
+  goEl.classList.add('hidden');pauseEl.classList.add('hidden');
+  menuEl.classList.remove('hidden');
+}
+
+function pauseGame(){
+  if(!gameActive||!gameLoop)return;
+  paused=true;clearInterval(gameLoop);gameLoop=null;
+  pauseEl.classList.remove('hidden');
+}
+function resumeGame(){
+  if(!gameActive)return;
+  paused=false;pauseEl.classList.add('hidden');
+  gameLoop=setInterval(tick,speed);
+}
 
 function tick(){
   dir={...nextDir};
   const head={x:snake[0].x+dir.x,y:snake[0].y+dir.y};
   
-  // Wall collision (wrap in ghost mode)
   if(activeEffects.ghost){
     head.x=(head.x+COLS)%COLS;head.y=(head.y+ROWS)%ROWS;
   }else if(head.x<0||head.x>=COLS||head.y<0||head.y>=ROWS){
     die();return;
   }
   
-  // Self collision (skip in ghost mode)
   if(!activeEffects.ghost&&snake.some(s=>s.x===head.x&&s.y===head.y)){
     die();return;
   }
   
   snake.unshift(head);
   
-  // Magnet: attract food
   if(activeEffects.magnet&&food){
     const dx=head.x-food.x,dy=head.y-food.y;
-    if(Math.abs(dx)<=3&&Math.abs(dy)<=3){
+    if(Math.abs(dx)<=4&&Math.abs(dy)<=4){
       food.x+=Math.sign(dx);food.y+=Math.sign(dy);
     }
   }
   
-  // Eat food
   if(food&&head.x===food.x&&head.y===food.y){
-    score+=food.points;scoreEl.textContent=score;
+    score+=food.points;foodEaten++;
+    scoreEl.textContent=score;
+    scoreEl.classList.add('bump');setTimeout(()=>scoreEl.classList.remove('bump'),100);
     addParticles(food.x,food.y,food.color,20);
-    shake(3);playEat();
+    addScorePopup(food.x,food.y,'+'+food.points,food.color);
+    shake(3);playEat();bgPulse=1;
     for(let i=1;i<food.grow;i++)snake.push({...snake[snake.length-1]});
+    maxLength=Math.max(maxLength,snake.length);
     if(food.powerup){
-      activeEffects[food.powerup]=300;// ~5 seconds at 60fps... actually ticks
+      activeEffects[food.powerup]=40;// 40 ticks
+      powerupsCollected++;
       playPowerup();
     }
-    // Speed up
-    if(score%10===0&&speed>60){
-      speed-=5;clearInterval(gameLoop);gameLoop=setInterval(tick,speed);
+    // Milestone sounds
+    if(score%25===0&&score>0)playMilestone();
+    // Gradual speed up (smoother curve)
+    if(foodEaten%5===0&&speed>55){
+      speed-=3;clearInterval(gameLoop);gameLoop=setInterval(tick,speed);
     }
     spawnFood();
   }else{
     snake.pop();
   }
   
-  // Decay active effects
   for(const k in activeEffects){
     activeEffects[k]--;
     if(activeEffects[k]<=0)delete activeEffects[k];
   }
   
-  // Trail particles
-  addParticles(head.x,head.y,activeEffects.ghost?'rgba(0,255,255,0.3)':activeEffects.speed?'#f80':'#0ff',2);
+  // Fewer trail particles for performance
+  if(Math.random()<0.5)addParticles(head.x,head.y,activeEffects.ghost?'rgba(0,255,255,0.3)':activeEffects.speed?'#f80':'#0ff',1);
 }
 
 function die(){
-  clearInterval(gameLoop);gameLoop=null;
-  playDie();shake(8);
-  // Explode snake
-  snake.forEach(s=>addParticles(s.x,s.y,'#f00',5));
+  clearInterval(gameLoop);gameLoop=null;gameActive=false;
+  playDie();shake(10);
+  snake.forEach((s,i)=>setTimeout(()=>addParticles(s.x,s.y,'#f00',4),i*20));
   if(score>highScore){highScore=score;localStorage.setItem('neonsnake_hs',highScore);hsEl.textContent='BEST: '+highScore}
   setTimeout(()=>{
     document.getElementById('final-score').textContent=score;
-    document.getElementById('go-highscore').textContent=score>=highScore?'🎉 NEW HIGH SCORE!':'Best: '+highScore;
+    document.getElementById('go-breakdown').textContent=`🍎 ${foodEaten} eaten • 🐍 Length ${maxLength} • ⚡ ${powerupsCollected} powerups`;
+    document.getElementById('go-highscore').textContent=score>0&&score>=highScore?'🎉 NEW HIGH SCORE!':'Best: '+highScore;
     goEl.classList.remove('hidden');
   },800);
 }
 
-// Controls - swipe
+// Controls
 let touchStart=null;
 document.addEventListener('touchstart',e=>{e.preventDefault();touchStart={x:e.touches[0].clientX,y:e.touches[0].clientY}},{passive:false});
 document.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
@@ -212,36 +259,55 @@ document.addEventListener('touchend',e=>{
   }
   touchStart=null;
 });
-// Keyboard
+
 document.addEventListener('keydown',e=>{
-  if(!gameLoop)return;
-  if(e.key==='ArrowUp'&&dir.y!==1)nextDir={x:0,y:-1};
-  if(e.key==='ArrowDown'&&dir.y!==(-1))nextDir={x:0,y:1};
-  if(e.key==='ArrowLeft'&&dir.x!==1)nextDir={x:-1,y:0};
-  if(e.key==='ArrowRight'&&dir.x!==(-1))nextDir={x:1,y:0};
+  if(e.key===' '||e.key==='Escape'){
+    e.preventDefault();
+    if(paused)resumeGame();
+    else if(gameActive&&gameLoop)pauseGame();
+    return;
+  }
+  if(!gameLoop||paused)return;
+  const k=e.key.toLowerCase();
+  if((k==='arrowup'||k==='w')&&dir.y!==1)nextDir={x:0,y:-1};
+  if((k==='arrowdown'||k==='s')&&dir.y!==(-1))nextDir={x:0,y:1};
+  if((k==='arrowleft'||k==='a')&&dir.x!==1)nextDir={x:-1,y:0};
+  if((k==='arrowright'||k==='d')&&dir.x!==(-1))nextDir={x:1,y:0};
 });
 
-// Render loop
+// Render
 function draw(){
   requestAnimationFrame(draw);
   ctx.save();
-  if(shakeT>0){ctx.translate(shakeX,shakeY);shakeT--;shakeX*=0.8;shakeY*=0.8}
+  if(shakeT>0){ctx.translate(shakeX,shakeY);shakeT--;shakeX*=0.85;shakeY*=0.85}
   
-  // Clear with trail effect
-  ctx.fillStyle='rgba(10,10,26,0.3)';ctx.fillRect(0,0,W,H);
+  // Clear with trail + bg pulse
+  const bgAlpha=0.25+bgPulse*0.15;
+  bgPulse*=0.92;
+  ctx.fillStyle=`rgba(10,10,26,${bgAlpha})`;ctx.fillRect(0,0,W,H);
   
-  // Grid (subtle)
-  ctx.strokeStyle='rgba(255,255,255,0.02)';ctx.lineWidth=0.5;
+  // Subtle grid
+  ctx.strokeStyle='rgba(255,255,255,0.015)';ctx.lineWidth=0.5;
   for(let x=0;x<COLS;x++){ctx.beginPath();ctx.moveTo(x*CELL,0);ctx.lineTo(x*CELL,H);ctx.stroke()}
   for(let y=0;y<ROWS;y++){ctx.beginPath();ctx.moveTo(0,y*CELL);ctx.lineTo(W,y*CELL);ctx.stroke()}
   
+  // Wall danger glow when snake is near edge (no ghost)
+  if(snake&&!activeEffects.ghost){
+    const h=snake[0];
+    if(h.x<=1||h.x>=COLS-2||h.y<=1||h.y>=ROWS-2){
+      ctx.fillStyle='rgba(233,69,96,0.03)';ctx.fillRect(0,0,W,H);
+    }
+  }
+  
   // Food
   if(food){
-    food.pulse=(food.pulse+0.05)%( Math.PI*2);
+    food.pulse=(food.pulse+0.06)%(Math.PI*2);
     const s=1+Math.sin(food.pulse)*0.2;
     const fx=food.x*CELL+CELL/2,fy=food.y*CELL+CELL/2;
-    ctx.save();ctx.translate(fx,fy);ctx.scale(s,s);
-    ctx.shadowBlur=20;ctx.shadowColor=food.glow;
+    // Food glow ring
+    const age=Math.min(1,(Date.now()-food.spawnTime)/300);
+    ctx.save();ctx.translate(fx,fy);ctx.scale(s*age,s*age);
+    ctx.shadowBlur=25;ctx.shadowColor=food.glow;
     ctx.fillStyle=food.color;
     ctx.beginPath();ctx.arc(0,0,CELL/2.5,0,Math.PI*2);ctx.fill();
     ctx.shadowBlur=0;
@@ -255,19 +321,22 @@ function draw(){
     snake.forEach((s,i)=>{
       const t=i/snake.length;
       const alpha=activeEffects.ghost?0.4:1;
-      let hue=180+t*120; // cyan to purple gradient
-      if(activeEffects.speed)hue=30+t*30; // orange
+      let hue=180+t*120;
+      if(activeEffects.speed)hue=30+t*30;
+      if(activeEffects.magnet)hue=60+t*40;
       ctx.fillStyle=`hsla(${hue},100%,60%,${alpha})`;
-      ctx.shadowBlur=i===0?15:8;
+      ctx.shadowBlur=i===0?18:8;
       ctx.shadowColor=`hsla(${hue},100%,60%,0.8)`;
       const pad=i===0?1:2;
       const r=i===0?CELL/3:CELL/4;
+      // Smooth body wiggle
+      const wiggle=Math.sin(Date.now()*0.008+i*0.5)*0.5;
       ctx.beginPath();
-      ctx.roundRect(s.x*CELL+pad,s.y*CELL+pad,CELL-pad*2,CELL-pad*2,r);
+      ctx.roundRect(s.x*CELL+pad+wiggle,s.y*CELL+pad,CELL-pad*2,CELL-pad*2,r);
       ctx.fill();
       ctx.shadowBlur=0;
     });
-    // Eyes on head
+    // Eyes
     if(snake.length>0){
       const h=snake[0];
       ctx.fillStyle='#fff';
@@ -275,23 +344,32 @@ function draw(){
       const ed=CELL*0.15;
       ctx.beginPath();ctx.arc(ex+dir.x*ed-dir.y*ed*0.6,ey+dir.y*ed-dir.x*ed*0.6,2.5,0,Math.PI*2);ctx.fill();
       ctx.beginPath();ctx.arc(ex+dir.x*ed+dir.y*ed*0.6,ey+dir.y*ed+dir.x*ed*0.6,2.5,0,Math.PI*2);ctx.fill();
+      // Pupils
+      ctx.fillStyle='#000';
+      ctx.beginPath();ctx.arc(ex+dir.x*ed*1.3-dir.y*ed*0.6,ey+dir.y*ed*1.3-dir.x*ed*0.6,1.2,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(ex+dir.x*ed*1.3+dir.y*ed*0.6,ey+dir.y*ed*1.3+dir.x*ed*0.6,1.2,0,Math.PI*2);ctx.fill();
     }
   }
   
-  // Particles
+  // Particles + score popups
   for(let i=particles.length-1;i>=0;i--){
     const p=particles[i];
-    p.x+=p.vx;p.y+=p.vy;p.vx*=0.96;p.vy*=0.96;p.life-=0.03;
+    p.x+=p.vx;p.y+=p.vy;p.vx*=0.96;p.vy*=0.96;p.life-=0.025;
     if(p.life<=0){particles.splice(i,1);continue}
     ctx.globalAlpha=p.life;
-    ctx.fillStyle=p.color;
-    ctx.shadowBlur=6;ctx.shadowColor=p.color;
-    ctx.beginPath();ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);ctx.fill();
-    ctx.shadowBlur=0;
+    if(p.text){
+      ctx.fillStyle=p.color;ctx.font='bold 14px sans-serif';ctx.textAlign='center';
+      ctx.fillText(p.text,p.x,p.y);
+    }else{
+      ctx.fillStyle=p.color;
+      ctx.shadowBlur=6;ctx.shadowColor=p.color;
+      ctx.beginPath();ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);ctx.fill();
+      ctx.shadowBlur=0;
+    }
     ctx.globalAlpha=1;
   }
   
-  // Power-up indicator
+  // Power-up indicator with timer bars
   const puTexts=[];
   if(activeEffects.ghost)puTexts.push('👻 GHOST');
   if(activeEffects.speed)puTexts.push('⚡ SPEED');

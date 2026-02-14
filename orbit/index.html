@@ -12,6 +12,7 @@ canvas{display:block}
 #hud>div{color:rgba(255,255,255,0.7);font-size:0.85rem;font-weight:600}
 #level-text{color:#7ec8e3;font-weight:800;font-size:1rem}
 #sats-left{color:#ffd700}
+#hint{position:fixed;bottom:16px;left:0;width:100%;text-align:center;color:rgba(255,255,255,0.25);font-size:0.7rem;z-index:10;pointer-events:none}
 .overlay{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(5,5,16,0.95);z-index:20}
 .overlay h1{font-size:clamp(2.5rem,8vw,4rem);font-weight:900;color:#7ec8e3;margin-bottom:8px;letter-spacing:-2px}
 .overlay .sub{color:#667;margin-bottom:24px;font-size:0.9rem;max-width:300px;text-align:center;line-height:1.5}
@@ -28,6 +29,7 @@ canvas{display:block}
   <div id="level-text">Level 1</div>
   <div id="sats-left">Satellites: 3</div>
 </div>
+<div id="hint"></div>
 
 <div class="overlay" id="menu">
   <h1>ORBIT</h1>
@@ -45,7 +47,7 @@ canvas{display:block}
 
 <div class="overlay hidden" id="fail-screen">
   <div class="result" style="color:#e94560">Satellites Lost</div>
-  <div class="sub">They drifted into the void...</div>
+  <div class="sub" id="fail-detail">They drifted into the void...</div>
   <button class="btn" id="retry-btn">RETRY</button>
   <button class="btn" style="background:rgba(255,255,255,0.05);border-color:rgba(255,255,255,0.1)" onclick="showMenu()">MENU</button>
 </div>
@@ -65,25 +67,24 @@ function playTone(f,d=0.2,t='sine',v=0.06){
   o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+d);
 }
 
-const G=0.5; // gravity constant
+const G=0.5;
 let planets,satellites,blackHoles,asteroids;
 let level,satsToLaunch,satsInOrbit,totalSats,gameActive,launchMode;
-let stars=[]; // background
-let trails=[];
+let stars=[];
 let particles=[];
+let checkTimer=0; // timer for fail check (wait a bit before checking)
 
-// Generate background stars
 for(let i=0;i<200;i++)stars.push({x:Math.random(),y:Math.random(),s:Math.random()*1.5+0.5,b:Math.random()});
 
 const LEVELS=[
-  null, // 1-indexed
-  {planets:[{x:0.5,y:0.5,r:25,m:800,color:'#4a9eff'}],sats:3,blackHoles:[],asteroids:[]},
-  {planets:[{x:0.35,y:0.5,r:22,m:600,color:'#ff6b6b'},{x:0.65,y:0.5,r:20,m:500,color:'#4ecdc4'}],sats:3,blackHoles:[],asteroids:[]},
-  {planets:[{x:0.5,y:0.4,r:30,m:1000,color:'#ffd700'}],sats:4,blackHoles:[],asteroids:[{x:0.3,y:0.6,r:8},{x:0.7,y:0.3,r:8}]},
-  {planets:[{x:0.3,y:0.35,r:20,m:500,color:'#a55eea'},{x:0.7,y:0.65,r:20,m:500,color:'#ff9ff3'}],sats:4,blackHoles:[],asteroids:[]},
-  {planets:[{x:0.5,y:0.5,r:28,m:900,color:'#00cec9'}],sats:3,blackHoles:[{x:0.2,y:0.2,r:15,m:400}],asteroids:[]},
+  null,
+  {planets:[{x:0.5,y:0.5,r:25,m:800,color:'#4a9eff'}],sats:3,blackHoles:[],asteroids:[],hint:'Tap near the planet to launch into orbit'},
+  {planets:[{x:0.35,y:0.5,r:22,m:600,color:'#ff6b6b'},{x:0.65,y:0.5,r:20,m:500,color:'#4ecdc4'}],sats:3,blackHoles:[],asteroids:[],hint:'Two planets — try orbiting each one'},
+  {planets:[{x:0.5,y:0.4,r:30,m:1000,color:'#ffd700'}],sats:4,blackHoles:[],asteroids:[{x:0.3,y:0.65,r:10},{x:0.7,y:0.3,r:10}],hint:'Watch out for asteroids!'},
+  {planets:[{x:0.3,y:0.35,r:20,m:500,color:'#a55eea'},{x:0.7,y:0.65,r:20,m:500,color:'#ff9ff3'}],sats:4,blackHoles:[],asteroids:[],hint:'Try a figure-8 orbit between both planets'},
+  {planets:[{x:0.5,y:0.5,r:28,m:900,color:'#00cec9'}],sats:3,blackHoles:[{x:0.2,y:0.2,r:15,m:400}],asteroids:[],hint:'Black holes pull hard — stay clear!'},
   {planets:[{x:0.35,y:0.4,r:18,m:400,color:'#e17055'},{x:0.65,y:0.4,r:18,m:400,color:'#00b894'},{x:0.5,y:0.7,r:22,m:600,color:'#fdcb6e'}],sats:5,blackHoles:[],asteroids:[]},
-  {planets:[{x:0.5,y:0.45,r:35,m:1200,color:'#6c5ce7'}],sats:4,blackHoles:[{x:0.15,y:0.8,r:12,m:300},{x:0.85,y:0.2,r:12,m:300}],asteroids:[{x:0.3,y:0.2,r:6},{x:0.7,y:0.7,r:6}]},
+  {planets:[{x:0.5,y:0.45,r:35,m:1200,color:'#6c5ce7'}],sats:4,blackHoles:[{x:0.15,y:0.8,r:12,m:300},{x:0.85,y:0.2,r:12,m:300}],asteroids:[{x:0.3,y:0.2,r:8},{x:0.7,y:0.7,r:8}]},
   {planets:[{x:0.25,y:0.3,r:15,m:300,color:'#ff6348'},{x:0.75,y:0.3,r:15,m:300,color:'#2ed573'},{x:0.25,y:0.7,r:15,m:300,color:'#1e90ff'},{x:0.75,y:0.7,r:15,m:300,color:'#a55eea'}],sats:6,blackHoles:[{x:0.5,y:0.5,r:10,m:200}],asteroids:[]},
 ];
 
@@ -92,6 +93,7 @@ function showMenu(){
   document.getElementById('level-complete').classList.add('hidden');
   document.getElementById('fail-screen').classList.add('hidden');
   document.getElementById('hud').classList.add('hidden');
+  document.getElementById('hint').textContent='';
   gameActive=false;
 }
 
@@ -109,45 +111,45 @@ function startLevel(n){
   blackHoles=(L.blackHoles||[]).map(b=>({x:b.x*W,y:b.y*H,r:b.r,m:b.m,angle:0}));
   asteroids=(L.asteroids||[]).map(a=>({x:a.x*W,y:a.y*H,r:a.r}));
   
-  satellites=[];trails=[];particles=[];
+  satellites=[];particles=[];
   totalSats=L.sats;satsToLaunch=L.sats;satsInOrbit=0;
-  gameActive=true;launchMode=true;
+  gameActive=true;launchMode=true;checkTimer=0;
   
   document.getElementById('level-text').textContent=`Level ${level}`;
+  document.getElementById('hint').textContent=L.hint||'';
   updateHud();
 }
 
 function updateHud(){
   document.getElementById('sats-left').textContent=
-    launchMode?`Tap to launch (${satsToLaunch} left)`:`Orbiting: ${satsInOrbit}/${totalSats}`;
+    launchMode?`Tap to launch (${satsToLaunch} left)`:
+    `Orbiting: ${satsInOrbit}/${totalSats}`;
 }
 
-// Launch satellite from tap position
 canvas.addEventListener('touchstart',e=>{e.preventDefault();handleTap(e.touches[0].clientX,e.touches[0].clientY)},{passive:false});
 canvas.addEventListener('click',e=>handleTap(e.clientX,e.clientY));
 
 function handleTap(tx,ty){
   if(!gameActive||!launchMode||satsToLaunch<=0)return;
   
-  // Don't launch on top of a planet
   for(const p of planets)if(dist(tx,ty,p.x,p.y)<p.r+20)return;
   for(const b of blackHoles)if(dist(tx,ty,b.x,b.y)<b.r+20)return;
   
-  // Calculate initial velocity: perpendicular to nearest planet, for orbital insertion
   let nearest=planets[0],nd=Infinity;
   for(const p of planets){const d=dist(tx,ty,p.x,p.y);if(d<nd){nd=d;nearest=p}}
   
   const dx=tx-nearest.x,dy=ty-nearest.y;
   const d=Math.sqrt(dx*dx+dy*dy);
-  // Orbital velocity ~ sqrt(GM/r)
   const orbV=Math.sqrt(G*nearest.m/d)*0.7;
   const vx=-dy/d*orbV,vy=dx/d*orbV;
   
   satellites.push({x:tx,y:ty,vx,vy,trail:[],orbitTime:0,stable:false,dead:false});
   satsToLaunch--;
-  if(satsToLaunch===0)launchMode=false;
+  if(satsToLaunch===0){launchMode=false;checkTimer=0}
   
   playTone(440+Math.random()*200,0.3,'sine',0.05);
+  // Clear hint after first launch
+  document.getElementById('hint').textContent='';
   updateHud();
 }
 
@@ -156,22 +158,17 @@ function dist(x1,y1,x2,y2){return Math.sqrt((x1-x2)**2+(y1-y2)**2)}
 function tick(){
   if(!gameActive)return;
   
-  const dt=1;
-  
   for(let s of satellites){
     if(s.dead)continue;
     
     let ax=0,ay=0;
-    // Gravity from planets
     for(const p of planets){
       const dx=p.x-s.x,dy=p.y-s.y;
       const d=Math.max(dist(s.x,s.y,p.x,p.y),p.r);
       const f=G*p.m/(d*d);
       ax+=f*dx/d;ay+=f*dy/d;
-      // Collision
       if(dist(s.x,s.y,p.x,p.y)<p.r){s.dead=true;addExplosion(s.x,s.y,p.color)}
     }
-    // Gravity from black holes
     for(const b of blackHoles){
       const dx=b.x-s.x,dy=b.y-s.y;
       const d=Math.max(dist(s.x,s.y,b.x,b.y),5);
@@ -179,22 +176,18 @@ function tick(){
       ax+=f*dx/d;ay+=f*dy/d;
       if(dist(s.x,s.y,b.x,b.y)<b.r){s.dead=true;addExplosion(s.x,s.y,'#8b00ff')}
     }
-    // Asteroid collision
     for(const a of asteroids){
       if(dist(s.x,s.y,a.x,a.y)<a.r+4){s.dead=true;addExplosion(s.x,s.y,'#888')}
     }
     
-    s.vx+=ax*dt;s.vy+=ay*dt;
-    s.x+=s.vx*dt;s.y+=s.vy*dt;
+    s.vx+=ax;s.vy+=ay;
+    s.x+=s.vx;s.y+=s.vy;
     
-    // Trail
     s.trail.push({x:s.x,y:s.y});
-    if(s.trail.length>150)s.trail.shift();
+    if(s.trail.length>200)s.trail.shift();
     
-    // Out of bounds
-    if(s.x<-100||s.x>W+100||s.y<-100||s.y>H+100){s.dead=true}
+    if(s.x<-200||s.x>W+200||s.y<-200||s.y>H+200){s.dead=true}
     
-    // Check orbit stability: if satellite has been near a planet for a while
     if(!s.dead){
       let nearPlanet=false;
       for(const p of planets){
@@ -202,32 +195,43 @@ function tick(){
         if(d<p.r*6&&d>p.r*1.2)nearPlanet=true;
       }
       if(nearPlanet)s.orbitTime++;else s.orbitTime=Math.max(0,s.orbitTime-2);
-      if(s.orbitTime>180&&!s.stable){// ~3 seconds
+      if(s.orbitTime>180&&!s.stable){
         s.stable=true;satsInOrbit++;
         playTone(523,0.3,'sine',0.08);setTimeout(()=>playTone(659,0.3,'sine',0.08),150);
+        // Celebration particles
+        for(let i=0;i<20;i++){
+          const a=Math.random()*Math.PI*2,sp=1+Math.random()*3;
+          particles.push({x:s.x,y:s.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:1,color:'#ffd700',size:2+Math.random()*3});
+        }
         updateHud();
       }
     }
   }
   
-  // Check win/lose
+  // Win check
+  if(satsInOrbit>=totalSats){
+    gameActive=false;
+    setTimeout(()=>levelComplete(),500);
+    return;
+  }
+  
+  // Fail check: only after all launched and waited a bit
   if(!launchMode){
-    const alive=satellites.filter(s=>!s.dead);
-    if(satsInOrbit>=totalSats){
-      gameActive=false;
-      setTimeout(()=>levelComplete(),500);
-    }else if(alive.length===0||(alive.every(s=>s.dead||(!s.stable&&s.orbitTime<10&&satellites.filter(x=>!x.dead).length+satsToLaunch<totalSats))){
-      // Check if impossible
-      const canStillWin=alive.filter(s=>!s.dead&&!s.stable).length+satsInOrbit>=totalSats;
-      if(!canStillWin&&satsToLaunch===0){
+    checkTimer++;
+    if(checkTimer>120){ // wait 2 seconds before checking failure
+      const alive=satellites.filter(s=>!s.dead);
+      const canStillWin=alive.filter(s=>!s.stable).length+satsInOrbit>=totalSats;
+      if(!canStillWin){
         gameActive=false;
-        setTimeout(()=>{document.getElementById('fail-screen').classList.remove('hidden')},500);
+        const survived=satsInOrbit;
+        document.getElementById('fail-detail').textContent=
+          survived>0?`${survived}/${totalSats} satellites made it...`:'They all drifted into the void...';
+        setTimeout(()=>{document.getElementById('fail-screen').classList.remove('hidden')},400);
         document.getElementById('retry-btn').onclick=()=>startLevel(level);
       }
     }
   }
   
-  // Update black hole rotation
   for(const b of blackHoles)b.angle+=0.02;
 }
 
@@ -258,19 +262,25 @@ function levelComplete(){
 
 function draw(){
   requestAnimationFrame(draw);
-  ctx.fillStyle='rgba(5,5,16,0.3)';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(5,5,16,0.25)';ctx.fillRect(0,0,W,H);
   
-  // Stars
   for(const s of stars){
     s.b+=0.005;
     ctx.fillStyle=`rgba(255,255,255,${0.3+Math.sin(s.b)*0.2})`;
     ctx.beginPath();ctx.arc(s.x*W,s.y*H,s.s,0,Math.PI*2);ctx.fill();
   }
   
-  if(gameActive||true){tick()}
+  tick();
   
-  // Gravity field visualization (subtle)
-  // Skip for performance
+  // Orbital guide rings around planets (subtle)
+  if(gameActive&&launchMode){
+    for(const p of planets){
+      for(let r=2;r<=5;r++){
+        ctx.strokeStyle=`rgba(126,200,227,${0.03})`;ctx.lineWidth=1;
+        ctx.beginPath();ctx.arc(p.x,p.y,p.r*r,0,Math.PI*2);ctx.stroke();
+      }
+    }
+  }
   
   // Asteroids
   for(const a of asteroids){
@@ -280,29 +290,37 @@ function draw(){
   
   // Black holes
   for(const b of blackHoles){
-    // Swirl effect
     ctx.save();ctx.translate(b.x,b.y);ctx.rotate(b.angle);
     const grad=ctx.createRadialGradient(0,0,0,0,0,b.r*3);
     grad.addColorStop(0,'rgba(139,0,255,0.3)');grad.addColorStop(0.5,'rgba(139,0,255,0.05)');grad.addColorStop(1,'transparent');
     ctx.fillStyle=grad;ctx.beginPath();ctx.arc(0,0,b.r*3,0,Math.PI*2);ctx.fill();
-    // Core
     ctx.fillStyle='#000';ctx.beginPath();ctx.arc(0,0,b.r,0,Math.PI*2);ctx.fill();
     ctx.strokeStyle='#8b00ff';ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,b.r+2,0,Math.PI*2);ctx.stroke();
+    // Swirl arms
+    for(let i=0;i<3;i++){
+      const a=b.angle+i*Math.PI*2/3;
+      ctx.strokeStyle='rgba(139,0,255,0.15)';ctx.lineWidth=1.5;
+      ctx.beginPath();
+      for(let t=0;t<40;t++){
+        const r=b.r+2+t*1.5;
+        const angle=a+t*0.15;
+        const px=Math.cos(angle)*r,py=Math.sin(angle)*r;
+        t===0?ctx.moveTo(px,py):ctx.lineTo(px,py);
+      }
+      ctx.stroke();
+    }
     ctx.restore();
   }
   
   // Planets
   for(const p of planets){
     p.pulse=(p.pulse+0.02)%(Math.PI*2);
-    // Atmosphere
     const grad=ctx.createRadialGradient(p.x,p.y,p.r*0.8,p.x,p.y,p.r*2);
     grad.addColorStop(0,p.color+'40');grad.addColorStop(1,'transparent');
     ctx.fillStyle=grad;ctx.beginPath();ctx.arc(p.x,p.y,p.r*2,0,Math.PI*2);ctx.fill();
-    // Body
     ctx.fillStyle=p.color;ctx.shadowBlur=20;ctx.shadowColor=p.color;
     ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();
     ctx.shadowBlur=0;
-    // Highlight
     ctx.fillStyle='rgba(255,255,255,0.15)';
     ctx.beginPath();ctx.arc(p.x-p.r*0.3,p.y-p.r*0.3,p.r*0.4,0,Math.PI*2);ctx.fill();
   }
@@ -310,24 +328,27 @@ function draw(){
   // Satellite trails and bodies
   for(const s of satellites){
     if(s.dead)continue;
-    // Trail
     if(s.trail.length>1){
-      ctx.beginPath();ctx.moveTo(s.trail[0].x,s.trail[0].y);
       for(let i=1;i<s.trail.length;i++){
-        ctx.lineTo(s.trail[i].x,s.trail[i].y);
+        const alpha=(i/s.trail.length)*(s.stable?0.4:0.2);
+        ctx.strokeStyle=s.stable?`rgba(255,215,0,${alpha})`:`rgba(126,200,227,${alpha})`;
+        ctx.lineWidth=s.stable?2:1.5;
+        ctx.beginPath();ctx.moveTo(s.trail[i-1].x,s.trail[i-1].y);ctx.lineTo(s.trail[i].x,s.trail[i].y);ctx.stroke();
       }
-      ctx.strokeStyle=s.stable?'rgba(255,215,0,0.3)':'rgba(126,200,227,0.2)';
-      ctx.lineWidth=1.5;ctx.stroke();
     }
-    // Body
     const color=s.stable?'#ffd700':'#7ec8e3';
     ctx.fillStyle=color;ctx.shadowBlur=12;ctx.shadowColor=color;
     ctx.beginPath();ctx.arc(s.x,s.y,5,0,Math.PI*2);ctx.fill();
     ctx.shadowBlur=0;
-    // Stable indicator
     if(s.stable){
       ctx.strokeStyle='rgba(255,215,0,0.5)';ctx.lineWidth=1;
       ctx.beginPath();ctx.arc(s.x,s.y,10+Math.sin(Date.now()/300)*3,0,Math.PI*2);ctx.stroke();
+    }
+    // Orbit progress indicator
+    if(!s.stable&&s.orbitTime>0){
+      const prog=Math.min(s.orbitTime/180,1);
+      ctx.strokeStyle=`rgba(255,215,0,${0.3+prog*0.4})`;ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(s.x,s.y,9,-Math.PI/2,-Math.PI/2+prog*Math.PI*2);ctx.stroke();
     }
   }
   
