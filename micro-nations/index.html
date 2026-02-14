@@ -1064,9 +1064,19 @@ function render() {
   ctx.scale(camera.zoom, camera.zoom);
   ctx.translate(camera.x, camera.y);
   
-  // Draw water background
+  // Draw water background with shimmer
   ctx.fillStyle = '#2B5F8F';
   ctx.fillRect(-2000, -2000, 4000, 4000);
+  // Water highlights
+  ctx.fillStyle = 'rgba(100,180,255,0.04)';
+  const wt = Date.now() / 1000;
+  for (let i = 0; i < 8; i++) {
+    const wx = Math.sin(wt * 0.2 + i * 2.5) * 500;
+    const wy = Math.cos(wt * 0.3 + i * 2.0) * 400;
+    ctx.beginPath();
+    ctx.ellipse(wx, wy, 50 + Math.sin(wt + i) * 15, 20, wt * 0.08 + i, 0, Math.PI * 2);
+    ctx.fill();
+  }
   
   // Draw island tiles (isometric)
   for (let y = 0; y < GRID_SIZE; y++) {
@@ -1137,11 +1147,14 @@ function drawIsoTile(x, y, tile) {
 function drawCitizen(c) {
   const wpos = isoToWorld(c.x, c.y);
   const size = 4;
+  // Walk bob
+  const bob = c.state === 'walking' ? Math.sin(Date.now() / 120 + c.id.charCodeAt(0)) * 1.5 : 0;
+  wpos.y += bob;
   
   // Shadow
   ctx.fillStyle = 'rgba(0,0,0,0.2)';
   ctx.beginPath();
-  ctx.ellipse(wpos.x, wpos.y + 2, size, size / 2, 0, 0, Math.PI * 2);
+  ctx.ellipse(wpos.x, wpos.y + 2 - bob, size, size / 2, 0, 0, Math.PI * 2);
   ctx.fill();
   
   // Body
@@ -1198,19 +1211,40 @@ function drawBuilding(b) {
   
   // Building sprites (simplified)
   switch (b.type) {
-    case 'campfire':
+    case 'campfire': {
+      const ft = Date.now() / 200;
+      // Glow
+      ctx.fillStyle = 'rgba(255,100,0,0.15)';
+      ctx.beginPath();
+      ctx.arc(wpos.x, wpos.y - 2, 10 + Math.sin(ft) * 2, 0, Math.PI * 2);
+      ctx.fill();
+      // Flame
       ctx.fillStyle = '#ff6b35';
       ctx.beginPath();
-      ctx.moveTo(wpos.x, wpos.y - 6);
+      ctx.moveTo(wpos.x + Math.sin(ft * 1.3) * 1, wpos.y - 6 - Math.abs(Math.sin(ft)) * 3);
       ctx.lineTo(wpos.x - 3, wpos.y);
       ctx.lineTo(wpos.x + 3, wpos.y);
       ctx.closePath();
       ctx.fill();
-      // Smoke
-      ctx.fillStyle = 'rgba(100,100,100,0.3)';
-      ctx.fillRect(wpos.x - 2, wpos.y - 12, 4, 8);
+      // Inner flame
+      ctx.fillStyle = '#ffcc00';
+      ctx.beginPath();
+      ctx.moveTo(wpos.x, wpos.y - 4 - Math.abs(Math.sin(ft * 1.5)));
+      ctx.lineTo(wpos.x - 1.5, wpos.y);
+      ctx.lineTo(wpos.x + 1.5, wpos.y);
+      ctx.closePath();
+      ctx.fill();
+      // Smoke particles
+      ctx.fillStyle = 'rgba(100,100,100,0.2)';
+      for (let s = 0; s < 3; s++) {
+        const sy = wpos.y - 10 - s * 5 - (ft % 8);
+        const sx = wpos.x + Math.sin(ft + s * 2) * 3;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 2 + s * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
       break;
-      
+    }
     case 'house':
       // Base
       ctx.fillStyle = '#8B4513';
