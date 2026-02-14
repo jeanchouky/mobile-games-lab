@@ -522,6 +522,17 @@ function scheduleHaunts() {
     { t: 108, fn: () => { triggerGlitch('invert', 1, 3); sfxHeartbeat(); } },
     { t: 115, fn: () => showNotif('System', 'CRITICAL', 'Device will self-destruct. Say goodbye.', '💣', 8000) },
     { t: 120, fn: () => { addCreepyText('...unless you know the pattern', W*0.5, H*0.8, 10, '#060'); } },
+    
+    // Extended terror (120s+) — more events for longer survival
+    { t: 125, fn: () => showNotif('Location', 'Tracking', 'Your exact location has been shared with... something.', '📍', 5000) },
+    { t: 132, fn: () => { triggerGlitch('static', 0.8, 1); triggerGlitch('shake', 2, 1); sfxJumpscare(); } },
+    { t: 138, fn: () => addCreepyText('I̶T̵ ̷F̶E̵E̴D̸S̵ ̴O̷N̵ ̷F̴E̸A̶R̵', W*0.5, H*0.4, 24, '#f00') },
+    { t: 145, fn: () => showNotif('Contacts', 'Alert', 'All your contacts have been replaced with "HIM".', '👤', 6000) },
+    { t: 152, fn: () => { triggerGlitch('invert', 1, 2); triggerGlitch('rgb', 0.8, 2); sfxHeartbeat(); } },
+    { t: 160, fn: () => showNotif('Health', '', 'Your heart rate is 180 BPM. Are you okay?', '❤️‍🩹', 5000) },
+    { t: 168, fn: () => { addCreepyText('THE PATTERN IS YOUR ONLY HOPE', W*0.5, H*0.8, 12, '#0a0'); sfxWhisper(); } },
+    { t: 175, fn: () => { triggerGlitch('static', 1, 3); sfxJumpscare(); addCreepyText('TOO LATE', W*0.5, H*0.5, 30, '#f00'); } },
+    { t: 185, fn: () => showNotif('Unknown', 'FINAL WARNING', 'You have 30 seconds. ↖ ↘ ✦ ↗', '☠️', 10000) },
   ];
 }
 
@@ -759,11 +770,17 @@ function drawFakePhone() {
     ctx.restore();
   }
   
-  // Hint system
-  if (survivalTime > 25 && tapHistory.length < 1) {
+  // Progressive hint system
+  if (survivalTime > 15 && tapHistory.length < 1) {
     ctx.save();
-    ctx.globalAlpha = 0.08 + Math.sin(gameTime * 1.5) * 0.04;
-    drawText('Tap the corners...', W/2, H - 28*scale, 9, '#484', 'center');
+    ctx.globalAlpha = 0.06 + Math.sin(gameTime * 1.5) * 0.03;
+    drawText('Something is watching...', W/2, H - 28*scale, 9, '#484', 'center');
+    ctx.restore();
+  }
+  if (survivalTime > 40 && tapHistory.length < 2) {
+    ctx.save();
+    ctx.globalAlpha = 0.1 + Math.sin(gameTime * 1.5) * 0.04;
+    drawText('Tap the corners to fight back...', W/2, H - 28*scale, 9, '#484', 'center');
     ctx.restore();
   }
   
@@ -1021,6 +1038,15 @@ function drawSolved() {
   ctx.stroke();
   drawText('PLAY AGAIN', W/2, by, 14, '#ccc');
   
+  // Best time
+  var bestTime = 0;
+  try { bestTime = parseInt(localStorage.getItem('haunted_best')) || 0; } catch(e){}
+  if (Math.floor(survivalTime) > bestTime) {
+    try { localStorage.setItem('haunted_best', Math.floor(survivalTime)); } catch(e){}
+    drawText('🏆 NEW RECORD!', W/2, H - 60*scale, 12, '#fa0');
+  } else if (bestTime > 0) {
+    drawText(`Best: ${bestTime}s`, W/2, H - 60*scale, 10, '#555');
+  }
   drawText('Secret: Tap ↖ ↘ ✦ ↗', W/2, H - 40*scale, 9, '#444');
 }
 
