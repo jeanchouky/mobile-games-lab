@@ -427,6 +427,17 @@ const questionBank = [
   { text: "Have you ever lied about reading a book?", category: "personal" },
   { text: "Do you fake-smile at people you don't like?", category: "personal" },
   { text: "Have you ever kept a relationship secret?", category: "personal" },
+  { text: "Have you ever regifted a present?", category: "embarrassing" },
+  { text: "Do you think you're better than most people?", category: "personal" },
+  { text: "Have you ever pretended to know someone when you forgot their name?", category: "embarrassing" },
+  { text: "Have you ever lied about watching a TV show everyone talks about?", category: "embarrassing" },
+  { text: "Would you sell out your best friend's secret for £10,000?", category: "hypothetical" },
+  { text: "Have you ever eaten someone else's food from the fridge?", category: "embarrassing" },
+  { text: "Do you secretly think one of your friends is annoying?", category: "personal" },
+  { text: "Have you ever pretended to exercise more than you actually do?", category: "embarrassing" },
+  { text: "Would you rather give up your phone for a year or give up a friend?", category: "would-you-rather" },
+  { text: "Have you ever creeped on someone's social media for more than 30 minutes?", category: "embarrassing" },
+  { text: "Do you talk to yourself when nobody's around?", category: "personal" },
   { text: "Do you think you're better than most people?", category: "personal" },
   { text: "Have you ever broken someone's trust?", category: "personal" },
   
@@ -1136,6 +1147,9 @@ function drawAnalysis() {
 }
 
 function drawVerdict() {
+  // Screen pulse
+  if (Math.sin(gameTime * 5) > 0.8) shakeAmount = Math.max(shakeAmount, 3 * scale);
+  
   // Dramatic reveal
   const grad = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, W);
   if (aiVerdict.verdict === 'LYING') {
