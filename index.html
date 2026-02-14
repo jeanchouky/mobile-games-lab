@@ -193,10 +193,14 @@ body{
   position:relative;overflow:hidden;
 }
 .card-thumb-emoji{font-size:3.5rem;position:relative;z-index:1;transition:transform 0.4s}
+.card-thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;opacity:0.7;transition:opacity 0.4s}
+.card:hover .card-thumb img{opacity:0.9}
 .card-thumb::after{
-  content:'';position:absolute;inset:0;
+  content:'';position:absolute;inset:0;z-index:1;
   background:radial-gradient(circle at 50% 50%,transparent 30%,rgba(0,0,0,0.3));
 }
+.featured-visual img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0.6;transition:opacity 0.4s}
+.featured-card:hover .featured-visual img{opacity:0.8}
 .card-body{padding:20px 22px 22px;flex:1;display:flex;flex-direction:column;position:relative;z-index:1}
 .card-body h2{font-size:1.2rem;margin-bottom:8px;font-weight:700}
 .card-body p{color:var(--muted);font-size:0.88rem;flex:1;line-height:1.6}
@@ -296,6 +300,7 @@ footer .footer-emoji{font-size:1.5rem;margin-bottom:12px;display:block}
 <div class="featured reveal">
   <a class="featured-card" href="/gravity-flip/">
     <div class="featured-visual" style="background:linear-gradient(135deg,#0a1628,#1a2a4a);">
+      <img src="screenshots/gravity-flip.png" alt="Gravity Flip gameplay">
       <span style="position:relative;z-index:1">🔄</span>
     </div>
     <div class="featured-info">
@@ -316,6 +321,7 @@ footer .footer-emoji{font-size:1.5rem;margin-bottom:12px;display:block}
 
     <a class="card reveal" href="/trust-nothing/" data-tags="puzzle">
       <div class="card-thumb" style="background:linear-gradient(135deg,#1a1a2e,#2d1b4e);">
+        <img src="screenshots/trust-nothing.png" alt="Trust Nothing">
         <span class="card-thumb-emoji">🤥</span>
       </div>
       <div class="card-body">
@@ -328,6 +334,7 @@ footer .footer-emoji{font-size:1.5rem;margin-bottom:12px;display:block}
 
     <a class="card reveal" href="/deja-vu/" data-tags="puzzle,horror">
       <div class="card-thumb" style="background:linear-gradient(135deg,#2a1a0a,#1a0a2a);">
+        <img src="screenshots/deja-vu.png" alt="Déjà Vu">
         <span class="card-thumb-emoji">⏳</span>
       </div>
       <div class="card-body">
@@ -340,6 +347,7 @@ footer .footer-emoji{font-size:1.5rem;margin-bottom:12px;display:block}
 
     <a class="card reveal" href="/conspiracy-board/" data-tags="puzzle">
       <div class="card-thumb" style="background:linear-gradient(135deg,#3a2a1a,#2a1a0a);">
+        <img src="screenshots/conspiracy-board.png" alt="Conspiracy Board">
         <span class="card-thumb-emoji">📌</span>
       </div>
       <div class="card-body">
@@ -352,6 +360,7 @@ footer .footer-emoji{font-size:1.5rem;margin-bottom:12px;display:block}
 
     <a class="card reveal" href="/emoji-wars/" data-tags="strategy,action">
       <div class="card-thumb" style="background:linear-gradient(135deg,#4a3500,#2a1a00);">
+        <img src="screenshots/emoji-wars.png" alt="Emoji Wars">
         <span class="card-thumb-emoji">⚔️</span>
       </div>
       <div class="card-body">
@@ -364,6 +373,7 @@ footer .footer-emoji{font-size:1.5rem;margin-bottom:12px;display:block}
 
     <a class="card reveal" href="/haunted/" data-tags="horror">
       <div class="card-thumb" style="background:linear-gradient(135deg,#1a0a2e,#0a0a14);">
+        <img src="screenshots/haunted.png" alt="Haunted">
         <span class="card-thumb-emoji">👻</span>
       </div>
       <div class="card-body">
@@ -376,6 +386,7 @@ footer .footer-emoji{font-size:1.5rem;margin-bottom:12px;display:block}
 
     <a class="card reveal" href="/one-button/" data-tags="action">
       <div class="card-thumb" style="background:linear-gradient(135deg,#1a2a1a,#2a1a3a);">
+        <img src="screenshots/one-button.png" alt="One Button Odyssey">
         <span class="card-thumb-emoji">🗡️</span>
       </div>
       <div class="card-body">
@@ -388,6 +399,7 @@ footer .footer-emoji{font-size:1.5rem;margin-bottom:12px;display:block}
 
     <a class="card reveal" href="/sound-thief/" data-tags="action">
       <div class="card-thumb" style="background:linear-gradient(135deg,#0a0e1a,#1a1040);">
+        <img src="screenshots/sound-thief.png" alt="Sound Thief">
         <span class="card-thumb-emoji">🎵</span>
       </div>
       <div class="card-body">
@@ -400,6 +412,7 @@ footer .footer-emoji{font-size:1.5rem;margin-bottom:12px;display:block}
 
     <a class="card reveal" href="/pocket-ecosystem/" data-tags="simulation">
       <div class="card-thumb" style="background:linear-gradient(135deg,#1a3a2a,#0a2a1a);">
+        <img src="screenshots/pocket-ecosystem.png" alt="Pocket Ecosystem">
         <span class="card-thumb-emoji">🌿</span>
       </div>
       <div class="card-body">
@@ -412,6 +425,7 @@ footer .footer-emoji{font-size:1.5rem;margin-bottom:12px;display:block}
 
     <a class="card reveal" href="/lie-detector/" data-tags="social">
       <div class="card-thumb" style="background:linear-gradient(135deg,#3a0a3a,#1a0a3a);">
+        <img src="screenshots/lie-detector.png" alt="Lie Detector">
         <span class="card-thumb-emoji">🎭</span>
       </div>
       <div class="card-body">
@@ -424,6 +438,7 @@ footer .footer-emoji{font-size:1.5rem;margin-bottom:12px;display:block}
 
     <a class="card reveal" href="/micro-nations/" data-tags="strategy,simulation">
       <div class="card-thumb" style="background:linear-gradient(135deg,#0a2a4a,#1a3a5a);">
+        <img src="screenshots/micro-nations.png" alt="Micro Nations">
         <span class="card-thumb-emoji">🏗️</span>
       </div>
       <div class="card-body">
