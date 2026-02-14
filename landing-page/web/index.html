@@ -6,276 +6,494 @@
 <meta name="description" content="A collection of 11 unique mobile-first HTML5 games. Play free in your browser.">
 <title>Mobile Games Lab — 11 Free HTML5 Games</title>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-:root {
-  --bg: #0f0f1a;
-  --card: #1a1a2e;
-  --accent: #e94560;
-  --text: #eee;
-  --muted: #999;
-  --gold: #ffd700;
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0a14;--card:#13132a;--card-hover:#1a1a3a;
+  --accent:#e94560;--accent2:#ff6b6b;--text:#f0f0f0;--muted:#8888aa;
+  --gold:#ffd700;--neon:#00f5d4;--purple:#7b2ff7;
 }
-html { scroll-behavior: smooth; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  min-height: 100vh;
-  line-height: 1.6;
+html{scroll-behavior:smooth}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  background:var(--bg);color:var(--text);min-height:100vh;line-height:1.6;
+  overflow-x:hidden;
 }
 
-/* Header */
-header {
-  text-align: center;
-  padding: 60px 20px 40px;
-  background: linear-gradient(180deg, #16213e 0%, var(--bg) 100%);
+/* Animated background */
+.bg-grid{
+  position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;
+  background-image:
+    linear-gradient(rgba(123,47,247,0.03) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(123,47,247,0.03) 1px,transparent 1px);
+  background-size:60px 60px;
+  animation:gridMove 20s linear infinite;
 }
-header h1 {
-  font-size: clamp(2rem, 5vw, 3.5rem);
-  font-weight: 900;
-  background: linear-gradient(135deg, var(--accent), var(--gold));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  margin-bottom: 12px;
+@keyframes gridMove{to{background-position:60px 60px}}
+
+/* Floating orbs */
+.orb{
+  position:fixed;border-radius:50%;filter:blur(80px);opacity:0.15;z-index:0;
+  animation:orbFloat 15s ease-in-out infinite alternate;
 }
-header p {
-  color: var(--muted);
-  font-size: clamp(1rem, 2.5vw, 1.2rem);
-  max-width: 600px;
-  margin: 0 auto;
+.orb-1{width:400px;height:400px;background:var(--accent);top:-100px;left:-100px;animation-duration:20s}
+.orb-2{width:300px;height:300px;background:var(--purple);bottom:-50px;right:-50px;animation-duration:15s;animation-delay:-5s}
+.orb-3{width:250px;height:250px;background:var(--neon);top:50%;left:50%;animation-duration:18s;animation-delay:-8s}
+@keyframes orbFloat{
+  0%{transform:translate(0,0) scale(1)}
+  33%{transform:translate(30px,-40px) scale(1.1)}
+  66%{transform:translate(-20px,30px) scale(0.9)}
+  100%{transform:translate(40px,20px) scale(1.05)}
 }
-.badge {
-  display: inline-block;
-  background: var(--accent);
-  color: #fff;
-  padding: 4px 14px;
-  border-radius: 20px;
-  font-size: 0.85rem;
-  font-weight: 700;
-  margin-top: 16px;
+
+/* Content wrapper */
+.content{position:relative;z-index:1}
+
+/* Hero */
+.hero{
+  text-align:center;padding:80px 20px 60px;
+  position:relative;overflow:hidden;
 }
+.hero::after{
+  content:'';position:absolute;bottom:0;left:0;right:0;height:120px;
+  background:linear-gradient(transparent,var(--bg));
+}
+.hero-badge{
+  display:inline-flex;align-items:center;gap:6px;
+  background:rgba(123,47,247,0.15);border:1px solid rgba(123,47,247,0.3);
+  padding:6px 16px;border-radius:50px;font-size:0.8rem;color:var(--neon);
+  font-weight:600;letter-spacing:0.5px;margin-bottom:24px;
+  animation:fadeInUp 0.6s ease-out;
+}
+.hero h1{
+  font-size:clamp(2.5rem,7vw,5rem);font-weight:900;
+  letter-spacing:-2px;line-height:1.1;margin-bottom:20px;
+  animation:fadeInUp 0.6s ease-out 0.1s both;
+}
+.hero h1 .gradient{
+  background:linear-gradient(135deg,var(--accent),var(--gold),var(--neon));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;background-size:200% 200%;
+  animation:gradientShift 4s ease-in-out infinite;
+}
+@keyframes gradientShift{
+  0%,100%{background-position:0% 50%}
+  50%{background-position:100% 50%}
+}
+.hero .subtitle{
+  color:var(--muted);font-size:clamp(1rem,2.5vw,1.3rem);
+  max-width:600px;margin:0 auto 30px;
+  animation:fadeInUp 0.6s ease-out 0.2s both;
+}
+.hero-stats{
+  display:flex;justify-content:center;gap:40px;flex-wrap:wrap;
+  animation:fadeInUp 0.6s ease-out 0.3s both;
+}
+.hero-stat{text-align:center}
+.hero-stat .num{
+  font-size:2rem;font-weight:900;
+  background:linear-gradient(135deg,var(--accent),var(--gold));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+}
+.hero-stat .label{font-size:0.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+
+@keyframes fadeInUp{
+  from{opacity:0;transform:translateY(20px)}
+  to{opacity:1;transform:translateY(0)}
+}
+
+/* Filter bar */
+.filters{
+  display:flex;justify-content:center;gap:8px;flex-wrap:wrap;
+  padding:10px 20px 40px;max-width:900px;margin:0 auto;
+  animation:fadeInUp 0.6s ease-out 0.4s both;
+}
+.filter-btn{
+  background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);
+  color:var(--muted);padding:8px 18px;border-radius:50px;cursor:pointer;
+  font-size:0.85rem;font-weight:600;transition:all 0.3s;font-family:inherit;
+}
+.filter-btn:hover,.filter-btn.active{
+  background:rgba(233,69,96,0.15);border-color:var(--accent);color:var(--accent);
+}
+
+/* Featured card */
+.featured{
+  max-width:1200px;margin:0 auto 40px;padding:0 24px;
+  animation:fadeInUp 0.6s ease-out 0.5s both;
+}
+.featured-card{
+  display:grid;grid-template-columns:1fr 1fr;
+  background:linear-gradient(135deg,rgba(233,69,96,0.08),rgba(123,47,247,0.08));
+  border:1px solid rgba(233,69,96,0.15);border-radius:24px;
+  overflow:hidden;transition:all 0.4s;position:relative;
+  text-decoration:none;color:inherit;
+}
+.featured-card:hover{
+  transform:translateY(-4px);
+  box-shadow:0 20px 60px rgba(233,69,96,0.15),0 0 0 1px rgba(233,69,96,0.3);
+}
+.featured-card::before{
+  content:'⭐ FEATURED';position:absolute;top:20px;right:20px;z-index:2;
+  background:linear-gradient(135deg,var(--gold),#ffaa00);color:#000;
+  padding:6px 16px;border-radius:50px;font-size:0.75rem;font-weight:800;
+  letter-spacing:1px;
+}
+.featured-visual{
+  aspect-ratio:16/10;display:flex;align-items:center;justify-content:center;
+  font-size:6rem;position:relative;overflow:hidden;
+  background:linear-gradient(135deg,#0a1628,#1a2a4a);
+}
+.featured-visual::after{
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(circle at 30% 40%,rgba(233,69,96,0.2),transparent 60%);
+}
+.featured-info{padding:40px;display:flex;flex-direction:column;justify-content:center}
+.featured-info h2{font-size:2rem;font-weight:800;margin-bottom:12px}
+.featured-info p{color:var(--muted);font-size:1rem;line-height:1.7;margin-bottom:20px}
+.featured-play{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:14px 32px;background:linear-gradient(135deg,var(--accent),var(--purple));
+  color:#fff;border-radius:14px;font-weight:700;font-size:1rem;
+  transition:all 0.3s;width:fit-content;
+}
+.featured-play:hover{transform:scale(1.05);box-shadow:0 8px 30px rgba(233,69,96,0.4)}
 
 /* Grid */
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 24px;
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 20px 24px 80px;
+.grid-section{max-width:1200px;margin:0 auto;padding:0 24px 80px}
+.section-title{
+  font-size:1.5rem;font-weight:800;margin-bottom:24px;
+  display:flex;align-items:center;gap:10px;
+}
+.grid{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));
+  gap:20px;
 }
 
 /* Card */
-.card {
-  background: var(--card);
-  border-radius: 16px;
-  overflow: hidden;
-  transition: transform 0.2s, box-shadow 0.2s;
-  text-decoration: none;
-  color: inherit;
-  display: flex;
-  flex-direction: column;
+.card{
+  background:var(--card);border:1px solid rgba(255,255,255,0.04);
+  border-radius:20px;overflow:hidden;transition:all 0.35s cubic-bezier(0.4,0,0.2,1);
+  text-decoration:none;color:inherit;display:flex;flex-direction:column;
+  position:relative;
 }
-.card:hover {
-  transform: translateY(-6px);
-  box-shadow: 0 12px 40px rgba(233, 69, 96, 0.2);
+.card::before{
+  content:'';position:absolute;inset:0;border-radius:20px;
+  background:linear-gradient(135deg,transparent,rgba(233,69,96,0.05));
+  opacity:0;transition:opacity 0.35s;z-index:0;
 }
-.card-thumb {
-  width: 100%;
-  aspect-ratio: 16/10;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 4rem;
-  position: relative;
-  overflow: hidden;
+.card:hover{
+  transform:translateY(-8px) scale(1.01);
+  box-shadow:0 20px 50px rgba(0,0,0,0.4),0 0 0 1px rgba(255,255,255,0.08);
+  border-color:rgba(255,255,255,0.1);
 }
-.card-body {
-  padding: 20px;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
+.card:hover::before{opacity:1}
+.card:hover .card-thumb-emoji{transform:scale(1.15);transition:transform 0.4s}
+.card-thumb{
+  width:100%;aspect-ratio:16/10;display:flex;align-items:center;justify-content:center;
+  position:relative;overflow:hidden;
 }
-.card-body h2 {
-  font-size: 1.3rem;
-  margin-bottom: 8px;
-  font-weight: 700;
+.card-thumb-emoji{font-size:3.5rem;position:relative;z-index:1;transition:transform 0.4s}
+.card-thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;opacity:0.7;transition:opacity 0.4s}
+.card:hover .card-thumb img{opacity:0.9}
+.card-thumb::after{
+  content:'';position:absolute;inset:0;z-index:1;
+  background:radial-gradient(circle at 50% 50%,transparent 30%,rgba(0,0,0,0.3));
 }
-.card-body p {
-  color: var(--muted);
-  font-size: 0.9rem;
-  flex: 1;
+.featured-visual img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0.6;transition:opacity 0.4s}
+.featured-card:hover .featured-visual img{opacity:0.8}
+.card-body{padding:20px 22px 22px;flex:1;display:flex;flex-direction:column;position:relative;z-index:1}
+.card-body h2{font-size:1.2rem;margin-bottom:8px;font-weight:700}
+.card-body p{color:var(--muted);font-size:0.88rem;flex:1;line-height:1.6}
+.tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px}
+.tag{
+  background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.06);
+  padding:4px 12px;border-radius:50px;font-size:0.72rem;color:var(--muted);
+  font-weight:500;transition:all 0.2s;
 }
-.tags {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 14px;
+.card:hover .tag{border-color:rgba(233,69,96,0.2);color:var(--accent)}
+.play-btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  margin-top:16px;padding:11px 0;width:100%;
+  background:linear-gradient(135deg,rgba(233,69,96,0.15),rgba(123,47,247,0.1));
+  border:1px solid rgba(233,69,96,0.2);
+  color:var(--accent);border-radius:12px;font-weight:700;font-size:0.9rem;
+  transition:all 0.3s;
 }
-.tag {
-  background: rgba(255,255,255,0.06);
-  padding: 3px 10px;
-  border-radius: 12px;
-  font-size: 0.75rem;
-  color: var(--muted);
+.card:hover .play-btn{
+  background:linear-gradient(135deg,var(--accent),var(--purple));
+  color:#fff;border-color:transparent;
 }
-.play-btn {
-  display: inline-block;
-  margin-top: 16px;
-  padding: 10px 24px;
-  background: var(--accent);
-  color: #fff;
-  border-radius: 10px;
-  font-weight: 700;
-  font-size: 0.95rem;
-  text-align: center;
-  transition: background 0.2s;
-}
-.play-btn:hover { background: #c73550; }
+
+/* Scroll animations */
+.reveal{opacity:0;transform:translateY(30px);transition:all 0.6s cubic-bezier(0.4,0,0.2,1)}
+.reveal.visible{opacity:1;transform:translateY(0)}
 
 /* Footer */
-footer {
-  text-align: center;
-  padding: 40px 20px;
-  color: var(--muted);
-  font-size: 0.85rem;
-  border-top: 1px solid rgba(255,255,255,0.05);
+footer{
+  text-align:center;padding:60px 20px;color:var(--muted);font-size:0.85rem;
+  border-top:1px solid rgba(255,255,255,0.04);position:relative;z-index:1;
 }
-footer a { color: var(--accent); text-decoration: none; }
+footer a{color:var(--accent);text-decoration:none;font-weight:600}
+footer a:hover{text-decoration:underline}
+footer .footer-emoji{font-size:1.5rem;margin-bottom:12px;display:block}
 
 /* Mobile */
-@media (max-width: 640px) {
-  .grid { grid-template-columns: 1fr; padding: 16px; gap: 16px; }
-  header { padding: 40px 16px 30px; }
+@media(max-width:768px){
+  .featured-card{grid-template-columns:1fr}
+  .featured-info{padding:24px}
+  .featured-info h2{font-size:1.5rem}
+  .hero{padding:60px 16px 40px}
+  .hero-stats{gap:24px}
 }
+@media(max-width:640px){
+  .grid{grid-template-columns:1fr;gap:16px}
+  .grid-section{padding:0 16px 60px}
+  .featured{padding:0 16px}
+}
+
+/* Cursor glow */
+.cursor-glow{
+  position:fixed;width:200px;height:200px;border-radius:50%;
+  background:radial-gradient(circle,rgba(233,69,96,0.06),transparent 70%);
+  pointer-events:none;z-index:0;transform:translate(-50%,-50%);
+  transition:left 0.3s ease-out,top 0.3s ease-out;
+}
+
+/* Number counter animation */
+@keyframes countUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
 </style>
 </head>
 <body>
 
-<header>
-  <h1>🎮 Mobile Games Lab</h1>
-  <p>11 unique mobile-first HTML5 games. No downloads, no ads, no tracking. Just play.</p>
-  <span class="badge">Free &amp; Open Source</span>
-</header>
+<div class="bg-grid"></div>
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+<div class="orb orb-3"></div>
+<div class="cursor-glow" id="glow"></div>
 
-<div class="grid">
+<div class="content">
 
-  <a class="card" href="https://jc-trust-nothing-game.web.app" target="_blank">
-    <div class="card-thumb" style="background: linear-gradient(135deg, #1a1a2e, #16213e);">🤥</div>
-    <div class="card-body">
-      <h2>Trust Nothing</h2>
-      <p>A game that lies to you. Every button, every instruction, every rule might be a trick. Can you figure out what's real?</p>
-      <div class="tags"><span class="tag">Puzzle</span><span class="tag">Mind-bending</span><span class="tag">Meta</span></div>
-      <span class="play-btn">Play Now →</span>
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-badge">🧪 EXPERIMENTAL GAME LAB</div>
+  <h1><span class="gradient">Mobile Games</span><br>Lab</h1>
+  <p class="subtitle">11 handcrafted HTML5 games. No downloads, no ads, no tracking. Pure play, straight from your browser.</p>
+  <div class="hero-stats">
+    <div class="hero-stat"><div class="num">11</div><div class="label">Games</div></div>
+    <div class="hero-stat"><div class="num">0</div><div class="label">Downloads</div></div>
+    <div class="hero-stat"><div class="num">100%</div><div class="label">Free</div></div>
+  </div>
+</section>
+
+<!-- Filters -->
+<div class="filters">
+  <button class="filter-btn active" data-filter="all">All Games</button>
+  <button class="filter-btn" data-filter="puzzle">🧩 Puzzle</button>
+  <button class="filter-btn" data-filter="action">⚡ Action</button>
+  <button class="filter-btn" data-filter="strategy">♟️ Strategy</button>
+  <button class="filter-btn" data-filter="horror">👻 Horror</button>
+  <button class="filter-btn" data-filter="social">🎉 Social</button>
+  <button class="filter-btn" data-filter="simulation">🌿 Simulation</button>
+</div>
+
+<!-- Featured: Gravity Flip -->
+<div class="featured reveal">
+  <a class="featured-card" href="gravity-flip/">
+    <div class="featured-visual" style="background:linear-gradient(135deg,#0a1628,#1a2a4a);">
+      <img src="screenshots/gravity-flip.png" alt="Gravity Flip gameplay">
+      <span style="position:relative;z-index:1">🔄</span>
     </div>
-  </a>
-
-  <a class="card" href="https://jc-deja-vu-game.web.app" target="_blank">
-    <div class="card-thumb" style="background: linear-gradient(135deg, #f5ebd7, #d4c5a9);">⏰</div>
-    <div class="card-body">
-      <h2>Déjà Vu</h2>
-      <p>60-second time-loop puzzle. You wake up in a room. The clock reads 3:47. It always does. Find the way out before time runs out — again.</p>
-      <div class="tags"><span class="tag">Time Loop</span><span class="tag">Puzzle</span><span class="tag">Mystery</span></div>
-      <span class="play-btn">Play Now →</span>
-    </div>
-  </a>
-
-  <a class="card" href="https://jc-conspiracy-board-game.web.app" target="_blank">
-    <div class="card-thumb" style="background: linear-gradient(135deg, #8b7355, #6d5a45);">🔍</div>
-    <div class="card-body">
-      <h2>Conspiracy Board</h2>
-      <p>Pin clues to a corkboard and connect them with red string. Solve detective cases by finding the right connections.</p>
-      <div class="tags"><span class="tag">Detective</span><span class="tag">Puzzle</span><span class="tag">Touch</span></div>
-      <span class="play-btn">Play Now →</span>
-    </div>
-  </a>
-
-  <a class="card" href="https://jc-emoji-wars.web.app" target="_blank">
-    <div class="card-thumb" style="background: linear-gradient(135deg, #FFD700, #FFA500);">⚔️</div>
-    <div class="card-body">
-      <h2>Emoji Wars</h2>
-      <p>Build an army of emoji units and battle AI opponents in real-time strategy. Rock-paper-scissors combat with 24 unique units.</p>
-      <div class="tags"><span class="tag">RTS</span><span class="tag">Strategy</span><span class="tag">Emoji</span></div>
-      <span class="play-btn">Play Now →</span>
-    </div>
-  </a>
-
-  <a class="card" href="https://jc-haunted-phone-game.web.app" target="_blank">
-    <div class="card-thumb" style="background: linear-gradient(135deg, #1a0a2e, #000);">👻</div>
-    <div class="card-body">
-      <h2>Haunted Phone</h2>
-      <p>Your phone turns against you. Fake notifications, glitches, screen inversions. Survive as long as you can — and find the secret to stop it.</p>
-      <div class="tags"><span class="tag">Horror</span><span class="tag">Social</span><span class="tag">Survival</span></div>
-      <span class="play-btn">Play Now →</span>
-    </div>
-  </a>
-
-  <a class="card" href="https://jc-one-button-odyssey.web.app" target="_blank">
-    <div class="card-thumb" style="background: linear-gradient(135deg, #2a1a3a, #4a6741);">⚔️</div>
-    <div class="card-body">
-      <h2>One Button Odyssey</h2>
-      <p>An entire RPG controlled with a single tap. Time your attacks to the beat, block, dodge, and defeat bosses across three zones.</p>
-      <div class="tags"><span class="tag">RPG</span><span class="tag">Rhythm</span><span class="tag">One-Button</span></div>
-      <span class="play-btn">Play Now →</span>
-    </div>
-  </a>
-
-  <a class="card" href="https://jc-gravity-flip-game.web.app" target="_blank">
-    <div class="card-thumb" style="background: linear-gradient(135deg, #0a1628, #1a2a4a);">🔄</div>
-    <div class="card-body">
+    <div class="featured-info">
       <h2>Gravity Flip</h2>
-      <p>Tap to flip gravity and navigate through obstacles. Fast-paced, polished platformer with procedurally generated levels.</p>
-      <div class="tags"><span class="tag">Platformer</span><span class="tag">Arcade</span><span class="tag">Polished</span></div>
-      <span class="play-btn">Play Now →</span>
+      <p>Tap to flip gravity and soar through procedurally generated worlds. A polished, fast-paced platformer that feels like it belongs on the App Store — except it runs right in your browser.</p>
+      <div class="tags" style="margin-bottom:20px">
+        <span class="tag">Platformer</span><span class="tag">Arcade</span><span class="tag">Polished</span>
+      </div>
+      <span class="featured-play">▶ Play Gravity Flip</span>
     </div>
   </a>
+</div>
 
-  <a class="card" href="https://jc-sound-thief-game.web.app" target="_blank">
-    <div class="card-thumb" style="background: linear-gradient(135deg, #0a0e1a, #1a2040);">🎤</div>
-    <div class="card-body">
-      <h2>Sound Thief</h2>
-      <p>Your microphone is your weapon. Record real sounds and use them as projectiles to defeat enemies in this unique platformer.</p>
-      <div class="tags"><span class="tag">Microphone</span><span class="tag">Platformer</span><span class="tag">Unique</span></div>
-      <span class="play-btn">Play Now →</span>
-    </div>
-  </a>
+<!-- Game Grid -->
+<div class="grid-section">
+  <div class="section-title">🎮 All Games</div>
+  <div class="grid">
 
-  <a class="card" href="https://jc-pocket-ecosystem-game.web.app" target="_blank">
-    <div class="card-thumb" style="background: linear-gradient(135deg, #c8e6c9, #b3d9d9);">🌿</div>
-    <div class="card-body">
-      <h2>Pocket Ecosystem</h2>
-      <p>A living terrarium on your phone. Plants grow, creatures breed and hunt. Tap to plant seeds and feed wildlife. Watercolor art style.</p>
-      <div class="tags"><span class="tag">Simulation</span><span class="tag">Relaxing</span><span class="tag">Persistent</span></div>
-      <span class="play-btn">Play Now →</span>
-    </div>
-  </a>
+    <a class="card reveal" href="trust-nothing/" data-tags="puzzle">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#1a1a2e,#2d1b4e);">
+        <img src="screenshots/trust-nothing.png" alt="Trust Nothing">
+        <span class="card-thumb-emoji">🤥</span>
+      </div>
+      <div class="card-body">
+        <h2>Trust Nothing</h2>
+        <p>A game that lies to you. Every button, every instruction, every rule might be a trick. Figure out what's real — if anything is.</p>
+        <div class="tags"><span class="tag">Puzzle</span><span class="tag">Mind-bending</span><span class="tag">Meta</span></div>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
 
-  <a class="card" href="https://jc-lie-detector-jc.web.app" target="_blank">
-    <div class="card-thumb" style="background: linear-gradient(135deg, #ff0099, #6633cc);">🎭</div>
-    <div class="card-body">
-      <h2>Lie Detector Party</h2>
-      <p>Pass-the-phone party game. Answer questions on the hot seat while a fake AI "analyzes" your face. Friends vote: truth or lie?</p>
-      <div class="tags"><span class="tag">Party</span><span class="tag">Multiplayer</span><span class="tag">Social</span></div>
-      <span class="play-btn">Play Now →</span>
-    </div>
-  </a>
+    <a class="card reveal" href="deja-vu/" data-tags="puzzle,horror">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#2a1a0a,#1a0a2a);">
+        <img src="screenshots/deja-vu.png" alt="Déjà Vu">
+        <span class="card-thumb-emoji">⏳</span>
+      </div>
+      <div class="card-body">
+        <h2>Déjà Vu</h2>
+        <p>60-second time loop. You wake up. The clock reads 3:47. It always does. Find the way out before time collapses — again.</p>
+        <div class="tags"><span class="tag">Time Loop</span><span class="tag">Puzzle</span><span class="tag">Creepy</span></div>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
 
-  <a class="card" href="https://jc-micro-nations-game.web.app" target="_blank">
-    <div class="card-thumb" style="background: linear-gradient(135deg, #1a3a52, #2B5F8F);">🏝️</div>
-    <div class="card-body">
-      <h2>Micro Nations</h2>
-      <p>God game where every citizen is visible. Assign jobs, resolve disputes, build structures, and grow your island civilization.</p>
-      <div class="tags"><span class="tag">God Game</span><span class="tag">Simulation</span><span class="tag">Strategy</span></div>
-      <span class="play-btn">Play Now →</span>
-    </div>
-  </a>
+    <a class="card reveal" href="conspiracy-board/" data-tags="puzzle">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#3a2a1a,#2a1a0a);">
+        <img src="screenshots/conspiracy-board.png" alt="Conspiracy Board">
+        <span class="card-thumb-emoji">📌</span>
+      </div>
+      <div class="card-body">
+        <h2>Conspiracy Board</h2>
+        <p>Pin clues to a corkboard and connect them with red string. Solve detective cases by finding hidden connections.</p>
+        <div class="tags"><span class="tag">Detective</span><span class="tag">Puzzle</span><span class="tag">Touch</span></div>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <a class="card reveal" href="emoji-wars/" data-tags="strategy,action">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#4a3500,#2a1a00);">
+        <img src="screenshots/emoji-wars.png" alt="Emoji Wars">
+        <span class="card-thumb-emoji">⚔️</span>
+      </div>
+      <div class="card-body">
+        <h2>Emoji Wars</h2>
+        <p>Build an emoji army and clash in real-time strategy. 24 unique units, rock-paper-scissors combat, energy management.</p>
+        <div class="tags"><span class="tag">RTS</span><span class="tag">Strategy</span><span class="tag">Battle</span></div>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <a class="card reveal" href="haunted/" data-tags="horror">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#1a0a2e,#0a0a14);">
+        <img src="screenshots/haunted.png" alt="Haunted">
+        <span class="card-thumb-emoji">👻</span>
+      </div>
+      <div class="card-body">
+        <h2>Haunted</h2>
+        <p>Your phone turns against you. Fake notifications, glitches, screen inversions. Survive the horror — or find the secret to stop it.</p>
+        <div class="tags"><span class="tag">Horror</span><span class="tag">Immersive</span><span class="tag">Survival</span></div>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <a class="card reveal" href="one-button/" data-tags="action">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#1a2a1a,#2a1a3a);">
+        <img src="screenshots/one-button.png" alt="One Button Odyssey">
+        <span class="card-thumb-emoji">🗡️</span>
+      </div>
+      <div class="card-body">
+        <h2>One Button Odyssey</h2>
+        <p>An entire RPG controlled with a single tap. Time attacks to the beat, dodge bosses, explore three zones.</p>
+        <div class="tags"><span class="tag">RPG</span><span class="tag">Rhythm</span><span class="tag">One-Button</span></div>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <a class="card reveal" href="sound-thief/" data-tags="action">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#0a0e1a,#1a1040);">
+        <img src="screenshots/sound-thief.png" alt="Sound Thief">
+        <span class="card-thumb-emoji">🎵</span>
+      </div>
+      <div class="card-body">
+        <h2>Sound Thief</h2>
+        <p>Your microphone is your weapon. Record real sounds and use them as projectiles in this audio-based stealth platformer.</p>
+        <div class="tags"><span class="tag">Audio</span><span class="tag">Stealth</span><span class="tag">Unique</span></div>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <a class="card reveal" href="pocket-ecosystem/" data-tags="simulation">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#1a3a2a,#0a2a1a);">
+        <img src="screenshots/pocket-ecosystem.png" alt="Pocket Ecosystem">
+        <span class="card-thumb-emoji">🌿</span>
+      </div>
+      <div class="card-body">
+        <h2>Pocket Ecosystem</h2>
+        <p>A living terrarium in your pocket. Plants grow, creatures breed and hunt. Watercolor art meets nature simulation.</p>
+        <div class="tags"><span class="tag">Simulation</span><span class="tag">Relaxing</span><span class="tag">Art</span></div>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <a class="card reveal" href="lie-detector/" data-tags="social">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#3a0a3a,#1a0a3a);">
+        <img src="screenshots/lie-detector.png" alt="Lie Detector">
+        <span class="card-thumb-emoji">🎭</span>
+      </div>
+      <div class="card-body">
+        <h2>Lie Detector</h2>
+        <p>Pass-the-phone party game. Answer questions on the hot seat while a fake AI "analyzes" your face. Friends vote: truth or lie?</p>
+        <div class="tags"><span class="tag">Party</span><span class="tag">Social</span><span class="tag">Multiplayer</span></div>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <a class="card reveal" href="micro-nations/" data-tags="strategy,simulation">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#0a2a4a,#1a3a5a);">
+        <img src="screenshots/micro-nations.png" alt="Micro Nations">
+        <span class="card-thumb-emoji">🏗️</span>
+      </div>
+      <div class="card-body">
+        <h2>Micro Nations</h2>
+        <p>Build an island civilization from scratch. Assign jobs, resolve disputes, grow your population. Every citizen is visible.</p>
+        <div class="tags"><span class="tag">God Game</span><span class="tag">Strategy</span><span class="tag">Building</span></div>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+  </div>
+</div>
+
+<!-- Footer -->
+<footer>
+  <span class="footer-emoji">🧪</span>
+  <p>Built with ❤️ by <a href="https://github.com/jeanchouky">JeanChouky</a></p>
+  <p style="margin-top:8px;font-size:0.78rem">Every game is a single HTML file — no frameworks, no dependencies, no nonsense.</p>
+</footer>
 
 </div>
 
-<footer>
-  <p>Built by <a href="https://github.com/jeanchouky">JeanChouky</a> • All games are single HTML files — no frameworks, no dependencies.</p>
-</footer>
+<script>
+// Cursor glow
+const glow=document.getElementById('glow');
+document.addEventListener('mousemove',e=>{glow.style.left=e.clientX+'px';glow.style.top=e.clientY+'px'});
+
+// Scroll reveal
+const obs=new IntersectionObserver(entries=>{
+  entries.forEach((e,i)=>{
+    if(e.isIntersecting){
+      setTimeout(()=>e.target.classList.add('visible'),i*80);
+      obs.unobserve(e.target);
+    }
+  });
+},{threshold:0.1,rootMargin:'0px 0px -40px 0px'});
+document.querySelectorAll('.reveal').forEach(el=>obs.observe(el));
+
+// Filter
+document.querySelectorAll('.filter-btn').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    const f=btn.dataset.filter;
+    document.querySelectorAll('.card').forEach(card=>{
+      const tags=card.dataset.tags||'';
+      const show=f==='all'||tags.includes(f);
+      card.style.display=show?'':'none';
+    });
+    // Show/hide featured
+    const feat=document.querySelector('.featured');
+    if(feat)feat.style.display=(f==='all'||f==='action')?'':'none';
+  });
+});
+</script>
 
 </body>
 </html>
