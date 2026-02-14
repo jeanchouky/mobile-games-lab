@@ -11,7 +11,7 @@
 html, body {
   width: 100%; height: 100%;
   overflow: hidden;
-  background: #8b7355;
+  background: #3a2a1a;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
@@ -29,14 +29,9 @@ canvas {
 <script>
 'use strict';
 
-// ============================================================
-// CONSPIRACY BOARD — Detective Puzzle Game
-// ============================================================
-
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
 
-// --- GLOBALS ---
 let W, H, scale;
 let gameTime = 0, deltaTime = 0, lastTime = 0;
 let currentCase = null;
@@ -50,15 +45,26 @@ let stringStart = null;
 let stringCurrent = { x: 0, y: 0 };
 let camera = { x: 0, y: 0, zoom: 1, targetZoom: 1 };
 let inputEvents = [];
-let gameState = 'menu'; // menu, playing, solved
+let gameState = 'menu';
 let solveTime = 0;
 let correctConnections = 0;
 let totalRequired = 0;
 let revealAnim = 0;
 let pinchDist = 0;
-let corkTexture = null;
+let selectedClue = null;
+let tutorial = { step: 0, shown: false, timer: 0 };
+let hints = [];
+let hintsUsed = 0;
+let shakeAmount = 0;
+let bestTimes = {};
+try { const s = localStorage.getItem('conspboard'); if (s) bestTimes = JSON.parse(s); } catch(e){}
+function saveBest() { try { localStorage.setItem('conspboard', JSON.stringify(bestTimes)); } catch(e){} }
 
-// --- RESIZE ---
+// Pin colors pool
+const pinColors = ['#c41e3a', '#ffd700', '#4169e1', '#228b22', '#ff8c00', '#9932cc', '#ff69b4', '#00ced1'];
+let pinColorIdx = 0;
+function nextPinColor() { return pinColors[pinColorIdx++ % pinColors.length]; }
+
 function resize() {
   const dpr = window.devicePixelRatio || 1;
   W = window.innerWidth;
@@ -74,7 +80,7 @@ window.addEventListener('resize', resize);
 resize();
 
 // ============================================================
-// AUDIO ENGINE
+// AUDIO
 // ============================================================
 let audioCtx = null;
 function ensureAudio() {
@@ -82,153 +88,172 @@ function ensureAudio() {
   if (audioCtx.state === 'suspended') audioCtx.resume();
 }
 
-function playTone(freq, duration, type = 'sine', vol = 0.12) {
+function playTone(freq, dur, type = 'sine', vol = 0.1) {
   ensureAudio();
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  osc.type = type;
-  osc.frequency.value = freq;
-  gain.gain.setValueAtTime(vol, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
-  osc.connect(gain);
-  gain.connect(audioCtx.destination);
-  osc.start();
-  osc.stop(audioCtx.currentTime + duration);
+  const t = audioCtx.currentTime;
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(audioCtx.destination);
+  o.start(t); o.stop(t + dur);
+}
+function playNoise(dur, vol = 0.06, freq = null) {
+  ensureAudio();
+  const t = audioCtx.currentTime;
+  const sz = audioCtx.sampleRate * dur;
+  const buf = audioCtx.createBuffer(1, sz, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < sz; i++) d[i] = Math.random() * 2 - 1;
+  const s = audioCtx.createBufferSource(); s.buffer = buf;
+  const g = audioCtx.createGain();
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  if (freq) {
+    const f = audioCtx.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.value = freq;
+    s.connect(f).connect(g).connect(audioCtx.destination);
+  } else { s.connect(g).connect(audioCtx.destination); }
+  s.start(t);
 }
 
-function playNoise(duration, vol = 0.08, filterFreq = null) {
-  ensureAudio();
-  const bufSize = audioCtx.sampleRate * duration;
-  const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
-  const data = buf.getChannelData(0);
-  for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
-  const src = audioCtx.createBufferSource();
-  const gain = audioCtx.createGain();
-  src.buffer = buf;
-  gain.gain.setValueAtTime(vol, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
-  
-  if (filterFreq) {
-    const filter = audioCtx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = filterFreq;
-    src.connect(filter);
-    filter.connect(gain);
-  } else {
-    src.connect(gain);
-  }
-  
-  gain.connect(audioCtx.destination);
-  src.start();
-}
-
-function sfxPin() { playTone(800, 0.04, 'sine', 0.1); playTone(400, 0.03, 'sine', 0.08); }
-function sfxPaperShuffle() { playNoise(0.15, 0.06, 2000); }
-function sfxStringStretch() { playTone(300 + Math.random() * 100, 0.08, 'triangle', 0.05); }
-function sfxRevelation() { 
-  playTone(523, 0.1, 'sine', 0.12); 
-  setTimeout(() => playTone(659, 0.1, 'sine', 0.12), 100); 
-  setTimeout(() => playTone(784, 0.15, 'sine', 0.12), 200); 
-  setTimeout(() => playTone(1047, 0.2, 'sine', 0.12), 300);
-}
-function sfxCorrect() { playTone(880, 0.08, 'sine', 0.1); }
-function sfxWrong() { playTone(220, 0.12, 'sawtooth', 0.08); }
+function sfxPin() { playTone(800, 0.04, 'sine', 0.08); playTone(400, 0.03, 'sine', 0.06); }
+function sfxPaper() { playNoise(0.12, 0.05, 2000); }
+function sfxString() { playTone(300 + Math.random() * 100, 0.08, 'triangle', 0.04); }
+function sfxCorrect() { playTone(880, 0.08, 'sine', 0.08); playTone(1100, 0.06, 'sine', 0.06); }
+function sfxWrong() { playTone(200, 0.12, 'sawtooth', 0.06); }
+function sfxSolve() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => playTone(f, 0.15, 'sine', 0.1), i * 120)); }
+function sfxClick() { playTone(600, 0.03, 'sine', 0.04); }
+function sfxHint() { playTone(440, 0.1, 'triangle', 0.06); playTone(660, 0.08, 'triangle', 0.04); }
+function sfxRemove() { playTone(300, 0.06, 'triangle', 0.04); }
 
 // ============================================================
-// PROCEDURAL CASE GENERATION
+// CASES — improved with clearer connections
 // ============================================================
-
 const caseTemplates = [
   {
-    type: 'murder',
-    title: 'The Midnight Manor Murder',
+    type: 'murder', title: 'The Midnight Manor Murder',
+    difficulty: 1,
     suspects: ['Butler', 'Gardener', 'Cook', 'Maid', 'Doctor'],
-    evidence: [
-      { type: 'photo', desc: 'Crime scene - Study', connects: ['weapon', 'time'] },
-      { type: 'document', desc: 'Will - £5M inheritance', connects: ['suspect1', 'motive'] },
-      { type: 'photo', desc: 'Bloody candlestick', connects: ['suspect2', 'crime'] },
-      { type: 'statement', desc: 'Butler: "I heard arguing at 11pm"', connects: ['time', 'suspect1'] },
-      { type: 'photo', desc: 'Muddy footprints', connects: ['suspect3', 'crime'] },
-      { type: 'document', desc: 'Poison report - negative', connects: ['weapon', 'crime'] },
-      { type: 'statement', desc: 'Gardener alibi contradicted', connects: ['suspect3', 'motive'] },
-      { type: 'evidence', desc: 'Thread from cook\'s apron', connects: ['suspect2', 'crime'] }
+    clueData: [
+      { type: 'photo', label: '📷 CRIME SCENE', desc: 'Study, 11pm\nBlood on desk', tags: ['crime', 'time'], color: '#8b0000' },
+      { type: 'document', label: '📜 THE WILL', desc: '£5M inheritance\nRecent change', tags: ['motive', 'suspect1'], color: '#daa520' },
+      { type: 'evidence', label: '🔪 CANDLESTICK', desc: 'Bloody, heavy\nFingerprints: Cook', tags: ['weapon', 'suspect2'], color: '#cd853f' },
+      { type: 'statement', label: '💬 BUTLER SAYS', desc: '"Heard arguing\nat 11pm"', tags: ['time', 'suspect1'], color: '#4682b4' },
+      { type: 'evidence', label: '👣 MUD TRACKS', desc: 'Garden boots\nSize 10 — Gardener', tags: ['suspect3', 'crime'], color: '#556b2f' },
+      { type: 'document', label: '🧪 POISON TEST', desc: 'Result: Negative\nNot poisoned', tags: ['weapon', 'crime'], color: '#708090' },
+      { type: 'statement', label: '❌ ALIBI BROKEN', desc: 'Gardener says home\nNeighbour saw him here', tags: ['suspect3', 'motive'], color: '#b22222' },
+      { type: 'evidence', label: '🧵 APRON THREAD', desc: 'Cook\'s apron thread\nFound at scene', tags: ['suspect2', 'crime'], color: '#deb887' },
     ],
-    solution: [
-      ['crime', 'weapon'], ['weapon', 'suspect2'], ['suspect2', 'motive'],
-      ['time', 'suspect1'], ['crime', 'suspect3']
+    connections: [
+      [0, 5, 'crime-weapon'], [5, 2, 'weapon-suspect'], [2, 7, 'suspect-scene'],
+      [0, 3, 'crime-time'], [3, 1, 'time-motive'], [4, 6, 'suspect-alibi']
     ]
   },
   {
-    type: 'heist',
-    title: 'The Gallery Heist',
+    type: 'heist', title: 'The Gallery Heist',
+    difficulty: 2,
     suspects: ['Security Guard', 'Curator', 'Janitor', 'Donor', 'Artist'],
-    evidence: [
-      { type: 'photo', desc: 'Empty frame - $10M painting gone', connects: ['crime', 'time'] },
-      { type: 'document', desc: 'Security logs altered', connects: ['suspect1', 'crime'] },
-      { type: 'photo', desc: 'Ventilation shaft opened', connects: ['entry', 'crime'] },
-      { type: 'statement', desc: 'Curator: "I left at 8pm sharp"', connects: ['suspect2', 'time'] },
-      { type: 'evidence', desc: 'Janitor key card used at 3am', connects: ['suspect3', 'entry'] },
-      { type: 'document', desc: 'Donor bankruptcy filing', connects: ['suspect4', 'motive'] },
-      { type: 'photo', desc: 'Paint samples match artist studio', connects: ['suspect5', 'crime'] },
-      { type: 'statement', desc: 'Security footage "corrupted"', connects: ['suspect1', 'motive'] }
+    clueData: [
+      { type: 'photo', label: '🖼️ EMPTY FRAME', desc: '$10M painting gone\n3am discovered', tags: ['crime', 'time'], color: '#8b0000' },
+      { type: 'document', label: '📊 SECURITY LOG', desc: 'Logs altered at 2am\nGuard\'s terminal', tags: ['suspect1', 'crime'], color: '#4169e1' },
+      { type: 'photo', label: '🔧 VENT OPENED', desc: 'Ventilation shaft\nScrews removed inside', tags: ['entry', 'crime'], color: '#708090' },
+      { type: 'statement', label: '💬 CURATOR', desc: '"I left at 8pm"\nCard swipe confirms', tags: ['suspect2', 'time'], color: '#4682b4' },
+      { type: 'evidence', label: '🔑 JANITOR KEY', desc: 'Keycard used 3am\nJanitor denies it', tags: ['suspect3', 'entry'], color: '#daa520' },
+      { type: 'document', label: '💰 BANKRUPTCY', desc: 'Donor filed Ch.11\nLast month', tags: ['suspect4', 'motive'], color: '#b22222' },
+      { type: 'evidence', label: '🎨 PAINT MATCH', desc: 'Paint samples match\nArtist\'s studio', tags: ['suspect5', 'crime'], color: '#9370db' },
+      { type: 'statement', label: '📹 FOOTAGE GONE', desc: 'Security footage\n"corrupted" by guard', tags: ['suspect1', 'motive'], color: '#cd853f' },
     ],
-    solution: [
-      ['crime', 'entry'], ['entry', 'suspect3'], ['suspect3', 'suspect1'],
-      ['suspect1', 'motive'], ['time', 'suspect2']
+    connections: [
+      [0, 2, 'crime-entry'], [2, 4, 'entry-suspect'], [4, 1, 'suspect-evidence'],
+      [1, 7, 'evidence-motive'], [0, 3, 'crime-time'], [5, 6, 'motive-link']
     ]
   },
   {
-    type: 'missing',
-    title: 'The Vanishing Heiress',
+    type: 'missing', title: 'The Vanishing Heiress',
+    difficulty: 2,
     suspects: ['Fiancé', 'Business Partner', 'Brother', 'Therapist', 'Driver'],
-    evidence: [
-      { type: 'photo', desc: 'Last seen - Café at 2pm', connects: ['time', 'location'] },
-      { type: 'document', desc: 'Text: "Meet me at the docks"', connects: ['location', 'suspect1'] },
-      { type: 'statement', desc: 'Fiancé claims she went abroad', connects: ['suspect1', 'motive'] },
-      { type: 'photo', desc: 'Her car found abandoned', connects: ['location', 'crime'] },
-      { type: 'document', desc: 'Recent life insurance policy', connects: ['motive', 'suspect1'] },
-      { type: 'statement', desc: 'Brother: "She feared someone"', connects: ['suspect3', 'motive'] },
-      { type: 'evidence', desc: 'Therapist notes - paranoia', connects: ['suspect4', 'motive'] },
-      { type: 'photo', desc: 'Driver GPS log - warehouse', connects: ['suspect5', 'location'] }
+    clueData: [
+      { type: 'photo', label: '☕ LAST SEEN', desc: 'Café at 2pm\nSeemed nervous', tags: ['time', 'location'], color: '#8b4513' },
+      { type: 'document', label: '📱 TEXT MSG', desc: '"Meet me at docks"\nFrom unknown number', tags: ['location', 'suspect1'], color: '#4169e1' },
+      { type: 'statement', label: '💬 FIANCÉ LIES', desc: '"She went abroad"\nPassport still home', tags: ['suspect1', 'motive'], color: '#b22222' },
+      { type: 'photo', label: '🚗 CAR FOUND', desc: 'Abandoned at docks\nKeys in ignition', tags: ['location', 'crime'], color: '#708090' },
+      { type: 'document', label: '📋 INSURANCE', desc: 'New life policy\n$2M — Fiancé benefits', tags: ['motive', 'suspect1'], color: '#daa520' },
+      { type: 'statement', label: '💬 BROTHER', desc: '"She feared someone"\nWouldn\'t say who', tags: ['suspect3', 'motive'], color: '#4682b4' },
+      { type: 'evidence', label: '📔 THERAPY NOTES', desc: 'Paranoia, threats\nFrom "close friend"', tags: ['suspect4', 'motive'], color: '#9370db' },
+      { type: 'photo', label: '📍 DRIVER GPS', desc: 'Went to warehouse\nDistrict 5, 4pm', tags: ['suspect5', 'location'], color: '#cd853f' },
     ],
-    solution: [
-      ['crime', 'location'], ['location', 'suspect1'], ['suspect1', 'motive'],
-      ['time', 'suspect5'], ['suspect3', 'suspect4']
+    connections: [
+      [0, 3, 'location-crime'], [3, 1, 'crime-suspect'], [1, 2, 'suspect-motive'],
+      [2, 4, 'motive-evidence'], [0, 7, 'time-trail'], [5, 6, 'fear-source']
+    ]
+  },
+  {
+    type: 'sabotage', title: 'The Poisoned Prototype',
+    difficulty: 3,
+    suspects: ['Rival CEO', 'Lab Assistant', 'Investor', 'Ex-Partner', 'Intern'],
+    clueData: [
+      { type: 'photo', label: '🧬 SABOTAGED', desc: 'Prototype failed\nContaminated sample', tags: ['crime', 'method'], color: '#8b0000' },
+      { type: 'document', label: '💻 ACCESS LOG', desc: 'Lab entered 2am\nIntern\'s badge', tags: ['suspect5', 'crime'], color: '#4169e1' },
+      { type: 'evidence', label: '🧪 CHEMICAL', desc: 'Rare solvent found\nOnly sold to 3 labs', tags: ['method', 'trail'], color: '#daa520' },
+      { type: 'statement', label: '💬 ASSISTANT', desc: '"Saw rival CEO\nnear lab Tuesday"', tags: ['suspect1', 'suspect5'], color: '#4682b4' },
+      { type: 'document', label: '📧 LEAKED EMAIL', desc: 'Rival offered intern\n$50K to "help"', tags: ['suspect1', 'motive'], color: '#b22222' },
+      { type: 'evidence', label: '📦 DELIVERY', desc: 'Chemical shipped to\nP.O. Box — Rival\'s', tags: ['trail', 'suspect1'], color: '#cd853f' },
+      { type: 'statement', label: '💬 EX-PARTNER', desc: '"They stole my\nresearch. I want justice"', tags: ['suspect4', 'motive'], color: '#9370db' },
+      { type: 'document', label: '📈 STOCK MOVE', desc: 'Investor shorted stock\nDay before failure', tags: ['suspect3', 'motive'], color: '#556b2f' },
+    ],
+    connections: [
+      [0, 2, 'crime-method'], [2, 5, 'method-trail'], [5, 4, 'trail-motive'],
+      [4, 3, 'motive-link'], [1, 3, 'access-witness'], [6, 7, 'side-motives']
     ]
   }
 ];
 
+// ============================================================
+// CASE SETUP
+// ============================================================
 function generateCase(templateIndex) {
-  const template = caseTemplates[templateIndex % caseTemplates.length];
-  const boardW = W * 1.5, boardH = H * 1.5;
-  const padding = 80 * scale;
+  const t = caseTemplates[templateIndex % caseTemplates.length];
+  const padding = 100 * scale;
+  const boardW = W * 1.5;
+  const boardH = H * 1.5;
   
-  const caseClues = template.evidence.map((ev, i) => {
-    const x = padding + Math.random() * (boardW - padding * 2);
-    const y = padding + Math.random() * (boardH - padding * 2);
-    const rotation = (Math.random() - 0.5) * 0.15;
-    const size = ev.type === 'photo' ? 140 : 120;
+  // Arrange clues in a nice spread
+  const cols = 3;
+  const rows = Math.ceil(t.clueData.length / cols);
+  const cellW = (boardW - padding * 2) / cols;
+  const cellH = (boardH - padding * 2) / rows;
+  
+  const caseClues = t.clueData.map((cd, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = padding + col * cellW + cellW / 2 + (Math.random() - 0.5) * cellW * 0.3;
+    const y = padding + row * cellH + cellH / 2 + (Math.random() - 0.5) * cellH * 0.3;
+    const rotation = (Math.random() - 0.5) * 0.08;
     
     return {
-      id: `clue${i}`,
-      type: ev.type,
-      desc: ev.desc,
-      x, y,
-      rotation,
-      width: size * scale,
-      height: (size * 0.75) * scale,
-      connects: ev.connects,
-      pinned: false,
-      discovered: true
+      id: i,
+      type: cd.type,
+      label: cd.label,
+      desc: cd.desc,
+      tags: cd.tags,
+      color: cd.color,
+      x, y, rotation,
+      width: 130 * scale,
+      height: 90 * scale,
+      pinColor: null,
+      discovered: false,
+      dropDelay: i * 0.15
     };
   });
   
   return {
-    title: template.title,
-    type: template.type,
+    title: t.title,
+    type: t.type,
+    difficulty: t.difficulty,
     clues: caseClues,
-    solution: template.solution,
-    suspect: template.suspects[Math.floor(Math.random() * template.suspects.length)]
+    requiredConnections: t.connections,
+    suspects: t.suspects
   };
 }
 
@@ -240,220 +265,175 @@ function startCase(index) {
   gameState = 'playing';
   solveTime = 0;
   correctConnections = 0;
-  totalRequired = currentCase.solution.length;
-  camera = { x: W * 0.75, y: H * 0.75, zoom: 0.65, targetZoom: 0.65 };
+  totalRequired = currentCase.requiredConnections.length;
+  camera = { x: W * 0.75, y: H * 0.75, zoom: 0.6, targetZoom: 0.6 };
+  selectedClue = null;
+  hints = [...currentCase.requiredConnections];
+  hintsUsed = 0;
+  pinColorIdx = 0;
+  tutorial = { step: 0, shown: false, timer: 0 };
+  shakeAmount = 0;
   
-  // Scatter clues with drop animation
+  // Animated reveal
   clues.forEach((c, i) => {
     setTimeout(() => {
       c.discovered = true;
-      sfxPaperShuffle();
-    }, i * 100);
+      sfxPaper();
+    }, 300 + i * 150);
   });
 }
 
 // ============================================================
-// DRAWING - Cork Board Aesthetic
+// DRAWING
 // ============================================================
-
-let corkCanvas = null;
-function buildCorkTexture() {
-  corkCanvas = document.createElement('canvas');
-  corkCanvas.width = W * (window.devicePixelRatio || 1);
-  corkCanvas.height = H * (window.devicePixelRatio || 1);
-  const cc = corkCanvas.getContext('2d');
-  const dpr = window.devicePixelRatio || 1;
-  cc.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const grad = cc.createLinearGradient(0, 0, W, H);
-  grad.addColorStop(0, '#8b7355'); grad.addColorStop(0.5, '#9d8264'); grad.addColorStop(1, '#8b7355');
-  cc.fillStyle = grad; cc.fillRect(0, 0, W, H);
-  cc.globalAlpha = 0.15;
-  for (let i = 0; i < 800; i++) {
-    cc.fillStyle = Math.random() > 0.5 ? '#6d5a45' : '#a08060';
-    cc.fillRect(Math.random() * W, Math.random() * H, Math.random() * 3, Math.random() * 3);
+function drawCorkBG() {
+  const grad = ctx.createLinearGradient(0, 0, W, H);
+  grad.addColorStop(0, '#7a6545');
+  grad.addColorStop(0.3, '#8d7455');
+  grad.addColorStop(0.7, '#7a6545');
+  grad.addColorStop(1, '#6d5a3a');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  
+  // Cork grain (static pattern based on position)
+  ctx.save(); ctx.globalAlpha = 0.15;
+  for (let i = 0; i < 300; i++) {
+    const seed = i * 7919;
+    const x = (seed * 13) % W;
+    const y = (seed * 17) % H;
+    const s = (seed % 3) + 1;
+    ctx.fillStyle = (seed % 2) ? '#5d4a35' : '#9a8060';
+    ctx.fillRect(x, y, s, s);
   }
-}
-
-function drawCorkTexture() {
-  if (!corkCanvas || corkCanvas.width !== W * (window.devicePixelRatio || 1)) buildCorkTexture();
-  ctx.drawImage(corkCanvas, 0, 0, W, H);
+  ctx.restore();
 }
 
 function drawClue(clue) {
   if (!clue.discovered) return;
   
+  // Drop animation
+  const age = gameTime - clue.dropDelay;
+  if (age < 0) return;
+  const dropScale = age < 0.3 ? 0.5 + (age / 0.3) * 0.5 : 1;
+  const dropAlpha = age < 0.2 ? age / 0.2 : 1;
+  
   ctx.save();
+  ctx.globalAlpha = dropAlpha;
   ctx.translate(clue.x, clue.y);
   ctx.rotate(clue.rotation);
+  ctx.scale(dropScale, dropScale);
   
   const hw = clue.width / 2;
   const hh = clue.height / 2;
+  const isSelected = selectedClue === clue;
   
   // Shadow
-  ctx.shadowColor = 'rgba(0,0,0,0.3)';
-  ctx.shadowBlur = 8 * scale;
-  ctx.shadowOffsetX = 3 * scale;
-  ctx.shadowOffsetY = 3 * scale;
+  ctx.shadowColor = isSelected ? 'rgba(255,200,0,0.4)' : 'rgba(0,0,0,0.35)';
+  ctx.shadowBlur = isSelected ? 15 * scale : 8 * scale;
+  ctx.shadowOffsetX = isSelected ? 0 : 3 * scale;
+  ctx.shadowOffsetY = isSelected ? 0 : 3 * scale;
   
-  // Clue background based on type
+  // Card background
+  const bgCol = clue.type === 'photo' ? '#f0ece0' : 
+                clue.type === 'document' ? '#fefef8' :
+                clue.type === 'statement' ? '#fffed0' : '#ece5d5';
+  ctx.fillStyle = bgCol;
+  ctx.fillRect(-hw, -hh, clue.width, clue.height);
+  
+  // Color accent stripe on left
+  ctx.fillStyle = clue.color;
+  ctx.fillRect(-hw, -hh, 5 * scale, clue.height);
+  
+  // Type-specific decoration
   if (clue.type === 'photo') {
-    // Polaroid style
-    ctx.fillStyle = '#f5f0e6';
-    ctx.fillRect(-hw - 4*scale, -hh - 4*scale, clue.width + 8*scale, clue.height + 20*scale);
     ctx.fillStyle = '#ddd';
-    ctx.fillRect(-hw, -hh, clue.width, clue.height);
-    // Photo "image" area
-    const photoGrad = ctx.createLinearGradient(-hw, -hh, hw, hh);
-    photoGrad.addColorStop(0, '#555');
-    photoGrad.addColorStop(0.5, '#888');
-    photoGrad.addColorStop(1, '#555');
-    ctx.fillStyle = photoGrad;
-    ctx.fillRect(-hw, -hh, clue.width, clue.height * 0.85);
-    // Caption area
-    ctx.fillStyle = '#f5f0e6';
-    ctx.fillRect(-hw, -hh + clue.height * 0.85, clue.width, clue.height * 0.15);
-  } else if (clue.type === 'document') {
-    // Paper with lines
-    ctx.fillStyle = '#fefef8';
-    ctx.fillRect(-hw, -hh, clue.width, clue.height);
-    ctx.strokeStyle = 'rgba(180,210,240,0.4)';
-    ctx.lineWidth = 0.5;
-    for (let ly = -hh + 10*scale; ly < hh; ly += 12*scale) {
-      ctx.beginPath();
-      ctx.moveTo(-hw + 5*scale, ly);
-      ctx.lineTo(hw - 5*scale, ly);
-      ctx.stroke();
+    ctx.fillRect(-hw + 7*scale, -hh + 5*scale, clue.width - 14*scale, clue.height * 0.35);
+    // Film strip effect
+    ctx.fillStyle = '#aaa';
+    for (let i = 0; i < 4; i++) {
+      ctx.fillRect(-hw + 10*scale + i * 25*scale, -hh + 3*scale, 3*scale, 2*scale);
     }
-  } else if (clue.type === 'statement') {
-    // Handwritten note
-    ctx.fillStyle = '#ffffcc';
-    ctx.fillRect(-hw, -hh, clue.width, clue.height);
-    ctx.strokeStyle = '#dda';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(-hw, -hh, clue.width, clue.height);
-  } else {
-    // Evidence tag
-    ctx.fillStyle = '#e8e0d5';
-    ctx.fillRect(-hw, -hh, clue.width, clue.height);
+  } else if (clue.type === 'document') {
+    ctx.strokeStyle = 'rgba(150,180,220,0.25)';
+    ctx.lineWidth = 0.5;
+    for (let ly = -hh + 30*scale; ly < hh - 5*scale; ly += 8*scale) {
+      ctx.beginPath(); ctx.moveTo(-hw + 10*scale, ly); ctx.lineTo(hw - 5*scale, ly); ctx.stroke();
+    }
   }
   
   // Border
   ctx.shadowColor = 'transparent';
-  ctx.strokeStyle = '#333';
-  ctx.lineWidth = 1.5;
-  if (clue.type === 'photo') {
-    ctx.strokeRect(-hw - 4*scale, -hh - 4*scale, clue.width + 8*scale, clue.height + 20*scale);
-  } else {
-    ctx.strokeRect(-hw, -hh, clue.width, clue.height);
-  }
+  ctx.strokeStyle = isSelected ? '#ffd700' : clue.color;
+  ctx.lineWidth = isSelected ? 2.5 : 1.5;
+  ctx.strokeRect(-hw, -hh, clue.width, clue.height);
   
-  // Text content
-  ctx.fillStyle = '#222';
-  ctx.font = `${10 * scale}px 'Courier New', monospace`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+  // Label (emoji + name)
+  ctx.fillStyle = '#111';
+  ctx.font = `bold ${10 * scale}px 'Courier New', monospace`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(clue.label, -hw + 8*scale, -hh + (clue.type === 'photo' ? clue.height * 0.4 : 6*scale));
   
-  // Word wrap
-  const words = clue.desc.split(' ');
-  const lines = [];
-  let line = '';
-  const maxWidth = clue.width - 16*scale;
-  for (const word of words) {
-    const test = line + word + ' ';
-    const metrics = ctx.measureText(test);
-    if (metrics.width > maxWidth && line.length > 0) {
-      lines.push(line.trim());
-      line = word + ' ';
-    } else {
-      line = test;
-    }
-  }
-  lines.push(line.trim());
-  
-  const lineHeight = 12 * scale;
-  const startY = -(lines.length - 1) * lineHeight / 2;
-  lines.forEach((ln, i) => {
-    ctx.fillText(ln, 0, startY + i * lineHeight);
+  // Description text
+  ctx.fillStyle = '#333';
+  ctx.font = `${8 * scale}px 'Courier New', monospace`;
+  const descLines = clue.desc.split('\n');
+  const descStartY = clue.type === 'photo' ? clue.height * 0.55 : 20*scale;
+  descLines.forEach((line, i) => {
+    ctx.fillText(line, -hw + 8*scale, -hh + descStartY + i * 10*scale);
   });
   
-  // Pushpin if pinned
-  if (clue.pinned) {
-    drawPushpin(0, -hh - (clue.type === 'photo' ? 8*scale : 4*scale));
+  // Pushpin
+  if (clue.pinColor) {
+    const px = 0, py = -hh - 2*scale;
+    ctx.fillStyle = clue.pinColor;
+    ctx.beginPath(); ctx.arc(px, py, 5*scale, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.beginPath(); ctx.arc(px - 1.5*scale, py - 1.5*scale, 2*scale, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#777'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px, py + 6*scale); ctx.stroke();
   }
   
   ctx.restore();
 }
 
-function drawPushpin(x, y) {
-  ctx.save();
-  ctx.translate(x, y);
-  
-  // Pin shadow
-  ctx.shadowColor = 'rgba(0,0,0,0.4)';
-  ctx.shadowBlur = 3 * scale;
-  
-  // Pin head
-  const pinColors = ['#c41e3a', '#ffd700', '#4169e1', '#228b22', '#ff8c00'];
-  const color = pinColors[Math.floor(Math.random() * pinColors.length)];
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(0, 0, 5 * scale, 0, Math.PI * 2);
-  ctx.fill();
-  
-  // Pin point
-  ctx.shadowColor = 'transparent';
-  ctx.strokeStyle = '#888';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(0, 8 * scale);
-  ctx.stroke();
-  
-  ctx.restore();
-}
-
-function drawString(x1, y1, x2, y2, isCorrect = null, alpha = 1) {
+function drawString(x1, y1, x2, y2, color = '#c41e3a', alpha = 1, thickness = 2) {
   ctx.save();
   ctx.globalAlpha = alpha;
   
-  // String color based on correctness
-  let color = '#c41e3a';
-  if (isCorrect === true) {
-    color = '#ffd700'; // Gold for correct
-  } else if (isCorrect === false) {
-    color = '#666'; // Gray for wrong
-  }
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+  const sag = Math.min(25 * scale, dist * 0.08);
+  const mx = (x1 + x2) / 2;
+  const my = (y1 + y2) / 2 + sag;
   
-  // Yarn texture with multiple strands
-  for (let offset = -1; offset <= 1; offset++) {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = (2 + Math.abs(offset)) * scale;
-    ctx.globalAlpha = alpha * (offset === 0 ? 1 : 0.5);
-    
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    
-    // Slight sag in the middle
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const sag = Math.min(30 * scale, dist * 0.1);
-    const mx = (x1 + x2) / 2;
-    const my = (y1 + y2) / 2 + sag;
-    
-    ctx.quadraticCurveTo(mx + offset, my, x2, y2);
-    ctx.stroke();
-  }
+  // Main string
+  ctx.strokeStyle = color;
+  ctx.lineWidth = thickness * scale;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.quadraticCurveTo(mx, my, x2, y2);
+  ctx.stroke();
+  
+  // Glow
+  ctx.globalAlpha = alpha * 0.15;
+  ctx.lineWidth = (thickness + 3) * scale;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.quadraticCurveTo(mx, my, x2, y2);
+  ctx.stroke();
   
   ctx.restore();
 }
 
 function drawConnections() {
   connections.forEach(conn => {
-    const c1 = clues.find(c => c.id === conn.from);
-    const c2 = clues.find(c => c.id === conn.to);
+    const c1 = clues[conn.from];
+    const c2 = clues[conn.to];
     if (c1 && c2) {
-      drawString(c1.x, c1.y, c2.x, c2.y, conn.correct);
+      const color = conn.correct === true ? '#ffd700' : conn.correct === false ? '#555' : conn.color || '#c41e3a';
+      drawString(c1.x, c1.y, c2.x, c2.y, color, 1, conn.correct === true ? 3 : 2);
     }
   });
 }
@@ -461,82 +441,118 @@ function drawConnections() {
 // ============================================================
 // GAME LOGIC
 // ============================================================
-
 function checkSolution() {
   correctConnections = 0;
   
   connections.forEach(conn => {
-    const c1 = clues.find(c => c.id === conn.from);
-    const c2 = clues.find(c => c.id === conn.to);
+    const c1 = clues[conn.from];
+    const c2 = clues[conn.to];
+    if (!c1 || !c2) { conn.correct = false; return; }
     
-    if (!c1 || !c2) {
-      conn.correct = false;
-      return;
-    }
+    // Check against required connections
+    const isRequired = currentCase.requiredConnections.some(rc => {
+      return (rc[0] === conn.from && rc[1] === conn.to) || (rc[0] === conn.to && rc[1] === conn.from);
+    });
     
-    // Check if these clues should connect
-    const connects1 = new Set(c1.connects);
-    const connects2 = new Set(c2.connects);
+    // Also check tag overlap
+    const tags1 = new Set(c1.tags);
+    const tags2 = new Set(c2.tags);
+    const overlap = [...tags1].filter(t => tags2.has(t)).length > 0;
     
-    // Find common tags
-    const common = [...connects1].filter(tag => connects2.has(tag));
-    
-    if (common.length > 0) {
+    if (isRequired) {
       conn.correct = true;
       correctConnections++;
+    } else if (overlap) {
+      conn.correct = true; // Related but not required
     } else {
       conn.correct = false;
     }
   });
   
-  // Check win condition (80%+ correct)
-  const requiredCorrect = Math.ceil(totalRequired * 0.8);
-  if (correctConnections >= requiredCorrect && connections.length >= totalRequired) {
+  // Check win
+  if (correctConnections >= totalRequired) {
     gameState = 'solved';
     revealAnim = 0;
-    sfxRevelation();
+    sfxSolve();
+    
+    // Save best time
+    const key = `case_${caseIndex}`;
+    if (!bestTimes[key] || solveTime < bestTimes[key]) {
+      bestTimes[key] = Math.floor(solveTime);
+      saveBest();
+    }
   }
 }
 
 function worldToScreen(wx, wy) {
-  return {
-    x: (wx - camera.x) * camera.zoom + W / 2,
-    y: (wy - camera.y) * camera.zoom + H / 2
-  };
+  return { x: (wx - camera.x) * camera.zoom + W/2, y: (wy - camera.y) * camera.zoom + H/2 };
 }
-
 function screenToWorld(sx, sy) {
-  return {
-    x: (sx - W / 2) / camera.zoom + camera.x,
-    y: (sy - H / 2) / camera.zoom + camera.y
-  };
+  return { x: (sx - W/2) / camera.zoom + camera.x, y: (sy - H/2) / camera.zoom + camera.y };
 }
 
 function getClueAtPoint(wx, wy) {
-  // Check from top to bottom (last drawn = on top)
   for (let i = clues.length - 1; i >= 0; i--) {
     const c = clues[i];
     if (!c.discovered) continue;
-    
-    const dx = wx - c.x;
-    const dy = wy - c.y;
-    
-    // Rotate point to match clue rotation
-    const cos = Math.cos(-c.rotation);
-    const sin = Math.sin(-c.rotation);
-    const rx = dx * cos - dy * sin;
-    const ry = dx * sin + dy * cos;
-    
-    if (Math.abs(rx) < c.width / 2 && Math.abs(ry) < c.height / 2) {
-      return c;
-    }
+    const dx = wx - c.x, dy = wy - c.y;
+    const cos = Math.cos(-c.rotation), sin = Math.sin(-c.rotation);
+    const rx = dx * cos - dy * sin, ry = dx * sin + dy * cos;
+    if (Math.abs(rx) < c.width/2 && Math.abs(ry) < c.height/2) return c;
   }
   return null;
 }
 
+function useHint() {
+  if (hints.length === 0) return;
+  
+  // Find first unconnected required connection
+  for (let i = 0; i < hints.length; i++) {
+    const h = hints[i];
+    const exists = connections.some(c => 
+      (c.from === h[0] && c.to === h[1]) || (c.from === h[1] && c.to === h[0])
+    );
+    if (!exists) {
+      // Highlight the two clues
+      const c1 = clues[h[0]], c2 = clues[h[1]];
+      c1.pinColor = c1.pinColor || nextPinColor();
+      c2.pinColor = c2.pinColor || nextPinColor();
+      
+      // Auto-connect
+      const color = nextPinColor();
+      connections.push({ from: h[0], to: h[1], correct: null, color });
+      sfxHint();
+      hintsUsed++;
+      
+      checkSolution();
+      return;
+    }
+  }
+}
+
+function removeConnection(wx, wy) {
+  // Find nearest connection to tap point
+  for (let i = connections.length - 1; i >= 0; i--) {
+    const c = connections[i];
+    const c1 = clues[c.from], c2 = clues[c.to];
+    const mx = (c1.x + c2.x) / 2, my = (c1.y + c2.y) / 2;
+    const dist = Math.sqrt((wx - mx)*(wx - mx) + (wy - my)*(wy - my));
+    if (dist < 30 * scale) {
+      connections.splice(i, 1);
+      sfxRemove();
+      // Re-check
+      checkSolution();
+      return true;
+    }
+  }
+  return false;
+}
+
 // ============================================================
-// INPUT HANDLING
+// INPUT
 // ============================================================
+let longPressTimer = null;
+let lastTapTime = 0;
 
 function handlePointerDown(x, y) {
   ensureAudio();
@@ -544,62 +560,72 @@ function handlePointerDown(x, y) {
   const clue = getClueAtPoint(world.x, world.y);
   
   if (clue) {
-    // Check if clicking near the top (to pin/draw string)
-    const dy = world.y - clue.y;
-    if (dy < -clue.height * 0.3) {
-      // Start drawing string
+    // Double-tap to start string
+    const now = Date.now();
+    if (selectedClue === clue && now - lastTapTime < 400) {
+      // Start drawing string from this clue
       drawingString = true;
       stringStart = clue;
       stringCurrent = { x, y };
       sfxPin();
-      clue.pinned = true;
-    } else {
-      // Drag clue
-      draggedClue = clue;
-      dragOffset = { x: clue.x - world.x, y: clue.y - world.y };
-      sfxPaperShuffle();
+      clue.pinColor = clue.pinColor || nextPinColor();
+      selectedClue = null;
+      lastTapTime = 0;
       
-      // Move to top
-      const index = clues.indexOf(clue);
-      clues.splice(index, 1);
-      clues.push(clue);
+      if (!tutorial.shown) { tutorial.step = 2; tutorial.timer = gameTime; }
+      return;
     }
+    
+    // Select & start drag
+    selectedClue = clue;
+    lastTapTime = now;
+    draggedClue = clue;
+    dragOffset = { x: clue.x - world.x, y: clue.y - world.y };
+    sfxPaper();
+    
+    // Move to top
+    const idx = clues.indexOf(clue);
+    clues.splice(idx, 1);
+    clues.push(clue);
+    
+    if (!tutorial.shown && tutorial.step === 0) { tutorial.step = 1; tutorial.timer = gameTime; }
+  } else {
+    selectedClue = null;
+    // Try removing a connection by tapping near it
+    removeConnection(world.x, world.y);
   }
 }
 
 function handlePointerMove(x, y) {
-  if (draggedClue) {
+  if (draggedClue && !drawingString) {
     const world = screenToWorld(x, y);
     draggedClue.x = world.x + dragOffset.x;
     draggedClue.y = world.y + dragOffset.y;
   }
-  
   if (drawingString) {
     stringCurrent = { x, y };
   }
 }
 
 function handlePointerUp(x, y) {
-  if (drawingString) {
+  if (drawingString && stringStart) {
     const world = screenToWorld(x, y);
     const endClue = getClueAtPoint(world.x, world.y);
     
     if (endClue && endClue !== stringStart) {
-      // Create connection
-      const exists = connections.find(c => 
+      const exists = connections.some(c =>
         (c.from === stringStart.id && c.to === endClue.id) ||
         (c.from === endClue.id && c.to === stringStart.id)
       );
       
       if (!exists) {
-        connections.push({
-          from: stringStart.id,
-          to: endClue.id,
-          correct: null
-        });
-        sfxStringStretch();
-        endClue.pinned = true;
+        const color = stringStart.pinColor || nextPinColor();
+        connections.push({ from: stringStart.id, to: endClue.id, correct: null, color });
+        sfxString();
+        endClue.pinColor = endClue.pinColor || nextPinColor();
         checkSolution();
+        
+        if (!tutorial.shown) { tutorial.step = 3; tutorial.timer = gameTime; tutorial.shown = true; }
       }
     }
     
@@ -611,43 +637,27 @@ function handlePointerUp(x, y) {
 }
 
 // Touch events
-let touches = {};
-
 canvas.addEventListener('touchstart', (e) => {
   e.preventDefault();
-  
   if (e.touches.length === 1) {
     const t = e.touches[0];
-    touches[t.identifier] = { x: t.clientX, y: t.clientY };
     handlePointerDown(t.clientX, t.clientY);
   } else if (e.touches.length === 2) {
-    // Start pinch
-    const t1 = e.touches[0];
-    const t2 = e.touches[1];
-    const dx = t2.clientX - t1.clientX;
-    const dy = t2.clientY - t1.clientY;
-    pinchDist = Math.sqrt(dx * dx + dy * dy);
+    const t1 = e.touches[0], t2 = e.touches[1];
+    pinchDist = Math.sqrt((t2.clientX-t1.clientX)**2 + (t2.clientY-t1.clientY)**2);
+    draggedClue = null;
   }
 }, { passive: false });
 
 canvas.addEventListener('touchmove', (e) => {
   e.preventDefault();
-  
   if (e.touches.length === 1) {
-    const t = e.touches[0];
-    handlePointerMove(t.clientX, t.clientY);
+    handlePointerMove(e.touches[0].clientX, e.touches[0].clientY);
   } else if (e.touches.length === 2) {
-    // Pinch zoom
-    const t1 = e.touches[0];
-    const t2 = e.touches[1];
-    const dx = t2.clientX - t1.clientX;
-    const dy = t2.clientY - t1.clientY;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    
+    const t1 = e.touches[0], t2 = e.touches[1];
+    const dist = Math.sqrt((t2.clientX-t1.clientX)**2 + (t2.clientY-t1.clientY)**2);
     if (pinchDist > 0) {
-      const scale = dist / pinchDist;
-      camera.targetZoom *= scale;
-      camera.targetZoom = Math.max(0.5, Math.min(2, camera.targetZoom));
+      camera.targetZoom = Math.max(0.4, Math.min(2, camera.targetZoom * (dist / pinchDist)));
     }
     pinchDist = dist;
   }
@@ -655,227 +665,269 @@ canvas.addEventListener('touchmove', (e) => {
 
 canvas.addEventListener('touchend', (e) => {
   e.preventDefault();
-  
-  if (e.touches.length === 0) {
-    handlePointerUp(0, 0);
-    pinchDist = 0;
-  }
+  if (e.touches.length === 0) { handlePointerUp(0, 0); pinchDist = 0; }
 });
 
-// Mouse events
-canvas.addEventListener('mousedown', (e) => {
-  ensureAudio();
-  handlePointerDown(e.clientX, e.clientY);
-});
-
-canvas.addEventListener('mousemove', (e) => {
-  handlePointerMove(e.clientX, e.clientY);
-});
-
-canvas.addEventListener('mouseup', (e) => {
-  handlePointerUp(e.clientX, e.clientY);
-});
-
-// Mouse wheel zoom
+canvas.addEventListener('mousedown', (e) => handlePointerDown(e.clientX, e.clientY));
+canvas.addEventListener('mousemove', (e) => handlePointerMove(e.clientX, e.clientY));
+canvas.addEventListener('mouseup', (e) => handlePointerUp(e.clientX, e.clientY));
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  const delta = e.deltaY > 0 ? 0.9 : 1.1;
-  camera.targetZoom *= delta;
-  camera.targetZoom = Math.max(0.5, Math.min(2, camera.targetZoom));
+  camera.targetZoom = Math.max(0.4, Math.min(2, camera.targetZoom * (e.deltaY > 0 ? 0.9 : 1.1)));
 }, { passive: false });
+
+// Menu clicks
+canvas.addEventListener('click', (e) => {
+  inputEvents.push({ type: 'tap', x: e.clientX, y: e.clientY });
+});
 
 // ============================================================
 // UI
 // ============================================================
-
 function drawUI() {
   ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
   
   if (gameState === 'menu') {
-    // Title
+    drawCorkBG();
+    
+    // Decorative pins
+    for (let i = 0; i < 6; i++) {
+      const px = W * 0.15 + Math.sin(i*2.1) * W * 0.3;
+      const py = H * 0.15 + i * H * 0.12;
+      ctx.fillStyle = pinColors[i];
+      ctx.beginPath(); ctx.arc(px, py, 4*scale, 0, Math.PI*2); ctx.fill();
+    }
+    
+    // Title card
     ctx.fillStyle = 'rgba(0,0,0,0.7)';
     ctx.fillRect(0, 0, W, H);
     
+    // Decorative strings
+    for (let i = 0; i < 4; i++) {
+      const sx = W * 0.1 + i * W * 0.25;
+      drawString(sx, H * 0.1, sx + W * 0.15, H * 0.15, pinColors[i], 0.3, 1.5);
+    }
+    
     ctx.fillStyle = '#f5f0e6';
-    ctx.font = `bold ${32 * scale}px 'Courier New', monospace`;
+    ctx.font = `bold ${36 * scale}px 'Courier New', monospace`;
     ctx.textAlign = 'center';
-    ctx.fillText('CONSPIRACY BOARD', W / 2, H * 0.3);
+    ctx.fillText('CONSPIRACY', W/2, H * 0.2);
+    ctx.fillText('BOARD', W/2, H * 0.2 + 40*scale);
     
-    ctx.font = `${14 * scale}px 'Courier New', monospace`;
-    ctx.fillText('Connect the evidence', W / 2, H * 0.4);
-    ctx.fillText('Solve the mystery', W / 2, H * 0.45);
+    // Magnifying glass icon
+    ctx.font = `${40*scale}px sans-serif`;
+    ctx.fillText('🔍', W/2, H * 0.2 - 50*scale);
     
-    // Case selection
-    const btnY = H * 0.6;
-    const btnW = 200 * scale;
-    const btnH = 50 * scale;
+    ctx.font = `${13 * scale}px 'Courier New', monospace`;
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('Connect the evidence. Solve the mystery.', W/2, H * 0.35);
     
-    caseTemplates.forEach((template, i) => {
-      const y = btnY + i * (btnH + 15 * scale);
+    // Case cards
+    const cardW = Math.min(300 * scale, W * 0.8);
+    const cardH = 70 * scale;
+    const startY = H * 0.42;
+    
+    caseTemplates.forEach((tmpl, i) => {
+      const y = startY + i * (cardH + 12*scale);
+      const hovered = false;
       
-      ctx.fillStyle = '#8b4513';
-      ctx.fillRect(W / 2 - btnW / 2, y - btnH / 2, btnW, btnH);
-      ctx.strokeStyle = '#f5f0e6';
+      // Card background
+      ctx.fillStyle = '#463020';
+      ctx.strokeStyle = '#8a7055';
       ctx.lineWidth = 2;
-      ctx.strokeRect(W / 2 - btnW / 2, y - btnH / 2, btnW, btnH);
+      ctx.beginPath(); ctx.roundRect(W/2 - cardW/2, y - cardH/2, cardW, cardH, 8*scale); ctx.fill(); ctx.stroke();
       
+      // Difficulty stars
+      const stars = '⭐'.repeat(tmpl.difficulty);
+      ctx.font = `${10*scale}px sans-serif`;
+      ctx.textAlign = 'right';
+      ctx.fillText(stars, W/2 + cardW/2 - 8*scale, y - 10*scale);
+      
+      // Title
       ctx.fillStyle = '#f5f0e6';
-      ctx.font = `${12 * scale}px 'Courier New', monospace`;
+      ctx.font = `bold ${13 * scale}px 'Courier New', monospace`;
       ctx.textAlign = 'center';
-      ctx.fillText(template.title, W / 2, y - 5);
-      ctx.font = `${10 * scale}px 'Courier New', monospace`;
-      ctx.fillText(`(${template.type})`, W / 2, y + 10);
+      ctx.fillText(tmpl.title, W/2, y - 5*scale);
       
-      // Hit test for menu
+      // Type + best time
+      ctx.font = `${10 * scale}px 'Courier New', monospace`;
+      ctx.fillStyle = '#999';
+      const typeEmoji = { murder: '🔪', heist: '💎', missing: '👤', sabotage: '🧪' }[tmpl.type] || '📋';
+      const best = bestTimes[`case_${i}`];
+      const bestStr = best ? `Best: ${Math.floor(best/60)}:${(best%60).toString().padStart(2,'0')}` : 'New!';
+      ctx.fillText(`${typeEmoji} ${tmpl.type.toUpperCase()} — ${bestStr}`, W/2, y + 15*scale);
+      
+      // Hit test
       if (inputEvents.length > 0) {
         const ev = inputEvents[0];
-        if (ev.type === 'tap' && 
-            ev.x > W / 2 - btnW / 2 && ev.x < W / 2 + btnW / 2 &&
-            ev.y > y - btnH / 2 && ev.y < y + btnH / 2) {
+        if (ev.type === 'tap' &&
+            ev.x > W/2 - cardW/2 && ev.x < W/2 + cardW/2 &&
+            ev.y > y - cardH/2 && ev.y < y + cardH/2) {
           startCase(i);
         }
       }
     });
+    
+    // How to play
+    ctx.fillStyle = '#666';
+    ctx.font = `${10*scale}px 'Courier New', monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText('Double-tap a clue to start a string', W/2, H - 40*scale);
+    ctx.fillText('Drag to another clue to connect them', W/2, H - 25*scale);
+    
   } else if (gameState === 'playing') {
     // Top bar
-    ctx.fillStyle = 'rgba(139, 115, 85, 0.9)';
-    ctx.fillRect(0, 0, W, 50 * scale);
+    ctx.fillStyle = 'rgba(50,35,20,0.92)';
+    ctx.fillRect(0, 0, W, 52 * scale);
     
+    // Back button
+    ctx.fillStyle = '#8a7055';
+    ctx.beginPath(); ctx.roundRect(6*scale, 6*scale, 50*scale, 36*scale, 6*scale); ctx.fill();
     ctx.fillStyle = '#f5f0e6';
-    ctx.font = `bold ${14 * scale}px 'Courier New', monospace`;
-    ctx.textAlign = 'left';
-    ctx.fillText(currentCase.title, 10 * scale, 20 * scale);
+    ctx.font = `${12*scale}px 'Courier New', monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText('← Back', 31*scale, 24*scale);
     
+    // Title
+    ctx.fillStyle = '#f5f0e6';
+    ctx.font = `bold ${12 * scale}px 'Courier New', monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText(currentCase.title, W/2, 15*scale);
+    
+    // Progress
     ctx.font = `${10 * scale}px 'Courier New', monospace`;
-    ctx.fillText(`Connections: ${connections.length}/${totalRequired}`, 10 * scale, 38 * scale);
+    ctx.fillStyle = correctConnections >= totalRequired ? '#4f4' : '#ddd';
+    ctx.fillText(`🔗 ${correctConnections}/${totalRequired}`, W/2, 35*scale);
     
+    // Timer
     ctx.textAlign = 'right';
     const mins = Math.floor(solveTime / 60);
     const secs = Math.floor(solveTime % 60);
-    ctx.fillText(`Time: ${mins}:${secs.toString().padStart(2, '0')}`, W - 10 * scale, 20 * scale);
-    ctx.fillText(`Correct: ${correctConnections}`, W - 10 * scale, 38 * scale);
+    ctx.fillStyle = '#aaa';
+    ctx.fillText(`⏱ ${mins}:${secs.toString().padStart(2, '0')}`, W - 10*scale, 15*scale);
     
-    // Help hint
-    if (connections.length === 0) {
-      ctx.textAlign = 'center';
-      ctx.globalAlpha = 0.5 + Math.sin(gameTime * 3) * 0.2;
-      ctx.fillText('Drag clue tops to connect with string', W / 2, 55 * scale);
-      ctx.globalAlpha = 1;
-    }
+    // Hint count
+    const hintsLeft = totalRequired - hintsUsed - correctConnections;
+    ctx.fillText(`💡 Hints`, W - 10*scale, 35*scale);
     
-    // Bottom toolbar
-    const toolY = H - 60 * scale;
-    ctx.fillStyle = 'rgba(139, 115, 85, 0.9)';
-    ctx.fillRect(0, toolY, W, 60 * scale);
+    // Bottom bar
+    const toolY = H - 50 * scale;
+    ctx.fillStyle = 'rgba(50,35,20,0.92)';
+    ctx.fillRect(0, toolY, W, 50 * scale);
     
-    // Reset zoom button
-    const resetBtnX = W / 2;
-    const resetBtnY = toolY + 30 * scale;
-    ctx.fillStyle = '#8b4513';
-    ctx.fillRect(resetBtnX - 50 * scale, resetBtnY - 20 * scale, 100 * scale, 40 * scale);
-    ctx.strokeStyle = '#f5f0e6';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(resetBtnX - 50 * scale, resetBtnY - 20 * scale, 100 * scale, 40 * scale);
+    const btnW = 90 * scale;
+    const btnH = 34 * scale;
+    const btnY = toolY + 25*scale;
+    
+    // Hint button
+    const hintX = W/2 - 55*scale;
+    ctx.fillStyle = '#5a6a3a';
+    ctx.beginPath(); ctx.roundRect(hintX - btnW/2, btnY - btnH/2, btnW, btnH, 6*scale); ctx.fill();
     ctx.fillStyle = '#f5f0e6';
-    ctx.font = `${12 * scale}px 'Courier New', monospace`;
+    ctx.font = `${11*scale}px 'Courier New', monospace`;
     ctx.textAlign = 'center';
-    ctx.fillText('Reset View', resetBtnX, resetBtnY);
+    ctx.fillText('💡 Hint', hintX, btnY);
     
     // Check button
-    const checkBtnX = W - 80 * scale;
-    ctx.fillStyle = '#228b22';
-    ctx.fillRect(checkBtnX - 50 * scale, resetBtnY - 20 * scale, 100 * scale, 40 * scale);
-    ctx.strokeStyle = '#f5f0e6';
-    ctx.strokeRect(checkBtnX - 50 * scale, resetBtnY - 20 * scale, 100 * scale, 40 * scale);
+    const checkX = W/2 + 55*scale;
+    ctx.fillStyle = correctConnections >= totalRequired ? '#3a7a3a' : '#555540';
+    ctx.beginPath(); ctx.roundRect(checkX - btnW/2, btnY - btnH/2, btnW, btnH, 6*scale); ctx.fill();
     ctx.fillStyle = '#f5f0e6';
-    ctx.fillText('Check', checkBtnX, resetBtnY);
-    
-    // Menu button
-    const menuBtnX = 80 * scale;
-    ctx.fillStyle = '#8b4513';
-    ctx.fillRect(menuBtnX - 50 * scale, resetBtnY - 20 * scale, 100 * scale, 40 * scale);
-    ctx.strokeStyle = '#f5f0e6';
-    ctx.strokeRect(menuBtnX - 50 * scale, resetBtnY - 20 * scale, 100 * scale, 40 * scale);
-    ctx.fillStyle = '#f5f0e6';
-    ctx.fillText('Menu', menuBtnX, resetBtnY);
+    ctx.fillText('✅ Check', checkX, btnY);
     
     // Button hit tests
-    if (inputEvents.length > 0) {
-      const ev = inputEvents[inputEvents.length - 1];
-      if (ev.type === 'tap') {
-        // Reset view
-        if (ev.x > resetBtnX - 50 * scale && ev.x < resetBtnX + 50 * scale &&
-            ev.y > resetBtnY - 20 * scale && ev.y < resetBtnY + 20 * scale) {
-          camera.x = 0;
-          camera.y = 0;
-          camera.targetZoom = 1;
-        }
-        
-        // Check solution
-        if (ev.x > checkBtnX - 50 * scale && ev.x < checkBtnX + 50 * scale &&
-            ev.y > resetBtnY - 20 * scale && ev.y < resetBtnY + 20 * scale) {
-          checkSolution();
-        }
-        
-        // Menu
-        if (ev.x > menuBtnX - 50 * scale && ev.x < menuBtnX + 50 * scale &&
-            ev.y > resetBtnY - 20 * scale && ev.y < resetBtnY + 20 * scale) {
-          gameState = 'menu';
-        }
-      }
+    for (const ev of inputEvents) {
+      if (ev.type !== 'tap') continue;
+      // Back
+      if (ev.x < 60*scale && ev.y < 50*scale) { gameState = 'menu'; sfxClick(); }
+      // Hint
+      if (Math.abs(ev.x - hintX) < btnW/2 && Math.abs(ev.y - btnY) < btnH/2) { useHint(); }
+      // Check
+      if (Math.abs(ev.x - checkX) < btnW/2 && Math.abs(ev.y - btnY) < btnH/2) { checkSolution(); sfxClick(); }
     }
+    
+    // Tutorial overlay
+    if (!tutorial.shown && tutorial.step <= 2) {
+      ctx.save();
+      ctx.globalAlpha = 0.7 + Math.sin(gameTime * 3) * 0.2;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.font = `${12*scale}px 'Courier New', monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ffd700';
+      
+      if (tutorial.step === 0) {
+        ctx.fillText('📌 Tap a clue to select it', W/2, H/2 + 80*scale);
+        ctx.fillText('📌 Double-tap to start a string', W/2, H/2 + 100*scale);
+      } else if (tutorial.step === 1) {
+        ctx.fillText('📌 Double-tap this clue to start connecting!', W/2, H/2 + 80*scale);
+      } else if (tutorial.step === 2) {
+        ctx.fillText('📌 Now drag to another clue to connect!', W/2, H/2 + 80*scale);
+      }
+      ctx.restore();
+    }
+    
   } else if (gameState === 'solved') {
     // Victory overlay
-    ctx.fillStyle = `rgba(0,0,0,${Math.min(0.8, revealAnim * 2)})`;
+    const alpha = Math.min(1, revealAnim * 1.5);
+    ctx.fillStyle = `rgba(0,0,0,${alpha * 0.8})`;
     ctx.fillRect(0, 0, W, H);
     
     if (revealAnim > 0.5) {
+      // Confetti strings
+      for (let i = 0; i < 6; i++) {
+        const sx = W * 0.15 + i * W * 0.14;
+        const sy = H * 0.1 + Math.sin(gameTime + i) * 20;
+        const ex = W * 0.2 + i * W * 0.12;
+        const ey = H * 0.25 + Math.cos(gameTime * 1.3 + i) * 15;
+        drawString(sx, sy, ex, ey, pinColors[i], 0.4, 1.5);
+      }
+      
       ctx.fillStyle = '#ffd700';
-      ctx.font = `bold ${36 * scale}px 'Courier New', monospace`;
+      ctx.font = `bold ${34 * scale}px 'Courier New', monospace`;
       ctx.textAlign = 'center';
-      ctx.fillText('CASE SOLVED!', W / 2, H * 0.3);
+      ctx.fillText('🔍 CASE SOLVED!', W/2, H * 0.3);
       
       ctx.fillStyle = '#f5f0e6';
       ctx.font = `${16 * scale}px 'Courier New', monospace`;
-      ctx.fillText(`Time: ${Math.floor(solveTime / 60)}:${(Math.floor(solveTime % 60)).toString().padStart(2, '0')}`, W / 2, H * 0.45);
-      ctx.fillText(`Accuracy: ${Math.round(correctConnections / connections.length * 100)}%`, W / 2, H * 0.52);
+      ctx.fillText(`Time: ${Math.floor(solveTime / 60)}:${(Math.floor(solveTime % 60)).toString().padStart(2, '0')}`, W/2, H * 0.42);
+      ctx.fillText(`Hints used: ${hintsUsed}`, W/2, H * 0.48);
       
-      // Next case button
-      const btnY = H * 0.7;
-      const btnW = 200 * scale;
-      const btnH = 50 * scale;
+      // Rating
+      let rating = '⭐', rMsg = 'Good work!';
+      if (hintsUsed === 0 && solveTime < 120) { rating = '⭐⭐⭐'; rMsg = 'Brilliant detective!'; }
+      else if (hintsUsed <= 1 && solveTime < 180) { rating = '⭐⭐'; rMsg = 'Sharp mind!'; }
+      ctx.fillText(`${rating} ${rMsg}`, W/2, H * 0.55);
       
-      ctx.fillStyle = '#228b22';
-      ctx.fillRect(W / 2 - btnW / 2, btnY - btnH / 2, btnW, btnH);
-      ctx.strokeStyle = '#ffd700';
-      ctx.lineWidth = 3;
-      ctx.strokeRect(W / 2 - btnW / 2, btnY - btnH / 2, btnW, btnH);
+      // Buttons
+      const btnW2 = 200 * scale;
+      const btnH2 = 50 * scale;
+      
+      // Next case
+      const nextY = H * 0.68;
+      ctx.fillStyle = '#3a7a3a';
+      ctx.beginPath(); ctx.roundRect(W/2 - btnW2/2, nextY - btnH2/2, btnW2, btnH2, 8*scale); ctx.fill();
+      ctx.strokeStyle = '#ffd700'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect(W/2 - btnW2/2, nextY - btnH2/2, btnW2, btnH2, 8*scale); ctx.stroke();
       ctx.fillStyle = '#fff';
-      ctx.font = `bold ${14 * scale}px 'Courier New', monospace`;
-      ctx.fillText('Next Case', W / 2, btnY);
+      ctx.font = `bold ${14*scale}px 'Courier New', monospace`;
+      ctx.fillText('Next Case →', W/2, nextY);
       
-      // Menu button
-      const menuBtnY = btnY + 70 * scale;
-      ctx.fillStyle = '#8b4513';
-      ctx.fillRect(W / 2 - btnW / 2, menuBtnY - btnH / 2, btnW, btnH);
-      ctx.strokeStyle = '#f5f0e6';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(W / 2 - btnW / 2, menuBtnY - btnH / 2, btnW, btnH);
+      // Menu
+      const menuY = nextY + 65*scale;
+      ctx.fillStyle = '#463020';
+      ctx.beginPath(); ctx.roundRect(W/2 - btnW2/2, menuY - btnH2/2, btnW2, btnH2, 8*scale); ctx.fill();
+      ctx.strokeStyle = '#8a7055'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect(W/2 - btnW2/2, menuY - btnH2/2, btnW2, btnH2, 8*scale); ctx.stroke();
       ctx.fillStyle = '#f5f0e6';
-      ctx.fillText('Case Select', W / 2, menuBtnY);
+      ctx.fillText('Case Select', W/2, menuY);
       
       // Hit tests
-      if (inputEvents.length > 0) {
-        const ev = inputEvents[inputEvents.length - 1];
-        if (ev.type === 'tap') {
-          if (ev.x > W / 2 - btnW / 2 && ev.x < W / 2 + btnW / 2) {
-            if (ev.y > btnY - btnH / 2 && ev.y < btnY + btnH / 2) {
-              startCase((caseIndex + 1) % caseTemplates.length);
-            } else if (ev.y > menuBtnY - btnH / 2 && ev.y < menuBtnY + btnH / 2) {
-              gameState = 'menu';
-            }
-          }
+      for (const ev of inputEvents) {
+        if (ev.type !== 'tap') continue;
+        if (ev.x > W/2 - btnW2/2 && ev.x < W/2 + btnW2/2) {
+          if (Math.abs(ev.y - nextY) < btnH2/2) { startCase((caseIndex + 1) % caseTemplates.length); sfxClick(); }
+          if (Math.abs(ev.y - menuY) < btnH2/2) { gameState = 'menu'; sfxClick(); }
         }
       }
     }
@@ -887,80 +939,53 @@ function drawUI() {
 // ============================================================
 // GAME LOOP
 // ============================================================
-
 function gameLoop(time) {
-  deltaTime = time - lastTime;
+  deltaTime = Math.min((time - lastTime) / 1000, 0.1);
   lastTime = time;
   gameTime = time * 0.001;
   
-  if (gameState === 'playing') {
-    solveTime += deltaTime * 0.001;
-  }
+  if (gameState === 'playing') solveTime += deltaTime;
+  if (gameState === 'solved') revealAnim += deltaTime;
   
-  if (gameState === 'solved') {
-    revealAnim += deltaTime * 0.001;
-  }
-  
-  // Smooth zoom
   camera.zoom += (camera.targetZoom - camera.zoom) * 0.1;
+  if (shakeAmount > 0.3) shakeAmount *= 0.9; else shakeAmount = 0;
   
-  // Draw
   ctx.save();
   
-  // Cork background
-  drawCorkTexture();
+  drawCorkBG();
   
   if (gameState !== 'menu') {
-    // Apply camera transform
-    ctx.translate(W / 2, H / 2);
+    ctx.translate(W/2, H/2);
     ctx.scale(camera.zoom, camera.zoom);
     ctx.translate(-camera.x, -camera.y);
     
-    // Draw connections first (under clues)
+    if (shakeAmount > 0.3) ctx.translate((Math.random()-0.5)*shakeAmount, (Math.random()-0.5)*shakeAmount);
+    
     drawConnections();
     
-    // Active string being drawn
     if (drawingString && stringStart) {
       const startScreen = worldToScreen(stringStart.x, stringStart.y);
-      drawString(startScreen.x, startScreen.y, stringCurrent.x, stringCurrent.y, null, 0.6);
+      ctx.save();
+      ctx.resetTransform();
+      const dpr = window.devicePixelRatio || 1;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      drawString(startScreen.x, startScreen.y, stringCurrent.x, stringCurrent.y, stringStart.pinColor || '#c41e3a', 0.6, 2);
+      ctx.restore();
     }
     
-    // Draw clues
     clues.forEach(clue => drawClue(clue));
   }
   
   ctx.restore();
   
-  // UI on top
   drawUI();
-  
-  // Clear input events
   inputEvents = [];
   
   requestAnimationFrame(gameLoop);
 }
 
-// ============================================================
-// INPUT QUEUE
-// ============================================================
-
-canvas.addEventListener('click', (e) => {
-  inputEvents.push({ type: 'tap', x: e.clientX, y: e.clientY });
-});
-
-canvas.addEventListener('touchstart', (e2) => {
-  if (gameState === 'menu' || gameState === 'solved') {
-    inputEvents.push({ type: 'tap', x: e2.touches[0].clientX, y: e2.touches[0].clientY });
-  }
-}, { passive: true });
-
-// ============================================================
-// START
-// ============================================================
-
 gameState = 'menu';
 requestAnimationFrame(gameLoop);
-
 </script>
 </body>
 </html>
