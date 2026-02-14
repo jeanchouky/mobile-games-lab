@@ -297,6 +297,22 @@ function sfxDeath() {
   setTimeout(() => playTone(200, 0.2, 'sine', 0.08), 150);
 }
 
+// Ambient bird chirps
+let lastChirpTime = 0;
+function maybeChirp() {
+  if (!audioCtx || audioMuted) return;
+  const now = gameTime;
+  if (now - lastChirpTime < 4 + Math.random() * 8) return;
+  if (creatures.filter(c => c.type === 'bird').length === 0) return;
+  lastChirpTime = now;
+  
+  const baseFreq = 1200 + Math.random() * 800;
+  const vol = 0.03;
+  playTone(baseFreq, 0.06, 'sine', vol);
+  setTimeout(() => playTone(baseFreq * 1.2, 0.04, 'sine', vol * 0.8), 80);
+  setTimeout(() => playTone(baseFreq * 0.9, 0.05, 'sine', vol * 0.6), 180);
+}
+
 // ============================================================
 // DRAWING HELPERS — Watercolor aesthetic
 // ============================================================
@@ -806,15 +822,33 @@ function drawPlants() {
     if (p.shape === 'stem') {
       // Simple grass stem
       const stemH = p.size * 1.5;
-      softLine(p.x, p.y, p.x + wobble(2), p.y - stemH, p.color, 1.5, 0.7);
+      // Gentle sway
+      const sway = Math.sin(gameTime * 1.5 + p.x * 0.01) * 3 * scale;
+      softLine(p.x, p.y, p.x + sway, p.y - stemH, p.color, 1.5, 0.7);
       
       // Leaves
       const leafCount = Math.floor(p.size / (8 * scale));
       for (let i = 0; i < leafCount; i++) {
         const leafY = p.y - (i / leafCount) * stemH;
         const leafR = p.size * 0.3;
-        watercolorCircle(p.x - leafR * 0.5, leafY, leafR, p.color, 0.5);
-        watercolorCircle(p.x + leafR * 0.5, leafY, leafR, p.color, 0.5);
+        const leafSway = sway * (i / leafCount);
+        watercolorCircle(p.x + leafSway - leafR * 0.5, leafY, leafR, p.color, 0.5);
+        watercolorCircle(p.x + leafSway + leafR * 0.5, leafY, leafR, p.color, 0.5);
+      }
+      // Flower on tall plants
+      if (p.size > 20 * scale) {
+        const flowerColors = ['#ff8a9b', '#ffb347', '#ff6b8a', '#e88aff', '#ffda6b'];
+        const fc = flowerColors[Math.floor(p.x * 7) % flowerColors.length];
+        const fTop = p.y - stemH;
+        watercolorCircle(p.x + sway, fTop - 2*scale, p.size * 0.25, fc, 0.6);
+        // Petals
+        for (let j = 0; j < 4; j++) {
+          const pa = j * Math.PI / 2 + gameTime * 0.2;
+          watercolorCircle(
+            p.x + sway + Math.cos(pa) * p.size * 0.18,
+            fTop - 2*scale + Math.sin(pa) * p.size * 0.18,
+            p.size * 0.15, fc, 0.4);
+        }
       }
     } else if (p.shape === 'bushy') {
       // Clustered circles
@@ -1120,9 +1154,44 @@ function drawJournal() {
 // ============================================================
 // INTERACTION
 // ============================================================
+// Ripple effects
+let ripples = [];
+
+function spawnRipple(x, y) {
+  ripples.push({ x, y, r: 0, maxR: 40 * scale, life: 1, speed: 60 * scale });
+}
+
+function updateRipples() {
+  for (let i = ripples.length - 1; i >= 0; i--) {
+    const r = ripples[i];
+    r.r += r.speed * deltaTime;
+    r.life = 1 - r.r / r.maxR;
+    if (r.life <= 0) ripples.splice(i, 1);
+  }
+}
+
+function drawRipples() {
+  for (const r of ripples) {
+    ctx.save();
+    ctx.globalAlpha = r.life * 0.4;
+    ctx.strokeStyle = '#64b5f6';
+    ctx.lineWidth = 2 * scale * r.life;
+    ctx.beginPath();
+    ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
+    ctx.stroke();
+    // Inner ring
+    ctx.globalAlpha = r.life * 0.2;
+    ctx.beginPath();
+    ctx.arc(r.x, r.y, r.r * 0.6, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
 function handleTap(x, y) {
   ensureAudio();
   sfxTap();
+  spawnRipple(x, y);
   
   // Check mute button
   if (muteButtonBounds && Math.hypot(x - muteButtonBounds.x, y - muteButtonBounds.y) < muteButtonBounds.size) {
@@ -1358,6 +1427,7 @@ function update() {
     updatePlants();
     updateEcosystem();
     updateParticles();
+    maybeChirp();
   }
   
   // Update time of day every 10 seconds
@@ -1384,6 +1454,8 @@ function draw() {
   drawPlants();
   drawCreatures();
   drawParticles();
+  updateRipples();
+  drawRipples();
   drawUI();
   drawJournal();
 }
