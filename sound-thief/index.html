@@ -954,7 +954,7 @@ function drawSoundInventory() {
     x: W - 70,
     y: invY + 10,
     w: 60,
-    h: 30
+    h: 40
   };
   
   ctx.fillStyle = recordingState.active ? '#ff6b6b' : '#4caf50';
@@ -1001,7 +1001,7 @@ function drawSoundInventory() {
       ctx.restore();
       
       // Stats
-      ctx.font = `9px sans-serif`;
+      ctx.font = `11px sans-serif`;
       ctx.fillStyle = '#ccc';
       ctx.fillText(`${sound.analysis.volume}dB`, slotX + 5, slotY + 50);
       ctx.fillText(`${(sound.analysis.frequency/1000).toFixed(1)}kHz`, slotX + 5, slotY + 62);

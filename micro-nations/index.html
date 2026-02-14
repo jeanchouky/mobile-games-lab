@@ -867,12 +867,12 @@ function updateUI() {
           ${e.message}
           ${e.type === 'dispute' ? `
             <div style="margin-top:4px;">
-              <button class="btn" onclick="resolveDispute('${e.data.c1.id}', '${e.data.c2.id}', 0)" style="font-size:10px;padding:4px 8px;">Support ${e.data.c1.name.split(' ')[0]}</button>
-              <button class="btn" onclick="resolveDispute('${e.data.c1.id}', '${e.data.c2.id}', 1)" style="font-size:10px;padding:4px 8px;">Support ${e.data.c2.name.split(' ')[0]}</button>
-              <button class="btn" onclick="resolveDispute('${e.data.c1.id}', '${e.data.c2.id}', 2)" style="font-size:10px;padding:4px 8px;">Compromise</button>
+              <button class="btn" onclick="resolveDispute('${e.data.c1.id}', '${e.data.c2.id}', 0)" style="font-size:12px;padding:8px 12px;min-height:36px;">Support ${e.data.c1.name.split(' ')[0]}</button>
+              <button class="btn" onclick="resolveDispute('${e.data.c1.id}', '${e.data.c2.id}', 1)" style="font-size:12px;padding:8px 12px;min-height:36px;">Support ${e.data.c2.name.split(' ')[0]}</button>
+              <button class="btn" onclick="resolveDispute('${e.data.c1.id}', '${e.data.c2.id}', 2)" style="font-size:12px;padding:8px 12px;min-height:36px;">Compromise</button>
             </div>
           ` : `
-            <button class="btn" onclick="dismissEvent(${state.events.indexOf(e)})" style="font-size:10px;padding:4px 8px;margin-top:4px;">Dismiss</button>
+            <button class="btn" onclick="dismissEvent(${state.events.indexOf(e)})" style="font-size:12px;padding:8px 12px;min-height:36px;margin-top:4px;">Dismiss</button>
           `}
         </div>
       `).join('')}
@@ -1005,9 +1005,9 @@ window.showDiplomacy = () => {
           Population: ${island.population} • ${island.relationship}
         </div>
         <div style="display:flex;gap:4px;margin-top:6px;">
-          <button class="btn" onclick="diplomacyAction(${i},'trade')" style="font-size:10px;padding:4px 8px;">📦 Trade</button>
-          <button class="btn" onclick="diplomacyAction(${i},'ally')" style="font-size:10px;padding:4px 8px;">🤝 Alliance</button>
-          <button class="btn danger" onclick="diplomacyAction(${i},'war')" style="font-size:10px;padding:4px 8px;">⚔️ War</button>
+          <button class="btn" onclick="diplomacyAction(${i},'trade')" style="font-size:12px;padding:8px 12px;min-height:36px;">📦 Trade</button>
+          <button class="btn" onclick="diplomacyAction(${i},'ally')" style="font-size:12px;padding:8px 12px;min-height:36px;">🤝 Alliance</button>
+          <button class="btn danger" onclick="diplomacyAction(${i},'war')" style="font-size:12px;padding:8px 12px;min-height:36px;">⚔️ War</button>
         </div>
       </div>
     `).join('')}
@@ -1104,7 +1104,7 @@ function render() {
     ctx.fillStyle = '#8B7355';
     ctx.fillRect(wpos.x - 20, wpos.y - 10, 40, 20);
     ctx.fillStyle = '#fff';
-    ctx.font = '8px sans-serif';
+    ctx.font = '11px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(island.name, wpos.x, wpos.y - 15);
   }
@@ -1179,7 +1179,7 @@ function drawCitizen(c) {
   // Working animation
   if (c.state === 'working') {
     ctx.fillStyle = '#ffd700';
-    ctx.font = '8px sans-serif';
+    ctx.font = '11px sans-serif';
     const tools = { farmer: '🌾', fisher: '🎣', builder: '🔨', scholar: '📖', gatherer: '🪓' };
     const tool = tools[c.job] || '⚙️';
     ctx.fillText(tool, wpos.x + 6, wpos.y - size * 2);
