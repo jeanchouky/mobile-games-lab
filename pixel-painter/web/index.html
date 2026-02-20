@@ -267,13 +267,19 @@ function showGallery(){
 
 function hideGallery(){document.getElementById('gallery').classList.add('hidden')}
 
-function shareArt(){
-  let url=toDataURL();
-  if(navigator.share){
-    navigator.share({title:'My Pixel Art',url});
-  }else{
-    let a=document.createElement('a');a.href=url;a.download='pixel-art.png';a.click();
+function exportPNG(){
+  // Create a larger canvas for better quality export
+  let tc=document.createElement('canvas');
+  const scale=Math.max(4,Math.floor(512/gridSize));
+  tc.width=gridSize*scale;tc.height=gridSize*scale;
+  let tx=tc.getContext('2d');
+  tx.fillStyle='#16213e';tx.fillRect(0,0,tc.width,tc.height);
+  for(let y=0;y<gridSize;y++){
+    for(let x=0;x<gridSize;x++){
+      if(pixels[y][x]){tx.fillStyle=pixels[y][x];tx.fillRect(x*scale,y*scale,scale,scale)}
+    }
   }
+  let a=document.createElement('a');a.href=tc.toDataURL();a.download='pixel-art.png';a.click();
 }
 
 // Build palette
