@@ -121,18 +121,29 @@ function initGrid(){
       let color;
       do{color=Math.floor(Math.random()*COLORS.length)}
       while(hasMatchAt(c,r,color));
-      grid[r][c]={color,scale:1,falling:0,power:false};
+      grid[r][c]={color,scale:1,falling:0,bomb:false};
     }
   }
 }
 
 function hasMatchAt(c,r,color){
-  // Check horizontal
+  // BFS to check if placing this color forms a group of 3+
+  const visited=new Set();
+  const queue=[{c,r}];
+  visited.add(r*cols+c);
   let cnt=1;
-  for(let i=c-1;i>=0&&grid[r][i]&&grid[r][i].color===color;i--)cnt++;
-  for(let i=c+1;i<cols&&grid[r][i]&&grid[r][i].color===color;i++)cnt++;
-  if(cnt>=3)return true;
-  return false;
+  while(queue.length){
+    const{c:cc,r:rr}=queue.shift();
+    const even=rr%2===0;
+    const dirs=even?[[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1]]:[[-1,0],[1,0],[0,-1],[0,1],[1,-1],[1,1]];
+    for(const[dc,dr]of dirs){
+      const nc=cc+dc,nr=rr+dr,key=nr*cols+nc;
+      if(nc>=0&&nc<cols&&nr>=0&&nr<rows&&!visited.has(key)&&grid[nr]&&grid[nr][nc]&&grid[nr][nc].color===color){
+        visited.add(key);queue.push({c:nc,r:nr});cnt++;
+      }
+    }
+  }
+  return cnt>=3;
 }
 
 function getNeighbors(c,r){
@@ -175,14 +186,29 @@ function findMatches(){
 }
 
 function removeMatches(matched){
-  let count=matched.size;
-  if(count===0)return 0;
+  if(matched.size===0)return 0;
+  // Check for bomb gems in matched set — explode neighbors too
+  const extra=new Set();
   matched.forEach(key=>{
     let r=Math.floor(key/cols),c=key%cols;
+    if(grid[r][c]&&grid[r][c].bomb){
+      for(let n of getNeighbors(c,r)){
+        let nk=n.r*cols+n.c;
+        if(!matched.has(nk))extra.add(nk);
+      }
+      shakeMag=Math.max(shakeMag,12);
+    }
+  });
+  extra.forEach(k=>matched.add(k));
+  let count=matched.size;
+  matched.forEach(key=>{
+    let r=Math.floor(key/cols),c=key%cols;
+    if(!grid[r][c])return;
     let pos=hexPos(c,r);
     let col=COLORS[grid[r][c].color];
-    for(let i=0;i<8;i++){
-      let a=Math.random()*Math.PI*2,sp=2+Math.random()*3;
+    let pCount=grid[r][c].bomb?16:8;
+    for(let i=0;i<pCount;i++){
+      let a=Math.random()*Math.PI*2,sp=2+Math.random()*(grid[r][c].bomb?5:3);
       particles.push({x:pos.x,y:pos.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:1,color:col,size:3+Math.random()*3});
     }
     grid[r][c]=null;
@@ -208,7 +234,7 @@ function dropGems(){
     }
     for(let r=0;r<rows;r++){
       if(!grid[r][c]){
-        grid[r][c]={color:Math.floor(Math.random()*COLORS.length),scale:1,falling:1};
+        grid[r][c]={color:Math.floor(Math.random()*COLORS.length),scale:1,falling:1,bomb:Math.random()<0.03};
         moved=true;
       }
     }
@@ -219,6 +245,7 @@ function dropGems(){
 async function processMatches(){
   animating=true;
   comboCount=0;
+  const multEl=document.getElementById('combo-mult');
   while(true){
     let matched=findMatches();
     if(matched.size===0)break;
@@ -232,12 +259,15 @@ async function processMatches(){
       comboSound(comboCount);
       showCombo(comboCount);
       shakeMag=Math.min(comboCount*3,15);
+      multEl.textContent=`x${comboCount} multiplier!`;
+      multEl.style.opacity='1';
     }
     document.getElementById('score').textContent=score;
     await delay(200);
     dropGems();
     await delay(250);
   }
+  setTimeout(()=>{multEl.style.opacity='0'},1000);
   animating=false;
 }
 
@@ -287,7 +317,7 @@ async function trySwap(a,b){
 C.addEventListener('touchstart',e=>{
   e.preventDefault();
   if(!gameActive||animating)return;
-  actx.resume();
+  getACtx();
   let t=e.touches[0];
   touchStart={x:t.clientX,y:t.clientY};
   touchHex=pixelToHex(t.clientX,t.clientY);
@@ -323,7 +353,7 @@ C.addEventListener('touchend',e=>{
 let mouseDown=false;
 C.addEventListener('mousedown',e=>{
   if(!gameActive||animating)return;
-  actx.resume();
+  getACtx();
   mouseDown=true;
   touchStart={x:e.clientX,y:e.clientY};
   touchHex=pixelToHex(e.clientX,e.clientY);
@@ -383,6 +413,11 @@ function render(){
       X.save();X.globalAlpha=0.3;
       drawHex(p.x-hexR*0.1,p.y-hexR*0.15,hexR*0.35,'rgba(255,255,255,0.5)',null);
       X.restore();
+      // Bomb indicator
+      if(gem.bomb){
+        X.save();X.fillStyle='#fff';X.font=`bold ${Math.round(hexR*0.6)}px sans-serif`;X.textAlign='center';X.textBaseline='middle';
+        X.fillText('💥',p.x,p.y);X.restore();
+      }
     }
   }
   
@@ -433,7 +468,7 @@ function endGame(){
 }
 
 function startGame(m){
-  actx.resume();
+  getACtx();
   mode=m;score=0;timeLeft=maxTime;comboCount=0;
   document.getElementById('score').textContent='0';
   document.getElementById('menu').classList.add('hidden');
