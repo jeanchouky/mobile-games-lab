@@ -1121,6 +1121,182 @@ class GravityWell {
   }
 }
 
+class WindZone {
+  constructor(x, y, w, h, dirX, dirY, strength) {
+    this.x = x; this.y = y; this.w = w; this.h = h;
+    this.dirX = dirX; this.dirY = dirY;
+    this.strength = strength * S;
+    this.pulse = Math.random() * Math.PI * 2;
+    this.particles = [];
+  }
+  update() {
+    this.pulse += dt * 2;
+    // spawn wind particles
+    if (Math.random() > 0.7) {
+      this.particles.push({
+        x: this.dirX >= 0 ? this.x : this.x + this.w,
+        y: this.y + Math.random() * this.h,
+        life: 1
+      });
+    }
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      p.x += this.dirX * 3 * S;
+      p.y += this.dirY * 3 * S;
+      p.life -= 0.025;
+      if (p.life <= 0 || p.x < this.x - 10 || p.x > this.x + this.w + 10 ||
+          p.y < this.y - 10 || p.y > this.y + this.h + 10) {
+        this.particles.splice(i, 1);
+      }
+    }
+    if (this.particles.length > 40) this.particles.splice(0, this.particles.length - 40);
+  }
+  draw() {
+    X.save();
+    // Zone background
+    const alpha = 0.04 + Math.sin(this.pulse) * 0.02;
+    X.fillStyle = `rgba(100,200,255,${alpha})`;
+    X.fillRect(this.x, this.y, this.w, this.h);
+    // Border lines (dashed)
+    X.strokeStyle = 'rgba(100,200,255,0.15)';
+    X.lineWidth = 1 * S;
+    X.setLineDash([4 * S, 4 * S]);
+    X.strokeRect(this.x, this.y, this.w, this.h);
+    X.setLineDash([]);
+    // Wind streaks
+    for (const p of this.particles) {
+      X.globalAlpha = p.life * 0.3;
+      X.strokeStyle = '#88ccff';
+      X.lineWidth = 1 * S;
+      X.beginPath();
+      X.moveTo(p.x, p.y);
+      X.lineTo(p.x - this.dirX * 12 * S, p.y - this.dirY * 12 * S);
+      X.stroke();
+    }
+    // Arrow indicator
+    X.globalAlpha = 0.2 + Math.sin(this.pulse * 1.5) * 0.1;
+    X.fillStyle = '#88ccff';
+    const cx = this.x + this.w / 2;
+    const cy = this.y + this.h / 2;
+    const arrowLen = 10 * S;
+    const ax = cx + this.dirX * arrowLen;
+    const ay = cy + this.dirY * arrowLen;
+    X.beginPath();
+    X.moveTo(ax, ay);
+    X.lineTo(ax - this.dirX * 8 * S - this.dirY * 4 * S, ay - this.dirY * 8 * S + this.dirX * 4 * S);
+    X.lineTo(ax - this.dirX * 8 * S + this.dirY * 4 * S, ay - this.dirY * 8 * S - this.dirX * 4 * S);
+    X.closePath();
+    X.fill();
+    X.restore();
+  }
+  applyForce(player) {
+    if (player.x > this.x && player.x < this.x + this.w &&
+        player.y > this.y && player.y < this.y + this.h) {
+      player.vx += this.dirX * this.strength * 0.15;
+      player.vy += this.dirY * this.strength * 0.15;
+    }
+  }
+}
+
+// Near-miss tracking
+let totalNearMisses = 0;
+let sessionNearMisses = 0;
+try { const nm = localStorage.getItem('gflip3_nearmiss'); if (nm) totalNearMisses = parseInt(nm) || 0; } catch(e) {}
+function saveNearMisses() { try { localStorage.setItem('gflip3_nearmiss', totalNearMisses.toString()); } catch(e) {} }
+
+// Leaderboard
+let leaderboard = [];
+try { const lb = localStorage.getItem('gflip3_lb'); if (lb) leaderboard = JSON.parse(lb); } catch(e) {}
+function saveLeaderboard() { try { localStorage.setItem('gflip3_lb', JSON.stringify(leaderboard)); } catch(e) {} }
+function addLeaderboardEntry(name, score, level) {
+  leaderboard.push({ name: name.substring(0, 3).toUpperCase(), score, level, date: Date.now() });
+  leaderboard.sort((a, b) => b.score - a.score);
+  if (leaderboard.length > 20) leaderboard.length = 20;
+  saveLeaderboard();
+}
+
+// Daily challenge
+let dailyChallengeCompleted = false;
+let dailyChallengeSeed = 0;
+let dailyChallengeScreen = false;
+function getDailySeed() {
+  const d = new Date();
+  return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+}
+function seededRandom(seed) {
+  let s = seed;
+  return function() {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    return s / 0x7fffffff;
+  };
+}
+function generateDailyChallenge() {
+  dailyChallengeSeed = getDailySeed();
+  const rng = seededRandom(dailyChallengeSeed);
+  // Check if already completed today
+  try {
+    const dc = localStorage.getItem('gflip3_daily');
+    if (dc) {
+      const data = JSON.parse(dc);
+      if (data.seed === dailyChallengeSeed) dailyChallengeCompleted = true;
+    }
+  } catch(e) {}
+
+  // Generate a procedural level
+  const numPlats = 4 + Math.floor(rng() * 4);
+  const platforms = [];
+  const spikes = [];
+  const orbs = [];
+  // Floor and ceiling
+  platforms.push([0, 0.0, 1.0, 0.02]);
+  platforms.push([0, 0.98, 1.0, 0.02]);
+  // Random platforms
+  for (let i = 0; i < numPlats; i++) {
+    const px = 0.1 + rng() * 0.7;
+    const py = 0.15 + rng() * 0.7;
+    const pw = 0.08 + rng() * 0.15;
+    const types = ['solid', 'solid', 'bouncy', 'crumble'];
+    const ptype = types[Math.floor(rng() * types.length)];
+    platforms.push([px, py, pw, 0.03, ptype]);
+  }
+  // Spikes
+  const numSpikes = 2 + Math.floor(rng() * 3);
+  for (let i = 0; i < numSpikes; i++) {
+    spikes.push([0.15 + rng() * 0.7, rng() < 0.5 ? 0.02 : 0.88, 0.04 + rng() * 0.06, 0.06]);
+  }
+  // Orbs
+  for (let i = 0; i < 3; i++) {
+    orbs.push([0.15 + rng() * 0.7, 0.15 + rng() * 0.65]);
+  }
+  return {
+    name: 'Daily Challenge', stars: [20, 14, 9],
+    spawn: [0.05, 0.3 + rng() * 0.3], goal: [0.9, 0.3 + rng() * 0.3],
+    width: 1.0, platforms, spikes, orbs, wells: [],
+    winds: rng() > 0.5 ? [[0.3, 0.2, 0.3, 0.5, rng() > 0.5 ? 1 : -1, 0, 0.4 + rng() * 0.4]] : []
+  };
+}
+
+// Stats screen
+let showStats = false;
+function getStats() {
+  let totalStars = 0, levelsCompleted = 0, bestTimes = [];
+  for (let i = 0; i < LEVELS.length; i++) {
+    if (progress[i]) {
+      if (progress[i].stars) totalStars += progress[i].stars;
+      if (progress[i].completed) levelsCompleted++;
+      if (progress[i].time) bestTimes.push({ level: i, time: progress[i].time });
+    }
+  }
+  return { totalStars, levelsCompleted, totalNearMisses, totalScore, bestTimes };
+}
+
+// Initials entry state
+let enteringInitials = false;
+let initialsText = '';
+let initialsCursor = 0;
+let initialsScore = 0;
+let initialsLevel = 0;
+
 // ============================================================
 // LASER BEAMS — toggling hazard for later levels
 // ============================================================
@@ -1310,7 +1486,8 @@ const LEVELS = [
     ],
     spikes: [[0.25, 0.37, 0.08, 0.06], [0.67, 0.37, 0.08, 0.06]],
     orbs: [[0.15, 0.25], [0.5, 0.3], [0.85, 0.25]],
-    wells: [[0.5, 0.5, 0.35, 100]]
+    wells: [[0.5, 0.5, 0.35, 100]],
+    winds: [[0.35, 0.0, 0.3, 0.35, 0, 1, 0.3]]
   },
   // 7
   { name: 'Zigzag', stars: [20,14,9],
@@ -1332,7 +1509,9 @@ const LEVELS = [
   { name: 'Gauntlet', stars: [25,18,12],
     spawn: [0.05, 0.35], goal: [0.9, 0.65], width: 1.0,
     platforms: [
-      [0, 0.45, 1.0, 0.03],
+      [0, 0.45, 0.4, 0.03],
+      [0.4, 0.45, 0.2, 0.03, 'moving', 0, 0.08, 1.2],
+      [0.6, 0.45, 0.4, 0.03],
       [0, 0.0, 1.0, 0.02],
       [0, 0.55, 1.0, 0.03],
     ],
@@ -1357,7 +1536,8 @@ const LEVELS = [
     spikes: [[0.35, 0.0, 0.06, 0.15], [0.6, 0.85, 0.06, 0.15]],
     orbs: [[0.2, 0.3], [0.5, 0.5], [0.8, 0.7]],
     wells: [[0.3, 0.35, 0.3, 90], [0.7, 0.65, 0.3, 90]],
-    lasers: [[0.48, 0.15, 0.04, 0.3, 1.6, 2.0, 0.5]]
+    lasers: [[0.48, 0.15, 0.04, 0.3, 1.6, 2.0, 0.5]],
+    winds: [[0.4, 0.4, 0.2, 0.2, 1, 0, 0.5]]
   },
   // 10
   { name: 'Grand Finale', stars: [35,25,18],
@@ -1449,7 +1629,7 @@ const LEVELS = [
       [0.2, 0.55, 0.12, 0.03, 'bouncy'],
       [0.38, 0.3, 0.1, 0.03, 'crumble'],
       [0.48, 0.5, 0.08, 0.03, 'moving', 0, 0.06, 1.3],
-      [0.55, 0.65, 0.12, 0.03],
+      [0.55, 0.65, 0.12, 0.03, 'moving', 0, 0.1, 0.8],
       [0.7, 0.4, 0.1, 0.03, 'crumble'],
       [0.85, 0.8, 0.15, 0.03],
       [0, 0.0, 1.0, 0.02], [0, 0.98, 1.0, 0.02],
@@ -1462,7 +1642,8 @@ const LEVELS = [
     ],
     orbs: [[0.1, 0.18], [0.5, 0.2], [0.9, 0.68]],
     wells: [[0.45, 0.5, 0.3, 90]],
-    lasers: [[0.32, 0.35, 0.03, 0.28, 1.4, 2.0, 0.3], [0.65, 0.35, 0.03, 0.28, 1.4, 2.0, 1.3]]
+    lasers: [[0.32, 0.35, 0.03, 0.28, 1.4, 2.0, 0.3], [0.65, 0.35, 0.03, 0.28, 1.4, 2.0, 1.3]],
+    winds: [[0.15, 0.0, 0.25, 0.3, 0, 1, 0.35], [0.6, 0.7, 0.25, 0.28, -1, 0, 0.4]]
   },
 ];
 
@@ -1556,16 +1737,19 @@ function getLevelData(index) {
 // ============================================================
 // LEVEL INITIALIZATION
 // ============================================================
-function startLevel(index) {
+function startLevel(index, levelData) {
   lvl = index;
-  const L = getLevelData(index);
-  
+  const L = levelData || getLevelData(index);
+
   const p = new Player(W * L.spawn[0], H * L.spawn[1]);
   p.invuln = 0.5; // brief invulnerability on spawn
-  
+
   const platforms = L.platforms.map(d => {
     const pl = new Platform(W * d[0], H * d[1], W * d[2], H * d[3], d[4] || 'solid');
-    if (d[4] === 'moving') {
+    // Moving platform ranges: d[5] = moveRangeX fraction, d[6] = moveRangeY fraction, d[7] = speed
+    if (d[4] === 'moving' || d[5] || d[6]) {
+      pl.type = pl.type === 'solid' && (d[5] || d[6]) ? 'moving' : pl.type;
+      if (d[4] === 'moving') pl.type = 'moving';
       pl.moveRangeX = (d[5] || 0) * W;
       pl.moveRangeY = (d[6] || 0) * H;
       pl.moveSpeed = d[7] || 1;
@@ -1575,17 +1759,21 @@ function startLevel(index) {
 
   const spikes = L.spikes.map(d => new Spike(W * d[0], H * d[1], W * d[2], H * d[3]));
   const orbs = L.orbs.map(d => new Orb(W * d[0], H * d[1]));
-  const wells = L.wells.map(d => new GravityWell(W * d[0], H * d[1], d[2], d[3]));
+  const wells = (L.wells || []).map(d => new GravityWell(W * d[0], H * d[1], d[2], d[3]));
   const lasers = (L.lasers || []).map(d => new LaserBeam(W * d[0], H * d[1], W * d[2], H * d[3], d[4], d[5], d[6]));
+  const winds = (L.winds || []).map(d => new WindZone(W * d[0], H * d[1], W * d[2], H * d[3], d[4], d[5], d[6]));
   const portal = new Portal(W * L.goal[0], H * L.goal[1]);
-  
+
+  sessionNearMisses = 0;
+
   gs = {
-    player: p, platforms, spikes, orbs, portal, wells, lasers,
+    player: p, platforms, spikes, orbs, portal, wells, lasers, winds,
     time: 0, orbsCollected: 0, totalOrbs: orbs.length,
     dead: false, won: false,
     deathCount: 0,
     btns: {},
-    levelStartTime: performance.now()
+    levelStartTime: performance.now(),
+    isDaily: !!levelData
   };
   
   combo = 0; comboTimer = 0;
@@ -1640,9 +1828,12 @@ function updateGame() {
   gs.portal.update();
   gs.wells.forEach(w => w.update());
   gs.lasers.forEach(l => l.update());
-  
+  if (gs.winds) gs.winds.forEach(w => w.update());
+
   // Gravity wells
   gs.wells.forEach(w => w.applyForce(p));
+  // Wind zones
+  if (gs.winds) gs.winds.forEach(w => w.applyForce(p));
   
   // Platform collisions
   gs.platforms.forEach(pl => pl.handleCollision(p));
@@ -1695,6 +1886,9 @@ function updateGame() {
       nearMissTimer = 0.5;
       sfxNearMiss();
       slowMo = 0.15; // brief time slowdown
+      sessionNearMisses++;
+      totalNearMisses++;
+      saveNearMisses();
       addFloatingText(p.x, p.y - 25 * S, 'CLOSE!', '#ff4488', 16);
       emitSpark(p.x, p.y, '#ff4488', 5);
       screenShake = Math.max(screenShake, 3);
@@ -1746,7 +1940,7 @@ function killPlayer() {
 
 function winLevel() {
   const time = gs.time;
-  const L = getLevelData(lvl);
+  const L = gs.isDaily ? { stars: [20, 14, 9], name: 'Daily Challenge' } : getLevelData(lvl);
   let stars = 1;
   if (time <= L.stars[1]) stars = 2;
   if (time <= L.stars[0]) stars = 3;
@@ -1758,7 +1952,7 @@ function winLevel() {
   const levelId = isCustomLevel ? 'custom_' + customLevelIndex : (isInfiniteMode ? 'inf_' + lvl : '' + lvl);
   addLeaderboardEntry(levelId, time, stars, gs.deathCount);
 
-  if (!isCustomLevel) {
+  if (!isCustomLevel && !gs.isDaily) {
     if (!progress[lvl] || progress[lvl].stars < stars) {
       progress[lvl] = { completed: true, stars, time };
       saveProgress();
@@ -1780,6 +1974,12 @@ function winLevel() {
     saveTotalScore();
   }
   
+  // Save daily challenge completion
+  if (gs.isDaily) {
+    try { localStorage.setItem('gflip3_daily', JSON.stringify({ seed: getDailySeed(), time, stars })); } catch(e) {}
+    dailyChallengeCompleted = true;
+  }
+
   sfxWin();
   screenShake = 12;
   screenFlash = 0.35;
@@ -1814,6 +2014,7 @@ function drawGame() {
   
   gs.wells.forEach(w => w.draw());
   gs.lasers.forEach(l => l.draw());
+  if (gs.winds) gs.winds.forEach(w => w.draw());
   gs.platforms.forEach(pl => pl.draw());
   gs.spikes.forEach(s => s.draw());
   gs.orbs.forEach(o => o.draw());
@@ -1889,7 +2090,7 @@ function drawHUD() {
   X.font = `${13 * S}px sans-serif`;
   X.textAlign = 'left';
   const curLevelData = getLevelData(lvl);
-  const levelLabel = isInfiniteMode ? `∞ ${lvl - LEVELS.length + 1}` : isCustomLevel ? 'Custom' : `${lvl + 1}/${LEVELS.length}`;
+  const levelLabel = gs.isDaily ? '☀ Daily Challenge' : isInfiniteMode ? `∞ ${lvl - LEVELS.length + 1}` : isCustomLevel ? 'Custom' : `${lvl + 1}/${LEVELS.length}`;
   X.fillText(`${levelLabel}  ${curLevelData.name}`, 12 * S, 20 * S);
 
   // Level progress bar
@@ -1904,7 +2105,7 @@ function drawHUD() {
   X.fillStyle = currentAccent;
   X.shadowColor = currentAccent;
   X.shadowBlur = 3 * S;
-  const progFill = isInfiniteMode ? 1 : (lvl + 1) / LEVELS.length;
+  const progFill = gs.isDaily ? 1 : isInfiniteMode ? 1 : (lvl + 1) / LEVELS.length;
   X.beginPath();
   X.roundRect(progX, progY, Math.max(progH, progW * progFill), progH, progH / 2);
   X.fill();
@@ -1952,7 +2153,7 @@ function drawHUD() {
   X.fillText(`${gs.time.toFixed(1)}s`, W - 12 * S, 20 * S);
   
   // Star time targets
-  const L = getLevelData(lvl);
+  const L = gs.isDaily ? { stars: [20, 14, 9] } : getLevelData(lvl);
   X.font = `${10 * S}px sans-serif`;
   X.fillStyle = gs.time <= L.stars[0] ? '#ffd700' : 'rgba(255,215,0,0.3)';
   X.fillText(`⭐⭐⭐ < ${L.stars[0]}s`, W - 12 * S, 36 * S);
@@ -2058,32 +2259,238 @@ function drawMenu() {
   X.restore();
   
   const bw = 200 * S, bh = 46 * S;
-  const btnY = H * 0.53;
+  const btnY = H * 0.50;
+  const btnGap = 10 * S;
   gs.btns = gs.btns || {};
   gs.btns.start = drawBtn(W/2 - bw/2, btnY, bw, bh, '▶  PLAY');
-  gs.btns.select = drawBtn(W/2 - bw/2, btnY + bh + 10 * S, bw, bh, '📋  LEVELS', false);
-  gs.btns.infinite = drawBtn(W/2 - bw/2, btnY + (bh + 10 * S) * 2, bw, bh, '∞  INFINITE', false);
-  gs.btns.editor = drawBtn(W/2 - bw/2, btnY + (bh + 10 * S) * 3, bw, bh, '🔧  EDITOR', false);
-  gs.btns.leaderboard = drawBtn(W/2 - bw/2, btnY + (bh + 10 * S) * 4, bw, bh, '🏆  TIMES', false);
-  
-  // Stars and score at bottom
+  gs.btns.select = drawBtn(W/2 - bw/2, btnY + bh + btnGap, bw, bh, '📋  LEVELS', false);
+  gs.btns.infinite = drawBtn(W/2 - bw/2, btnY + (bh + btnGap) * 2, bw, bh, '∞  INFINITE', false);
+  gs.btns.daily = drawBtn(W/2 - bw/2, btnY + (bh + btnGap) * 3, bw, bh, '☀  DAILY', false);
+  gs.btns.editor = drawBtn(W/2 - bw/2, btnY + (bh + btnGap) * 4, bw, bh, '🔧  EDITOR', false);
+
+  // Small buttons row
+  const smallW = 95 * S, smallH = 36 * S;
+  gs.btns.stats = drawBtn(W/2 - smallW - 5 * S, btnY + (bh + btnGap) * 5, smallW, smallH, 'STATS', false);
+  gs.btns.leaders = drawBtn(W/2 + 5 * S, btnY + (bh + btnGap) * 5, smallW, smallH, 'TOP 20', false);
+  gs.btns.leaderboard = drawBtn(W/2 - bw/2, btnY + (bh + btnGap) * 5 + smallH + btnGap, bw, smallH, '🏆  TIMES', false);
+
+  // Stars and score display
   if (bestTotalStars > 0 || totalScore > 0) {
     X.save();
     X.fillStyle = '#ffd700';
-    X.font = `bold ${12 * S}px sans-serif`;
+    X.font = `bold ${13 * S}px sans-serif`;
     X.textAlign = 'center';
     X.shadowColor = '#ffd700';
     X.shadowBlur = 6 * S;
-    X.fillText(`⭐ ${bestTotalStars}/${LEVELS.length * 3}  •  Score: ${totalScore}`, W/2, H - 22 * S);
+    X.fillText(`⭐ ${bestTotalStars} / ${LEVELS.length * 3}`, W/2, H * 0.93);
+    if (totalScore > 0) {
+      X.fillStyle = '#00ffff';
+      X.shadowColor = '#00ffff';
+      X.fillText(`Score: ${totalScore}`, W/2, H * 0.97);
+    }
+    X.restore();
+  }
+}
+
+// ============================================================
+// STATS SCREEN
+// ============================================================
+function drawStatsScreen() {
+  drawNeonText('STATISTICS', W/2, 50 * S, 26, '#00ffff');
+
+  const stats = getStats();
+  const items = [
+    { label: 'Levels Completed', value: `${stats.levelsCompleted} / ${LEVELS.length}` },
+    { label: 'Total Stars', value: `${stats.totalStars} / ${LEVELS.length * 3}` },
+    { label: 'Total Score', value: `${stats.totalScore}` },
+    { label: 'Near Misses', value: `${stats.totalNearMisses}` },
+  ];
+
+  const startY = 100 * S;
+  items.forEach((item, i) => {
+    const y = startY + i * 55 * S;
+    X.save();
+    X.fillStyle = 'rgba(0,255,255,0.06)';
+    X.beginPath();
+    X.roundRect(W * 0.1, y, W * 0.8, 42 * S, 6 * S);
+    X.fill();
+    X.strokeStyle = 'rgba(0,255,255,0.15)';
+    X.lineWidth = 1 * S;
+    X.stroke();
+
+    X.fillStyle = 'rgba(255,255,255,0.6)';
+    X.font = `${14 * S}px sans-serif`;
+    X.textAlign = 'left';
+    X.fillText(item.label, W * 0.15, y + 27 * S);
+
+    X.fillStyle = '#00ffff';
+    X.font = `bold ${16 * S}px sans-serif`;
+    X.textAlign = 'right';
+    X.fillText(item.value, W * 0.85, y + 27 * S);
+    X.restore();
+  });
+
+  // Best times
+  if (stats.bestTimes.length > 0) {
+    const btY = startY + items.length * 55 * S + 20 * S;
+    X.save();
+    X.fillStyle = 'rgba(255,255,255,0.5)';
+    X.font = `bold ${13 * S}px sans-serif`;
+    X.textAlign = 'center';
+    X.fillText('BEST TIMES', W/2, btY);
+    stats.bestTimes.forEach((bt, i) => {
+      if (i >= 8) return;
+      const ty = btY + 22 * S + i * 22 * S;
+      X.fillStyle = 'rgba(255,255,255,0.4)';
+      X.font = `${11 * S}px sans-serif`;
+      X.textAlign = 'left';
+      X.fillText(`${bt.level + 1}. ${LEVELS[bt.level].name}`, W * 0.15, ty);
+      X.textAlign = 'right';
+      X.fillStyle = '#ffd700';
+      X.fillText(`${bt.time.toFixed(1)}s`, W * 0.85, ty);
+    });
     X.restore();
   }
 
+  gs.btns = gs.btns || {};
+  gs.btns.back = drawBtn(W/2 - 50 * S, H - 60 * S, 100 * S, 42 * S, '← BACK', false);
+}
+
+// ============================================================
+// LEADERBOARD SCREEN
+// ============================================================
+function drawLeaderboardScreen() {
+  drawNeonText('TOP 20', W/2, 50 * S, 26, '#ffd700');
+
+  if (leaderboard.length === 0) {
+    X.save();
+    X.fillStyle = 'rgba(255,255,255,0.4)';
+    X.font = `${14 * S}px sans-serif`;
+    X.textAlign = 'center';
+    X.fillText('No scores yet! Complete a level.', W/2, H * 0.4);
+    X.restore();
+  } else {
+    const startY = 85 * S;
+    leaderboard.forEach((entry, i) => {
+      if (i >= 15) return;
+      const y = startY + i * 28 * S;
+      const isTop3 = i < 3;
+      X.save();
+      if (isTop3) {
+        X.fillStyle = ['rgba(255,215,0,0.08)', 'rgba(192,192,192,0.06)', 'rgba(205,127,50,0.05)'][i];
+        X.fillRect(W * 0.08, y - 8 * S, W * 0.84, 26 * S);
+      }
+      // Rank
+      X.fillStyle = isTop3 ? ['#ffd700', '#c0c0c0', '#cd7f32'][i] : 'rgba(255,255,255,0.4)';
+      X.font = `bold ${12 * S}px sans-serif`;
+      X.textAlign = 'left';
+      X.fillText(`${i + 1}.`, W * 0.1, y + 6 * S);
+      // Name
+      X.fillStyle = '#fff';
+      X.font = `bold ${13 * S}px monospace`;
+      X.fillText(entry.name || '???', W * 0.2, y + 6 * S);
+      // Score
+      X.fillStyle = '#00ffff';
+      X.font = `${13 * S}px sans-serif`;
+      X.textAlign = 'right';
+      X.fillText(`${entry.score}`, W * 0.7, y + 6 * S);
+      // Level
+      X.fillStyle = 'rgba(255,255,255,0.3)';
+      X.font = `${10 * S}px sans-serif`;
+      X.fillText(`Lv.${entry.level + 1}`, W * 0.9, y + 6 * S);
+      X.restore();
+    });
+  }
+
+  gs.btns = gs.btns || {};
+  gs.btns.back = drawBtn(W/2 - 50 * S, H - 60 * S, 100 * S, 42 * S, '← BACK', false);
+}
+
+// ============================================================
+// INITIALS ENTRY SCREEN
+// ============================================================
+function drawInitialsEntry() {
   X.save();
-  X.fillStyle = 'rgba(255,255,255,0.2)';
-  X.font = `${10 * S}px sans-serif`;
-  X.textAlign = 'center';
-  X.fillText('v4.0', W/2, H - 8 * S);
+  X.fillStyle = 'rgba(0,0,0,0.92)';
+  X.fillRect(0, 0, W, H);
   X.restore();
+
+  drawNeonText('NEW HIGH SCORE!', W/2, H * 0.2, 22, '#ffd700');
+
+  X.save();
+  X.fillStyle = '#00ffff';
+  X.font = `bold ${28 * S}px sans-serif`;
+  X.textAlign = 'center';
+  X.fillText(`${initialsScore}`, W/2, H * 0.32);
+  X.restore();
+
+  // Initials boxes
+  X.save();
+  X.fillStyle = 'rgba(255,255,255,0.5)';
+  X.font = `${14 * S}px sans-serif`;
+  X.textAlign = 'center';
+  X.fillText('Enter your initials:', W/2, H * 0.42);
+
+  for (let i = 0; i < 3; i++) {
+    const bx = W/2 + (i - 1) * 50 * S;
+    const by = H * 0.48;
+    const bw = 40 * S, bhh = 50 * S;
+
+    X.fillStyle = i === initialsCursor ? 'rgba(0,255,255,0.15)' : 'rgba(255,255,255,0.05)';
+    X.beginPath();
+    X.roundRect(bx - bw/2, by, bw, bhh, 6 * S);
+    X.fill();
+    X.strokeStyle = i === initialsCursor ? '#00ffff' : 'rgba(255,255,255,0.2)';
+    X.lineWidth = 2 * S;
+    X.stroke();
+
+    const ch = initialsText[i] || (i === initialsCursor ? '_' : '');
+    X.fillStyle = '#fff';
+    X.font = `bold ${28 * S}px monospace`;
+    X.textAlign = 'center';
+    if (i === initialsCursor && !initialsText[i]) {
+      X.globalAlpha = 0.4 + Math.sin(gt * 5) * 0.3;
+    }
+    X.fillText(ch, bx, by + 35 * S);
+    X.globalAlpha = 1;
+  }
+  X.restore();
+
+  // Letter grid
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const cols = 7;
+  const gridStartY = H * 0.62;
+  const cellSize = 38 * S;
+  const gridW = cols * cellSize;
+  const gridStartX = W/2 - gridW/2;
+
+  gs.btns = gs.btns || {};
+  gs.btns.letterBtns = [];
+
+  for (let i = 0; i < letters.length; i++) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const lx = gridStartX + col * cellSize;
+    const ly = gridStartY + row * cellSize;
+
+    X.save();
+    X.fillStyle = 'rgba(0,255,255,0.06)';
+    X.beginPath();
+    X.roundRect(lx + 2 * S, ly + 2 * S, cellSize - 4 * S, cellSize - 4 * S, 4 * S);
+    X.fill();
+    X.fillStyle = '#fff';
+    X.font = `bold ${16 * S}px monospace`;
+    X.textAlign = 'center';
+    X.fillText(letters[i], lx + cellSize/2, ly + cellSize/2 + 6 * S);
+    X.restore();
+
+    gs.btns.letterBtns.push({ x: lx, y: ly, w: cellSize, h: cellSize, letter: letters[i] });
+  }
+
+  // Done / Back buttons
+  const doneBw = 100 * S;
+  gs.btns.initialsDone = drawBtn(W/2 - doneBw - 8 * S, H - 65 * S, doneBw, 42 * S, 'SAVE');
+  gs.btns.initialsSkip = drawBtn(W/2 + 8 * S, H - 65 * S, doneBw, 42 * S, 'SKIP', false);
 }
 
 // ============================================================
@@ -2201,7 +2608,8 @@ function drawVictory() {
   drawNeonText('LEVEL COMPLETE!', 0, 0, 28, '#ffd700');
   X.restore();
   
-  drawNeonText(getLevelData(lvl).name, W/2, H * 0.13 + 35 * S, 14, 'rgba(255,255,255,0.5)');
+  const victoryLevelName = gs.isDaily ? 'Daily Challenge' : getLevelData(lvl).name;
+  drawNeonText(victoryLevelName, W/2, H * 0.13 + 35 * S, 14, 'rgba(255,255,255,0.5)');
   
   // Stars with staggered pop-in
   const stars = gs.victoryStars || 1;
@@ -2233,18 +2641,18 @@ function drawVictory() {
   X.save();
   X.globalAlpha = statsAlpha;
   const cy = H * 0.38;
-  
+
   // Stat boxes
-  const statBoxW = W * 0.35;
+  const statBoxW = W * 0.18;
   const statBoxH = 55 * S;
-  const stats = [
-    { label: 'TIME', value: `${(gs.victoryTime || 0).toFixed(1)}s`, x: W * 0.2 },
-    { label: 'DEATHS', value: `${gs.deathCount}`, x: W * 0.4 },
-    { label: 'SCORE', value: `${gs.levelScore || 0}`, x: W * 0.6 },
-    { label: 'TOTAL', value: `${totalScore}`, x: W * 0.8 },
+  const victoryStats = [
+    { label: 'TIME', value: `${(gs.victoryTime || 0).toFixed(1)}s`, x: W * 0.15 },
+    { label: 'DEATHS', value: `${gs.deathCount}`, x: W * 0.35 },
+    { label: 'CLOSE', value: `${sessionNearMisses}`, x: W * 0.55 },
+    { label: 'SCORE', value: `${gs.levelScore || 0}`, x: W * 0.75 },
   ];
   
-  stats.forEach((stat, i) => {
+  victoryStats.forEach((stat, i) => {
     X.fillStyle = 'rgba(255,255,255,0.05)';
     X.beginPath();
     X.roundRect(stat.x - statBoxW/2, cy - 10 * S, statBoxW, statBoxH, 6 * S);
@@ -2262,7 +2670,7 @@ function drawVictory() {
   X.restore();
   
   // Best time
-  if (progress[lvl] && progress[lvl].time < gs.victoryTime) {
+  if (!gs.isDaily && progress[lvl] && progress[lvl].time < gs.victoryTime) {
     X.save();
     X.globalAlpha = statsAlpha * 0.5;
     X.fillStyle = '#888';
@@ -2282,7 +2690,9 @@ function drawVictory() {
     gs.btns = gs.btns || {};
     gs.btns.replay = drawBtn(W/2 - bw - 10 * S, btnY, bw, bh, '↺ RETRY', false);
     
-    if (isInfiniteMode || lvl < LEVELS.length - 1) {
+    if (gs.isDaily) {
+      gs.btns.next = drawBtn(W/2 + 10 * S, btnY, bw, bh, '🏠 MENU');
+    } else if (isInfiniteMode || lvl < LEVELS.length - 1) {
       gs.btns.next = drawBtn(W/2 + 10 * S, btnY, bw, bh, 'NEXT →');
     } else {
       gs.btns.next = drawBtn(W/2 + 10 * S, btnY, bw, bh, '🏠 MENU');
@@ -2291,14 +2701,26 @@ function drawVictory() {
     // Leaderboard button
     gs.btns.lbBtn = drawBtn(W/2 - 65 * S, btnY + bh + 60 * S, 130 * S, 38 * S, '🏆 TIMES', false);
     
-    gs.btns.share = drawBtn(W/2 - 65 * S, btnY + bh + 15 * S, 130 * S, 38 * S, '📤 SHARE', false);
+    gs.btns.share = drawBtn(W/2 - bw - 10 * S, btnY + bh + 12 * S, bw, 38 * S, '📤 SHARE', false);
+    gs.btns.addScore = drawBtn(W/2 + 10 * S, btnY + bh + 12 * S, bw, 38 * S, '🏆 SAVE', false);
+    X.restore();
+  }
+
+  // Daily challenge badge
+  if (gs.isDaily) {
+    X.save();
+    X.fillStyle = '#ffd700';
+    X.font = `bold ${12 * S}px sans-serif`;
+    X.textAlign = 'center';
+    X.fillText('☀ DAILY CHALLENGE COMPLETE!', W/2, H * 0.10);
     X.restore();
   }
 }
 
 function shareResult() {
   const stars = gs.victoryStars || 1;
-  const text = `🔮 Gravity Flip - Level ${lvl + 1}: ${getLevelData(lvl).name}\n${'⭐'.repeat(stars)}${'☆'.repeat(3 - stars)} in ${(gs.victoryTime || 0).toFixed(1)}s\nCan you beat my time?`;
+  const levelName = gs.isDaily ? 'Daily Challenge' : `Level ${lvl + 1}: ${getLevelData(lvl).name}`;
+  const text = `🔮 Gravity Flip - ${levelName}\n${'⭐'.repeat(stars)}${'☆'.repeat(3 - stars)} in ${(gs.victoryTime || 0).toFixed(1)}s\nCan you beat my time?`;
   if (navigator.share) {
     navigator.share({ title: 'Gravity Flip', text }).catch(() => {});
   } else if (navigator.clipboard) {
@@ -2766,9 +3188,45 @@ function drawCustomSelect() {
 // ============================================================
 function handleTap(x, y) {
   ensureAudio();
-  
+
   if (transAlpha > 0.1) return;
-  
+
+  // Initials entry screen
+  if (enteringInitials) {
+    if (gs.btns.letterBtns) {
+      for (const btn of gs.btns.letterBtns) {
+        if (hit(x, y, btn)) {
+          sfxClick();
+          if (initialsCursor < 3) {
+            initialsText += btn.letter;
+            initialsCursor++;
+          }
+          if (initialsCursor >= 3) {
+            // Auto-complete: save and return
+          }
+          return;
+        }
+      }
+    }
+    if (hit(x, y, gs.btns.initialsDone)) {
+      sfxClick();
+      const name = initialsText.padEnd(3, 'A');
+      addLeaderboardEntry(name, initialsScore, initialsLevel);
+      enteringInitials = false;
+      initialsText = '';
+      initialsCursor = 0;
+      return;
+    }
+    if (hit(x, y, gs.btns.initialsSkip)) {
+      sfxClick();
+      enteringInitials = false;
+      initialsText = '';
+      initialsCursor = 0;
+      return;
+    }
+    return;
+  }
+
   if (screen === 'menu') {
     if (hit(x, y, gs.btns.start)) {
       sfxClick();
@@ -2785,8 +3243,15 @@ function handleTap(x, y) {
       sfxClick(); isInfiniteMode = true; isCustomLevel = false;
       startLevel(LEVELS.length);
     }
+    else if (hit(x, y, gs.btns.daily)) {
+      sfxClick();
+      const dailyLevel = generateDailyChallenge();
+      startLevel(0, dailyLevel);
+    }
     else if (hit(x, y, gs.btns.editor)) { sfxClick(); editorReset(); screen = 'editor'; gs.btns = {}; }
     else if (hit(x, y, gs.btns.leaderboard)) { sfxClick(); lbLevelId = null; screen = 'leaderboard'; gs.btns = {}; }
+    else if (hit(x, y, gs.btns.stats)) { sfxClick(); screen = 'stats'; gs.btns = {}; }
+    else if (hit(x, y, gs.btns.leaders)) { sfxClick(); screen = 'top20'; gs.btns = {}; }
   } else if (screen === 'select') {
     if (hit(x, y, gs.btns.back)) { sfxClick(); screen = 'menu'; gs.btns = {}; }
     else if (gs.btns.customBtn && hit(x, y, gs.btns.customBtn)) { sfxClick(); screen = 'customselect'; gs.btns = {}; }
@@ -2819,15 +3284,26 @@ function handleTap(x, y) {
         if (hit(x, y, t)) { sfxClick(); lbLevelId = t.id; break; }
       }
     }
+  } else if (screen === 'stats' || screen === 'leaderboard' || screen === 'top20') {
+    if (hit(x, y, gs.btns.back)) { sfxClick(); screen = 'menu'; gs.btns = {}; }
   } else if (screen === 'game') {
     if (!gs.dead && !gs.won) {
       gs.player.flip();
     }
   } else if (screen === 'victory') {
-    if (hit(x, y, gs.btns.replay)) { sfxClick(); startLevel(lvl); }
+    if (hit(x, y, gs.btns.replay)) {
+      sfxClick();
+      if (gs.isDaily) {
+        const dailyLevel = generateDailyChallenge();
+        startLevel(0, dailyLevel);
+      } else {
+        startLevel(lvl);
+      }
+    }
     else if (hit(x, y, gs.btns.next)) {
       sfxClick();
-      if (isInfiniteMode) startLevel(lvl + 1);
+      if (gs.isDaily) { screen = 'menu'; gs.btns = {}; }
+      else if (isInfiniteMode) startLevel(lvl + 1);
       else if (isCustomLevel) { screen = 'menu'; gs.btns = {}; isCustomLevel = false; }
       else if (lvl < LEVELS.length - 1) startLevel(lvl + 1);
       else { screen = 'menu'; gs.btns = {}; }
@@ -2838,6 +3314,14 @@ function handleTap(x, y) {
       const levelId = isCustomLevel ? 'custom_' + customLevelIndex : (isInfiniteMode ? 'inf_' + lvl : '' + lvl);
       lbLevelId = levelId;
       screen = 'leaderboard'; gs.btns = {};
+    }
+    else if (gs.btns.addScore && hit(x, y, gs.btns.addScore)) {
+      sfxClick();
+      enteringInitials = true;
+      initialsText = '';
+      initialsCursor = 0;
+      initialsScore = gs.levelScore || 0;
+      initialsLevel = lvl;
     }
   }
 }
@@ -2939,8 +3423,9 @@ function loop(time) {
   
   // Apply slow motion
   if (slowMo > 0) {
+    const realDt = dt; // save real dt before scaling
     dt *= 0.3;
-    slowMo -= (time - lt + dt) || 0.016;
+    slowMo -= realDt; // decrement using real elapsed time
     if (slowMo < 0) slowMo = 0;
   }
   
@@ -2958,7 +3443,9 @@ function loop(time) {
   else if (screen === 'select') drawSelect();
   else if (screen === 'customselect') drawCustomSelect();
   else if (screen === 'editor') { drawEditor(); updateParticles(); drawParticles(); }
+  else if (screen === 'stats') drawStatsScreen();
   else if (screen === 'leaderboard') drawLeaderboard();
+  else if (screen === 'top20') drawLeaderboardScreen();
   else if (screen === 'game') {
     // Apply camera zoom
     if (cameraZoom !== 1) {
@@ -2974,6 +3461,9 @@ function loop(time) {
   }
   else if (screen === 'victory') drawVictory();
   
+  // Initials entry overlay
+  if (enteringInitials) drawInitialsEntry();
+
   // Transition overlay
   if (transAlpha > 0.01 || transTarget > 0) {
     transAlpha += (transTarget - transAlpha) * 0.1;
@@ -2982,7 +3472,7 @@ function loop(time) {
     X.fillRect(0, 0, W, H);
     X.restore();
   }
-  
+
   requestAnimationFrame(loop);
 }
 

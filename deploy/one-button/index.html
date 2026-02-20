@@ -47,7 +47,7 @@ let hiScore = 0;
 try { hiScore = parseInt(localStorage.getItem('obo_hi')) || 0; } catch(e){}
 
 // Player
-let player = { hp: 100, maxHp: 100, xp: 0, level: 1, gold: 0, atk: 12, def: 5, kills: 0 };
+let player = { hp: 100, maxHp: 100, xp: 0, level: 1, gold: 0, atk: 12, def: 5, kills: 0, deaths: 0 };
 let playerAnim = { x: 0, y: 0, frame: 0, attacking: false, hurt: false, blocking: false, walkPhase: 0 };
 
 // Enemy
@@ -86,6 +86,10 @@ const zones = [
     enemies: ['slime','goblin','wolf','bat','spider'], boss: 'treant', music: [65, 82, 98, 110] },
   { name: 'Crystal Caverns', sky: '#0a1525', skyBot: '#1a1a30', ground: '#3a3a5a', tree: '#4a4a6a', path: '#2a2a4a',
     enemies: ['bat','skeleton','ghost','crystal','zombie'], boss: 'demon', music: [55, 73, 87, 110] },
+  { name: 'Frozen Wastes', sky: '#1a2030', skyBot: '#2a3040', ground: '#556575', tree: '#455565', path: '#657585',
+    enemies: ['frost','yeti','icewyrm','revenant','banshee'], boss: 'icequeen', music: [73, 87, 110, 131] },
+  { name: 'Volcanic Depths', sky: '#1a0a00', skyBot: '#2a1005', ground: '#5a3020', tree: '#4a2010', path: '#6a4030',
+    enemies: ['imp','lavagolem','phoenix','hellhound','magma'], boss: 'inferno', music: [49, 55, 65, 82] },
   { name: 'Obsidian Castle', sky: '#0a0a1a', skyBot: '#1a0a1a', ground: '#3a2a3a', tree: '#2a1a2a', path: '#4a3a4a',
     enemies: ['knight','mage','dragon','golem','wraith'], boss: 'darklord', music: [49, 65, 82, 98] },
 ];
@@ -105,9 +109,24 @@ const enemyDefs = {
   dragon:   { name:'Dragon',   hp:80,  atk:20, spd:2.2, col:'#a55', col2:'#833', xp:50, gp:40, sprite:'beast', emoji:'🐲' },
   golem:    { name:'Golem',    hp:90,  atk:16, spd:3.5, col:'#887', col2:'#665', xp:45, gp:35, sprite:'blob', emoji:'🗿' },
   wraith:   { name:'Wraith',   hp:65,  atk:22, spd:1.6, col:'#667', col2:'#445', xp:55, gp:45, sprite:'blob', emoji:'👤' },
+  // Frozen Wastes
+  frost:    { name:'Frost',    hp:55,  atk:13, spd:2.2, col:'#8bf', col2:'#69d', xp:30, gp:20, sprite:'blob', emoji:'❄️' },
+  yeti:     { name:'Yeti',     hp:75,  atk:16, spd:2.8, col:'#bcd', col2:'#9ab', xp:35, gp:25, sprite:'beast', emoji:'🦣' },
+  icewyrm:  { name:'Ice Wyrm', hp:60,  atk:14, spd:1.9, col:'#6af', col2:'#48c', xp:32, gp:22, sprite:'beast', emoji:'🐉' },
+  revenant: { name:'Revenant', hp:70,  atk:17, spd:2.4, col:'#89a', col2:'#678', xp:38, gp:28, sprite:'humanoid', emoji:'⚰️' },
+  banshee:  { name:'Banshee',  hp:50,  atk:20, spd:1.7, col:'#9ac', col2:'#78a', xp:40, gp:30, sprite:'flying', emoji:'👻' },
+  // Volcanic Depths
+  imp:      { name:'Imp',      hp:45,  atk:15, spd:1.6, col:'#f64', col2:'#d42', xp:32, gp:22, sprite:'flying', emoji:'😈' },
+  lavagolem:{ name:'Lava Golem',hp:95, atk:18, spd:3.2, col:'#a52', col2:'#831', xp:45, gp:35, sprite:'blob', emoji:'🌋' },
+  phoenix:  { name:'Phoenix',  hp:65,  atk:22, spd:1.8, col:'#fa4', col2:'#d82', xp:50, gp:40, sprite:'flying', emoji:'🔥' },
+  hellhound:{ name:'Hellhound',hp:70,  atk:19, spd:1.9, col:'#c42', col2:'#a20', xp:42, gp:32, sprite:'beast', emoji:'🐕' },
+  magma:    { name:'Magma',    hp:80,  atk:16, spd:2.6, col:'#c64', col2:'#a42', xp:40, gp:30, sprite:'blob', emoji:'🔴' },
+  // Bosses
   treant:   { name:'TREANT',   hp:150, atk:18, spd:2.8, col:'#5a3', col2:'#381', xp:100,gp:80, sprite:'boss', emoji:'🌳' },
   demon:    { name:'FIRE DEMON',hp:200,atk:25, spd:2.0, col:'#c44', col2:'#a22', xp:150,gp:120,sprite:'boss', emoji:'😈' },
-  darklord: { name:'DARK LORD', hp:300, atk:30, spd:1.8, col:'#55a', col2:'#338', xp:200,gp:200,sprite:'boss', emoji:'🫅' },
+  icequeen: { name:'ICE QUEEN',hp:250, atk:22, spd:2.2, col:'#8cf', col2:'#6ad', xp:180,gp:150,sprite:'boss', emoji:'👸' },
+  inferno:  { name:'INFERNO',  hp:280, atk:28, spd:1.9, col:'#f62', col2:'#d40', xp:200,gp:180,sprite:'boss', emoji:'🌋' },
+  darklord: { name:'DARK LORD', hp:350, atk:32, spd:1.8, col:'#55a', col2:'#338', xp:250,gp:250,sprite:'boss', emoji:'🫅' },
 };
 
 const allShopItems = [
@@ -117,6 +136,11 @@ const allShopItems = [
   { name:'Life Crystal', cost:30, desc:'+20 Max HP', icon:'❤️', fn:() => { player.maxHp += 20; player.hp += 20; } },
   { name:'Speed Ring', cost:50, desc:'Slower wheel', icon:'💍', fn:() => { wheelSpeed = Math.min(2.5, wheelSpeed + 0.25); } },
   { name:'Full Heal', cost:60, desc:'Full HP', icon:'✨', fn:() => { player.hp = player.maxHp; } },
+  { name:'Fire Blade', cost:55, desc:'+6 ATK', icon:'🗡️', fn:() => { player.atk += 6; } },
+  { name:'Iron Wall', cost:50, desc:'+5 DEF', icon:'🧱', fn:() => { player.def += 5; } },
+  { name:'Berserker Ale', cost:45, desc:'+8 ATK, -2 DEF', icon:'🍺', fn:() => { player.atk += 8; player.def = Math.max(1, player.def - 2); } },
+  { name:'Angel Feather', cost:70, desc:'Extra life', icon:'🪶', fn:() => { player.deaths = Math.max(0, player.deaths - 1); } },
+  { name:'Dragon Scale', cost:65, desc:'+30 Max HP, +2 DEF', icon:'🐲', fn:() => { player.maxHp += 30; player.hp += 30; player.def += 2; } },
 ];
 
 // ============================================================
@@ -159,11 +183,11 @@ resize();
 // ============================================================
 let audioCtx = null;
 function ensureAudio() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
 }
 function tone(f, d, type='square', v=0.08) {
-  ensureAudio();
+  if (!audioCtx) return;
   const t = audioCtx.currentTime;
   const o = audioCtx.createOscillator(), g = audioCtx.createGain();
   o.type = type; o.frequency.value = f;
@@ -591,6 +615,23 @@ canvas.addEventListener('touchstart', (e) => { e.preventDefault(); handleTap(); 
 canvas.addEventListener('mousedown', handleTap);
 
 // ============================================================
+// DELAYED ACTION QUEUE (replaces raw setTimeout for game logic)
+// ============================================================
+let pendingActions = [];
+function scheduleAction(delaySec, fn) {
+  pendingActions.push({ delay: delaySec, fn });
+}
+function processPendingActions(dt) {
+  for (let i = pendingActions.length - 1; i >= 0; i--) {
+    pendingActions[i].delay -= dt;
+    if (pendingActions[i].delay <= 0) {
+      pendingActions[i].fn();
+      pendingActions.splice(i, 1);
+    }
+  }
+}
+
+// ============================================================
 // COMBAT LOGIC
 // ============================================================
 function spawnEnemy(type, isBoss) {
@@ -641,15 +682,15 @@ function executeAction() {
   if (action === 0) { // ATTACK
     combatPhase = 'animating';
     playerAnim.attacking = true;
-    
-    setTimeout(() => {
+
+    scheduleAction(0.15, () => {
       const critChance = 0.12 + comboCount * 0.06;
       const crit = Math.random() < critChance;
       const dmg = Math.floor(player.atk * (crit ? 2.0 : 1) * (1 + comboCount * 0.1));
       enemy.hp -= dmg;
       enemyAnim.hurt = true;
-      setTimeout(() => enemyAnim.hurt = false, 200);
-      
+      scheduleAction(0.2, () => enemyAnim.hurt = false);
+
       if (crit) {
         sfxCrit();
         floatText(`CRIT ${dmg}!`, enemyAnim.x, enemyAnim.y - 25, '#ff4', 9);
@@ -664,18 +705,18 @@ function executeAction() {
         spawnP(enemyAnim.x, enemyAnim.y, 8, '#f66');
         comboCount++;
       }
-      
+
       if (comboCount > 1) floatText(`x${comboCount}`, enemyAnim.x + 14, enemyAnim.y - 10, '#fa0', 6);
-      
+
       playerAnim.attacking = false;
-      
+
       if (enemy.hp <= 0) {
         enemyDefeated();
       } else {
         combatPhase = 'enemy';
         enemyAttackTimer = 0.5;
       }
-    }, 150);
+    });
     
   } else if (action === 1) { // BLOCK
     combatPhase = 'blocking';
@@ -696,7 +737,7 @@ function executeAction() {
       spawnP(playerAnim.x + 8, playerAnim.y - 5, 4, '#8af');
     }
     
-    setTimeout(() => {
+    scheduleAction(0.5, () => {
       const blockPct = perfectBlock ? 0.9 : blockQuality;
       const blocked = Math.floor(enemy.atk * blockPct);
       const dmg = Math.max(0, enemy.atk - blocked - Math.floor(player.def * 0.5));
@@ -704,9 +745,9 @@ function executeAction() {
       if (dmg > 0) {
         floatText(`-${dmg}`, playerAnim.x, playerAnim.y - 10, '#f88', 6);
         playerAnim.hurt = true;
-        setTimeout(() => playerAnim.hurt = false, 150);
+        scheduleAction(0.15, () => playerAnim.hurt = false);
       }
-      
+
       // Perfect block counter-attack!
       if (perfectBlock && enemy) {
         const counterDmg = Math.floor(player.atk * 0.5);
@@ -714,17 +755,17 @@ function executeAction() {
         floatText(`${counterDmg}!`, enemyAnim.x, enemyAnim.y - 15, '#4ff', 7);
         spawnP(enemyAnim.x, enemyAnim.y, 6, '#4ff');
         enemyAnim.hurt = true;
-        setTimeout(() => enemyAnim.hurt = false, 150);
+        scheduleAction(0.15, () => enemyAnim.hurt = false);
         if (enemy.hp <= 0) { enemyDefeated(); playerAnim.blocking = false; return; }
       }
-      
+
       playerAnim.blocking = false;
       perfectBlock = false;
       if (player.hp <= 0) { playerDied(); return; }
       combatPhase = 'player';
       wheelTimer = 0;
       turnDelay = 0.3;
-    }, 500);
+    });
     
   } else { // POWER ATTACK
     combatPhase = 'animating';
@@ -732,26 +773,26 @@ function executeAction() {
     comboCount = 0;
     sfxPower();
     
-    setTimeout(() => {
+    scheduleAction(0.2, () => {
       const dmg = Math.floor(player.atk * 2.5);
       enemy.hp -= dmg;
       enemyAnim.hurt = true;
-      setTimeout(() => enemyAnim.hurt = false, 300);
-      
+      scheduleAction(0.3, () => enemyAnim.hurt = false);
+
       floatText(`💥${dmg}!`, enemyAnim.x, enemyAnim.y - 25, '#f84', 10);
       shake(10);
       flash('#f84');
       spawnP(enemyAnim.x, enemyAnim.y, 25, '#f84', { speed: 1.5, glow: true });
-      
+
       playerAnim.attacking = false;
-      
+
       if (enemy.hp <= 0) {
         enemyDefeated();
       } else {
         combatPhase = 'enemy';
         enemyAttackTimer = 0.3;
       }
-    }, 200);
+    });
   }
 }
 
@@ -762,23 +803,23 @@ function enemyTurn() {
   const dmg = Math.max(1, enemy.atk - Math.floor(player.def * 0.4));
   player.hp -= dmg;
   playerAnim.hurt = true;
-  setTimeout(() => playerAnim.hurt = false, 250);
-  
+  scheduleAction(0.25, () => playerAnim.hurt = false);
+
   sfxHurt();
   floatText(`-${dmg}`, playerAnim.x, playerAnim.y - 12, '#f44', 7);
   shake(4);
   flash('#f44');
   spawnP(playerAnim.x, playerAnim.y, 10, '#f44');
-  
+
   if (player.hp <= 0) {
     playerDied();
   } else {
-    setTimeout(() => {
+    scheduleAction(0.4, () => {
       enemyAttacking = false;
       combatPhase = 'player';
       wheelTimer = 0;
       turnDelay = 0.3;
-    }, 400);
+    });
   }
 }
 
@@ -795,11 +836,11 @@ function enemyDefeated() {
   player.kills++;
   
   floatText(`+${xpGain} XP`, enemyAnim.x - 5, enemyAnim.y - 30, '#af4', 7);
-  setTimeout(() => {
+  scheduleAction(0.3, () => {
     floatText(`+${gpGain} G`, enemyAnim.x + 5, enemyAnim.y - 20, '#fd4', 7);
     sfxCoin();
-  }, 300);
-  
+  });
+
   // Level up
   const needed = player.level * 40 + 20;
   if (player.xp >= needed) {
@@ -809,24 +850,24 @@ function enemyDefeated() {
     player.hp = player.maxHp;
     player.atk += 2;
     player.def += 1;
-    setTimeout(() => {
+    scheduleAction(0.5, () => {
       sfxLevelUp();
       floatText('LEVEL UP!', GW/2, GH/2 - 40, '#fd4', 10);
       spawnP(playerAnim.x, playerAnim.y, 25, '#fd4', { rise: true, glow: true });
-    }, 500);
+    });
   }
-  
+
   const wasBoss = enemy.isBoss;
   enemy = null;
   encounter++;
-  
+
   // Track hi score
   if (player.kills > hiScore) {
     hiScore = player.kills;
     try { localStorage.setItem('obo_hi', hiScore); } catch(e){}
   }
-  
-  setTimeout(() => {
+
+  scheduleAction(0.8, () => {
     if (wasBoss) {
       if (currentZone < zones.length - 1) {
         initShop();
@@ -838,7 +879,7 @@ function enemyDefeated() {
     } else {
       startWalking();
     }
-  }, 800);
+  });
 }
 
 function playerDied() {
@@ -876,9 +917,10 @@ function update() {
   
   if (gameState === 'title') {
     if (tapped) {
-      player = { hp: 100, maxHp: 100, xp: 0, level: 1, gold: 0, atk: 12, def: 5, kills: 0 };
+      player = { hp: 100, maxHp: 100, xp: 0, level: 1, gold: 0, atk: 12, def: 5, kills: 0, deaths: 0 };
       currentZone = 0; encounter = 0; walkProgress = 0;
       wheelSpeed = 1.2;
+      pendingActions = [];
       startWalking();
     }
   }
@@ -954,15 +996,25 @@ function update() {
   
   else if (gameState === 'dead') {
     if (tapped) {
-      // Revive with penalty
-      player.hp = player.maxHp;
-      player.gold = Math.floor(player.gold * 0.5);
-      encounter = Math.max(0, Math.floor(encounter / 5) * 5);
-      startWalking();
+      player.deaths++;
+      if (player.deaths >= 3) {
+        // Game over — full reset
+        gameState = 'title';
+        pendingActions = [];
+      } else {
+        // Revive with penalty: lose gold, XP, restart zone segment
+        player.hp = Math.floor(player.maxHp * 0.7);
+        player.gold = Math.floor(player.gold * 0.4);
+        player.xp = Math.max(0, player.xp - 20);
+        encounter = Math.max(0, Math.floor(encounter / 5) * 5);
+        pendingActions = [];
+        startWalking();
+      }
     }
   }
   
   tapped = false;
+  processPendingActions(deltaTime);
   updateEffects();
 }
 
@@ -1013,9 +1065,9 @@ function drawTitle() {
   ctx.restore();
   
   // Instructions
-  txt('A one-button RPG', GW/2, GH*0.78, 6, '#888');
-  txt('Tap when the right', GW/2, GH*0.82, 6, '#888');
-  txt('action is highlighted!', GW/2, GH*0.86, 6, '#888');
+  txt('A one-button RPG across 5 zones', GW/2, GH*0.78, 6, '#888');
+  txt('Tap when the right action', GW/2, GH*0.82, 6, '#888');
+  txt('is highlighted! 3 lives per run.', GW/2, GH*0.86, 6, '#888');
   
   // Hi score
   if (hiScore > 0) {
@@ -1280,23 +1332,32 @@ function drawDead() {
   txt('💀', GW/2, GH*0.22, 24, '#f44');
   
   txt('DEFEATED', GW/2, GH*0.35, 13, '#f44');
-  txt('Your journey ends here...', GW/2, GH*0.43, 7, '#aaa');
-  txt('but heroes never truly die.', GW/2, GH*0.48, 7, '#888');
-  
-  // Penalty info
-  txt(`Kills: ${player.kills}`, GW/2, GH*0.58, 7, '#888');
-  txt(`Lost: ${Math.floor(player.gold * 0.5)}G`, GW/2, GH*0.63, 7, '#f88');
-  
-  if (player.kills >= hiScore && player.kills > 0) {
-    txt('🏆 NEW BEST!', GW/2, GH*0.7, 8, '#fd4');
+
+  const livesLeft = 2 - player.deaths;
+  if (livesLeft > 0) {
+    txt(`Lives remaining: ${'❤️'.repeat(livesLeft)}`, GW/2, GH*0.43, 7, '#f88');
+    txt('You can still continue...', GW/2, GH*0.48, 7, '#888');
+  } else {
+    txt('No lives remaining!', GW/2, GH*0.43, 7, '#f44');
+    txt('Your adventure is over.', GW/2, GH*0.48, 7, '#888');
   }
-  
+
+  // Penalty info
+  txt(`Kills: ${player.kills}`, GW/2, GH*0.56, 7, '#888');
+  if (livesLeft > 0) {
+    txt(`Penalty: -60% gold, -20 XP`, GW/2, GH*0.61, 6, '#f88');
+  }
+
+  if (player.kills >= hiScore && player.kills > 0) {
+    txt('🏆 NEW BEST!', GW/2, GH*0.68, 8, '#fd4');
+  }
+
   const p = 0.4 + Math.sin(gameTime * 3) * 0.3;
   ctx.save(); ctx.globalAlpha = p;
-  txt('TAP TO REVIVE', GW/2, GH*0.82, 9, '#fff');
+  txt(livesLeft > 0 ? 'TAP TO REVIVE' : 'TAP TO RESTART', GW/2, GH*0.82, 9, '#fff');
   ctx.restore();
-  
-  txt('(Lose half gold, restart zone segment)', GW/2, GH*0.88, 5, '#555');
+
+  txt(livesLeft > 0 ? '(Restart zone segment with penalties)' : '(Start a new adventure)', GW/2, GH*0.88, 5, '#555');
 }
 
 // ============================================================

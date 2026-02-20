@@ -8,71 +8,152 @@
 *{margin:0;padding:0;box-sizing:border-box;-webkit-user-select:none;user-select:none;touch-action:manipulation}
 body{background:#0a0a1e;overflow:hidden;font-family:-apple-system,system-ui,sans-serif;color:#fff}
 canvas{display:block;width:100vw;height:100vh}
-#hud{position:absolute;top:0;left:0;width:100%;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;z-index:10;pointer-events:none}
-.hud-box{background:rgba(0,0,0,0.5);border-radius:10px;padding:6px 14px;backdrop-filter:blur(8px);pointer-events:auto}
-.hud-box .lbl{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:0.5px}
-.hud-box .val{font-size:20px;font-weight:900}
-#menu{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(10,10,30,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:20}
-#menu h1{font-size:42px;margin-bottom:6px}
-#menu p{color:#888;margin-bottom:24px;font-size:14px;text-align:center;padding:0 20px}
-#menu .diff-btns{display:flex;flex-direction:column;gap:10px}
-#menu button{border:none;color:#fff;padding:14px 36px;border-radius:50px;font-size:16px;font-weight:700;cursor:pointer;min-width:200px}
+#hud{position:absolute;top:0;left:0;width:100%;padding:8px 12px;display:flex;justify-content:space-between;align-items:center;z-index:10;pointer-events:none}
+.hud-box{background:rgba(0,0,0,0.5);border-radius:10px;padding:5px 12px;backdrop-filter:blur(8px);pointer-events:auto}
+.hud-box .lbl{font-size:9px;color:#888;text-transform:uppercase;letter-spacing:0.5px}
+.hud-box .val{font-size:18px;font-weight:900}
+#power-ups{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:10;pointer-events:auto}
+.power-btn{width:50px;height:50px;border-radius:12px;border:2px solid rgba(255,255,255,0.2);background:rgba(0,0,0,0.5);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer;position:relative}
+.power-btn:active{transform:scale(0.9)}
+.power-btn.disabled{opacity:0.3;pointer-events:none}
+.power-btn .badge{position:absolute;top:-4px;right:-4px;background:#e94560;color:#fff;font-size:10px;font-weight:700;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+#combo-display{position:absolute;top:50px;left:50%;transform:translateX(-50%);z-index:10;pointer-events:none;font-size:24px;font-weight:900;opacity:0;transition:all 0.3s;text-shadow:0 0 20px currentColor}
+#menu{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(10,10,30,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:20;overflow-y:auto;padding:20px}
+#menu h1{font-size:36px;margin-bottom:4px}
+#menu p{color:#888;margin-bottom:16px;font-size:13px;text-align:center;padding:0 20px}
+#menu .diff-btns{display:flex;flex-direction:column;gap:8px;width:100%;max-width:260px}
+#menu button{border:none;color:#fff;padding:12px 30px;border-radius:50px;font-size:15px;font-weight:700;cursor:pointer;min-width:200px;text-align:center}
 #menu button:active{transform:scale(0.95)}
 .btn-easy{background:linear-gradient(135deg,#6bcb77,#1dd1a1)}
 .btn-med{background:linear-gradient(135deg,#ffd93d,#e17055)}
 .btn-hard{background:linear-gradient(135deg,#e94560,#a55eea)}
 .hidden{display:none!important}
+#theme-select{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;justify-content:center}
+.theme-btn{width:60px;height:60px;border-radius:12px;border:2px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;font-size:10px;gap:2px}
+.theme-btn.selected{border-color:#ffd93d;background:rgba(255,217,61,0.15)}
+.theme-btn span{font-size:22px}
 #result{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:15;text-align:center;pointer-events:none;opacity:0;transition:opacity .3s}
-#result h2{font-size:36px;margin-bottom:8px}
-#result p{color:#888;font-size:14px}
-#game-over{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(10,10,30,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:20}
-#game-over h2{font-size:32px;margin-bottom:8px}
-#game-over .score{font-size:56px;font-weight:900;background:linear-gradient(135deg,#ffd93d,#e94560);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-#game-over p{color:#888;margin:4px}
-#game-over button{background:linear-gradient(135deg,#4d96ff,#a55eea);border:none;color:#fff;padding:14px 36px;border-radius:50px;font-size:16px;font-weight:700;margin-top:16px;cursor:pointer}
+#result h2{font-size:32px;margin-bottom:6px}
+#result p{color:#888;font-size:13px}
+#game-over{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(10,10,30,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:20;text-align:center;padding:20px}
+#game-over h2{font-size:28px;margin-bottom:6px}
+#game-over .score{font-size:48px;font-weight:900;background:linear-gradient(135deg,#ffd93d,#e94560);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+#game-over .stars{font-size:36px;margin:8px 0}
+#game-over p{color:#888;margin:3px}
+#game-over button{background:linear-gradient(135deg,#4d96ff,#a55eea);border:none;color:#fff;padding:12px 30px;border-radius:50px;font-size:15px;font-weight:700;margin-top:12px;cursor:pointer}
+#level-complete{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:15;text-align:center;background:rgba(10,10,30,0.95);border-radius:20px;padding:24px;border:1px solid rgba(255,255,255,0.1);backdrop-filter:blur(10px);pointer-events:auto}
+#level-complete h3{font-size:22px;margin-bottom:6px}
+#level-complete .lc-stars{font-size:32px;margin:6px 0}
+#level-complete p{color:#888;font-size:13px;margin:3px 0}
+#level-complete button{background:linear-gradient(135deg,#6bcb77,#1dd1a1);border:none;color:#fff;padding:10px 24px;border-radius:50px;font-size:14px;font-weight:700;margin-top:10px;cursor:pointer}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <div id="hud">
   <div class="hud-box"><div class="lbl">Matches</div><div class="val" id="matches">0/0</div></div>
+  <div class="hud-box"><div class="lbl">Time</div><div class="val" id="timer">0:00</div></div>
   <div class="hud-box"><div class="lbl">Moves</div><div class="val" id="moves">0</div></div>
   <div class="hud-box"><div class="lbl">Level</div><div class="val" id="level">1</div></div>
 </div>
+<div id="combo-display"></div>
+<div id="power-ups">
+  <div class="power-btn" id="pw-peek" onclick="usePowerUp('peek')"><span>&#128064;</span><div class="badge" id="pw-peek-count">2</div></div>
+  <div class="power-btn" id="pw-freeze" onclick="usePowerUp('freeze')"><span>&#10052;</span><div class="badge" id="pw-freeze-count">1</div></div>
+  <div class="power-btn" id="pw-hint" onclick="usePowerUp('hint')"><span>&#128161;</span><div class="badge" id="pw-hint-count">3</div></div>
+</div>
 <div id="result"><h2 id="res-text">Nice!</h2><p id="res-sub"></p></div>
+<div id="level-complete" class="hidden"></div>
 <div id="menu">
-  <h1>🏛️ Memory Palace</h1>
-  <p>Match cards in 3D space.<br>The view rotates — remember positions!</p>
+  <h1>Memory Palace</h1>
+  <p>Match cards in 3D space.<br>The view rotates - remember positions!</p>
+  <div id="theme-select">
+    <div class="theme-btn selected" data-theme="space" onclick="selectTheme('space')"><span>&#127756;</span>Space</div>
+    <div class="theme-btn" data-theme="egypt" onclick="selectTheme('egypt')"><span>&#127963;</span>Egypt</div>
+    <div class="theme-btn" data-theme="ocean" onclick="selectTheme('ocean')"><span>&#127754;</span>Ocean</div>
+    <div class="theme-btn" data-theme="forest" onclick="selectTheme('forest')"><span>&#127794;</span>Forest</div>
+  </div>
   <div class="diff-btns">
-    <button class="btn-easy" onclick="startGame('easy')">Easy (3×2) — 5 levels</button>
-    <button class="btn-med" onclick="startGame('medium')">Medium (4×3) — 8 levels</button>
-    <button class="btn-hard" onclick="startGame('hard')">Hard (4×4) — 8 levels</button>
+    <button class="btn-easy" onclick="startGame('easy')">Easy (3x2) - 5 levels</button>
+    <button class="btn-med" onclick="startGame('medium')">Medium (4x3) - 8 levels</button>
+    <button class="btn-hard" onclick="startGame('hard')">Hard (4x4) - 12 levels</button>
   </div>
 </div>
-<div id="game-over" class="hidden">
-  <h2>🎉 Complete!</h2>
-  <div class="score" id="go-score">0</div>
-  <p>Moves: <span id="go-moves">0</span></p>
-  <button onclick="document.getElementById('game-over').classList.add('hidden');document.getElementById('menu').classList.remove('hidden')">Play Again</button>
-</div>
+<div id="game-over" class="hidden"></div>
 
 <script>
 const C=document.getElementById('c'),ctx=C.getContext('2d');
 let W,H,dpr;
-const actx=new(window.AudioContext||window.webkitAudioContext)();
-function snd(f,d,t='sine',v=0.08){const o=actx.createOscillator(),g=actx.createGain();o.type=t;o.frequency.value=f;g.gain.setValueAtTime(v,actx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,actx.currentTime+d);o.connect(g);g.connect(actx.destination);o.start();o.stop(actx.currentTime+d)}
 
-const SYMBOLS=['🌟','🎈','🔥','💎','🌈','🎵','🍀','⚡','🌸','🎯','🦋','🌙','❄️','🎪','🍄','🎭','🌺','💫','🎲','🐱'];
+// AudioContext pattern - lazy init
+let audioCtx;
+function ensureAudio(){
+  if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  if(audioCtx.state==='suspended')audioCtx.resume();
+  return audioCtx;
+}
+function snd(f,d,t='sine',v=0.08){
+  try{
+    let a=ensureAudio();
+    const o=a.createOscillator(),g=a.createGain();
+    o.type=t;o.frequency.value=f;g.gain.setValueAtTime(v,a.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,a.currentTime+d);
+    o.connect(g);g.connect(a.destination);o.start();o.stop(a.currentTime+d);
+  }catch(e){}
+}
+
+function saveData(key,data){try{localStorage.setItem(key,JSON.stringify(data))}catch(e){}}
+function loadData(key){try{return JSON.parse(localStorage.getItem(key))}catch(e){return null}}
+
+// Themes
+const THEMES={
+  space:{
+    bg:'#0a0a1e',symbols:['&#127775;','&#127752;','&#128293;','&#128142;','&#127752;','&#127925;','&#127808;','&#9889;','&#127800;','&#127919;','&#129419;','&#127769;','&#10052;','&#127914;','&#127804;','&#127913;','&#127802;','&#128171;','&#127922;','&#128049;'],
+    cardBack:'#2d3436',cardBackAlt:'#1a1a2e',starColor:'rgba(255,255,255,0.3)'
+  },
+  egypt:{
+    bg:'#1a150a',symbols:['&#128081;','&#128293;','&#9728;','&#128142;','&#127919;','&#127793;','&#128013;','&#127774;','&#11088;','&#129477;','&#128302;','&#127754;','&#128123;','&#129412;','&#127942;','&#127760;','&#128161;','&#9875;','&#128221;','&#128295;'],
+    cardBack:'#3a2a10',cardBackAlt:'#251a08',starColor:'rgba(255,200,50,0.2)'
+  },
+  ocean:{
+    bg:'#0a1a2e',symbols:['&#127754;','&#128032;','&#128031;','&#128025;','&#129416;','&#127776;','&#128026;','&#9875;','&#127774;','&#128043;','&#129418;','&#128024;','&#128027;','&#127880;','&#128171;','&#127800;','&#128302;','&#9889;','&#128051;','&#127756;'],
+    cardBack:'#1a3040',cardBackAlt:'#0a1a2e',starColor:'rgba(100,200,255,0.2)'
+  },
+  forest:{
+    bg:'#0a1a0e',symbols:['&#127794;','&#127807;','&#127812;','&#127811;','&#128004;','&#127800;','&#127804;','&#127808;','&#128038;','&#129415;','&#127806;','&#127809;','&#127813;','&#128144;','&#127810;','&#128028;','&#127803;','&#127805;','&#128039;','&#129425;'],
+    cardBack:'#1a2a1a',cardBackAlt:'#0a1a0a',starColor:'rgba(100,200,100,0.2)'
+  }
+};
 const CARD_COLORS=['#e94560','#4d96ff','#6bcb77','#ffd93d','#a55eea','#fd79a8','#00cec9','#e17055','#74b9ff','#badc58'];
 
+let currentTheme='space';
 let cards=[],cols=4,rows=3,totalPairs=0;
-let flipped=[],matched=new Set(),moves=0,gameActive=false,level=1;
-let rotAngle=0,rotSpeed=0.003,rotTarget=0;
+let flipped=[],matched=new Set(),moves=0,gameActive=false,level=1,maxLevel=8;
+let rotAngle=0,rotSpeed=0.003;
 let difficulty='medium';
 let cardW,cardH,gapX,gapY,baseX,baseY;
 let flipAnims={};
-let shakeT=0;
 let matchParticles=[];
+let totalScore=0;
+
+// Timer
+let gameTime=0,timerInterval=null;
+
+// Combo system
+let comboCount=0,comboTimer=0,lastMatchTime=0;
+const COMBO_WINDOW=3000; // 3 seconds to keep combo
+
+// Power-ups
+let powerUps={peek:2,freeze:1,hint:3};
+let freezeActive=false,freezeTimer=0;
+let hintCard=-1,hintTimer=0;
+let peekActive=false,peekTimer=0;
+
+function selectTheme(t){
+  currentTheme=t;
+  document.querySelectorAll('.theme-btn').forEach(b=>b.classList.toggle('selected',b.dataset.theme===t));
+  document.body.style.background=THEMES[t].bg;
+}
 
 function resize(){
   dpr=window.devicePixelRatio||1;W=window.innerWidth;H=window.innerHeight;
@@ -83,11 +164,11 @@ function resize(){
 
 function layoutCards(){
   let maxW=(W-40)/cols;
-  let maxH=(H-120)/rows;
-  cardW=Math.min(maxW,80);cardH=Math.min(maxH,110);
+  let maxH=(H-140)/rows;
+  cardW=Math.min(maxW,75);cardH=Math.min(maxH,100);
   gapX=(W-cols*cardW)/(cols+1);
-  gapY=(H-80-rows*cardH)/(rows+1);
-  baseX=gapX;baseY=60+gapY;
+  gapY=(H-100-rows*cardH)/(rows+1);
+  baseX=gapX;baseY=55+gapY;
 }
 
 function cardPos(idx){
@@ -98,7 +179,6 @@ function cardPos(idx){
 }
 
 function project3D(x,y){
-  // Apply perspective rotation around Y axis
   let cx=W/2,cy=H/2;
   let dx=x-cx,dy=y-cy;
   let cos=Math.cos(rotAngle),sin=Math.sin(rotAngle);
@@ -109,59 +189,166 @@ function project3D(x,y){
   return{x:cx+px*scale,y:cy+dy*scale,scale,z:pz};
 }
 
+// FIXED: Inverse projection for accurate hit detection
+function unproject(screenX,screenY){
+  let cx=W/2,cy=H/2;
+  let cos=Math.cos(rotAngle),sin=Math.sin(rotAngle);
+  // For each card, compute its projected position and check against screen coords
+  // This avoids the distortion in the old project3D-based hit test
+  let bestIdx=-1,bestD=Infinity;
+  for(let i=0;i<cards.length;i++){
+    if(matched.has(i))continue;
+    let pos=cardPos(i);
+    let pp=project3D(pos.x,pos.y);
+    let w=cardW*pp.scale*0.5;
+    let h=cardH*pp.scale*0.5;
+    // Rectangular hit test (more accurate than distance)
+    if(screenX>=pp.x-w&&screenX<=pp.x+w&&screenY>=pp.y-h&&screenY<=pp.y+h){
+      // Prefer closer cards (higher z = closer to camera)
+      if(pp.z<bestD||bestIdx===-1){bestD=pp.z;bestIdx=i}
+    }
+  }
+  return bestIdx;
+}
+
 function initCards(){
+  let theme=THEMES[currentTheme];
   let n=cols*rows;
   totalPairs=n/2;
-  let symbols=SYMBOLS.slice(0,totalPairs);
+  let symbols=theme.symbols.slice(0,totalPairs);
   let deck=[...symbols,...symbols];
-  // Shuffle
   for(let i=deck.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[deck[i],deck[j]]=[deck[j],deck[i]]}
   cards=deck.map((sym,i)=>({symbol:sym,color:CARD_COLORS[i%CARD_COLORS.length]}));
   flipped=[];matched=new Set();moves=0;flipAnims={};
-  rotAngle=0;
+  rotAngle=0;comboCount=0;
+  hintCard=-1;hintTimer=0;peekActive=false;
   document.getElementById('matches').textContent=`0/${totalPairs}`;
   document.getElementById('moves').textContent='0';
-  document.getElementById('level').textContent=level;
-  
+  document.getElementById('level').textContent=level+'/'+maxLevel;
+
   // Brief peek at start
   cards.forEach((c,i)=>flipAnims[i]={progress:1,direction:-1,timer:1.5+i*0.05});
 }
 
 function startGame(diff){
-  actx.resume();
-  difficulty=diff;level=1;
-  if(diff==='easy'){cols=3;rows=2}
-  else if(diff==='medium'){cols=4;rows=3}
-  else{cols=4;rows=4}
+  ensureAudio();
+  difficulty=diff;level=1;totalScore=0;
+  if(diff==='easy'){cols=3;rows=2;maxLevel=5}
+  else if(diff==='medium'){cols=4;rows=3;maxLevel=8}
+  else{cols=4;rows=4;maxLevel=12}
+  powerUps={peek:2,freeze:1,hint:3};
+  updatePowerUpUI();
   document.getElementById('menu').classList.add('hidden');
   document.getElementById('game-over').classList.add('hidden');
+  document.getElementById('level-complete').classList.add('hidden');
   layoutCards();initCards();
-  rotSpeed=0.003*(diff==='hard'?2:diff==='medium'?1.5:1);
+  rotSpeed=0.003*(diff==='hard'?1.5:diff==='medium'?1:0.7);
   gameActive=true;
+  gameTime=0;
+  if(timerInterval)clearInterval(timerInterval);
+  timerInterval=setInterval(()=>{
+    if(gameActive&&!freezeActive){
+      gameTime++;
+      let m=Math.floor(gameTime/60),s=gameTime%60;
+      document.getElementById('timer').textContent=m+':'+(s<10?'0':'')+s;
+    }
+  },1000);
+}
+
+function usePowerUp(type){
+  if(!gameActive)return;
+  ensureAudio();
+
+  if(type==='peek'&&powerUps.peek>0){
+    powerUps.peek--;
+    peekActive=true;peekTimer=2;
+    cards.forEach((c,i)=>{
+      if(!matched.has(i)){
+        flipAnims[i]={progress:0,direction:1,timer:0};
+      }
+    });
+    setTimeout(()=>{
+      cards.forEach((c,i)=>{
+        if(!matched.has(i)&&!flipped.includes(i)){
+          flipAnims[i]={progress:1,direction:-1,timer:0};
+        }
+      });
+      peekActive=false;
+    },2000);
+    snd(600,0.15);snd(800,0.1,'triangle');
+  }
+  else if(type==='freeze'&&powerUps.freeze>0){
+    powerUps.freeze--;
+    freezeActive=true;freezeTimer=5;
+    setTimeout(()=>{freezeActive=false},5000);
+    snd(300,0.2);snd(500,0.15,'triangle');
+  }
+  else if(type==='hint'&&powerUps.hint>0){
+    // Find an unmatched pair and highlight one
+    for(let i=0;i<cards.length;i++){
+      if(matched.has(i))continue;
+      for(let j=i+1;j<cards.length;j++){
+        if(matched.has(j))continue;
+        if(cards[i].symbol===cards[j].symbol){
+          powerUps.hint--;
+          hintCard=i;hintTimer=2;
+          setTimeout(()=>{hintCard=-1},2000);
+          snd(700,0.1);snd(900,0.08,'triangle');
+          updatePowerUpUI();
+          return;
+        }
+      }
+    }
+  }
+  updatePowerUpUI();
+}
+
+function updatePowerUpUI(){
+  document.getElementById('pw-peek-count').textContent=powerUps.peek;
+  document.getElementById('pw-freeze-count').textContent=powerUps.freeze;
+  document.getElementById('pw-hint-count').textContent=powerUps.hint;
+  document.getElementById('pw-peek').classList.toggle('disabled',powerUps.peek<=0);
+  document.getElementById('pw-freeze').classList.toggle('disabled',powerUps.freeze<=0);
+  document.getElementById('pw-hint').classList.toggle('disabled',powerUps.hint<=0);
 }
 
 function clickCard(idx){
   if(!gameActive)return;
+  if(peekActive)return;
   if(matched.has(idx))return;
   if(flipped.includes(idx))return;
   if(flipped.length>=2)return;
-  if(flipAnims[idx]&&flipAnims[idx].progress>0)return;
-  
+  if(flipAnims[idx]&&flipAnims[idx].progress>0&&flipAnims[idx].direction===1)return;
+
   flipped.push(idx);
   flipAnims[idx]={progress:0,direction:1,timer:0};
   snd(400+idx*20,0.1);
-  
+
   if(flipped.length===2){
     moves++;
     document.getElementById('moves').textContent=moves;
     let [a,b]=flipped;
     if(cards[a].symbol===cards[b].symbol){
       // Match!
+      let now=Date.now();
+      if(now-lastMatchTime<COMBO_WINDOW){comboCount++}else{comboCount=1}
+      lastMatchTime=now;
+
+      // Show combo
+      if(comboCount>1){
+        let cd=document.getElementById('combo-display');
+        cd.textContent=comboCount+'x Combo!';
+        cd.style.color=comboCount>=4?'#ffd93d':comboCount>=3?'#e94560':'#6bcb77';
+        cd.style.opacity='1';cd.style.transform='translateX(-50%) scale(1.2)';
+        setTimeout(()=>{cd.style.opacity='0';cd.style.transform='translateX(-50%) scale(0.8)'},1000);
+      }
+
       setTimeout(()=>{
         matched.add(a);matched.add(b);
         flipped=[];
         snd(600,0.2);snd(800,0.15,'triangle');
-        // Celebration particles at both cards
+        if(comboCount>1)snd(1000,0.1,'sine',0.05);
+
         [a,b].forEach(idx=>{
           let pos=cardPos(idx);let pp=project3D(pos.x,pos.y);
           for(let k=0;k<12;k++){
@@ -170,75 +357,104 @@ function clickCard(idx){
           }
         });
         document.getElementById('matches').textContent=`${matched.size/2}/${totalPairs}`;
-        
+
         if(matched.size===cards.length){
           // Level complete
-          setTimeout(()=>{
-            level++;
-            if(level>8){
-              gameActive=false;
-              let score=Math.max(0,2000-moves*10+level*300);
-              document.getElementById('go-score').textContent=score;
-              document.getElementById('go-moves').textContent=moves;
-              document.getElementById('game-over').classList.remove('hidden');
-            }else{
-              rotSpeed+=0.002;
-              initCards();layoutCards();
-            }
-          },600);
+          setTimeout(()=>levelComplete(),500);
         }
       },400);
     }else{
-      // No match
       setTimeout(()=>{
         flipAnims[a]={progress:1,direction:-1,timer:0};
         flipAnims[b]={progress:1,direction:-1,timer:0};
         flipped=[];
+        comboCount=0;
         snd(200,0.15,'square',0.05);
       },800);
     }
   }
 }
 
-C.addEventListener('click',e=>{
-  if(!gameActive)return;
-  actx.resume();
-  let mx=e.clientX,my=e.clientY;
-  // Find closest card
-  let bestIdx=-1,bestD=Infinity;
-  for(let i=0;i<cards.length;i++){
-    let p=cardPos(i);
-    let pp=project3D(p.x,p.y);
-    let d=Math.hypot(mx-pp.x,my-pp.y);
-    let hitR=cardW*pp.scale*0.6;
-    if(d<hitR&&d<bestD){bestD=d;bestIdx=i}
-  }
-  if(bestIdx>=0)clickCard(bestIdx);
-});
+function levelComplete(){
+  // Calculate star rating
+  let perfectMoves=totalPairs;
+  let moveRatio=moves/perfectMoves;
+  let timeBonus=Math.max(0,120-gameTime);
+  let stars=moveRatio<=1.5?3:moveRatio<=2.5?2:1;
+  let comboBonus=comboCount>1?comboCount*50:0;
+  let levelScore=Math.max(0,1000-moves*20+timeBonus*5+comboBonus+stars*200);
+  totalScore+=levelScore;
 
+  let lc=document.getElementById('level-complete');
+  let starStr='';
+  for(let i=0;i<3;i++)starStr+=i<stars?'&#11088;':'&#9734;';
+  lc.innerHTML=`
+    <h3>Level ${level} Complete!</h3>
+    <div class="lc-stars">${starStr}</div>
+    <p>Moves: ${moves} | Time: ${Math.floor(gameTime/60)}:${(gameTime%60).toString().padStart(2,'0')}</p>
+    <p>Score: +${levelScore}</p>
+    <button onclick="nextLevel()">Next Level</button>
+  `;
+  lc.classList.remove('hidden');
+  gameActive=false;
+
+  // Award extra power-ups for 3 stars
+  if(stars===3){
+    powerUps.hint++;powerUps.peek++;
+    updatePowerUpUI();
+  }
+}
+
+function nextLevel(){
+  document.getElementById('level-complete').classList.add('hidden');
+  level++;
+  if(level>maxLevel){
+    // Game complete
+    gameActive=false;
+    if(timerInterval)clearInterval(timerInterval);
+    let go=document.getElementById('game-over');
+    let overallStars=totalScore>=maxLevel*800?3:totalScore>=maxLevel*500?2:1;
+    let starStr='';for(let i=0;i<3;i++)starStr+=i<overallStars?'&#11088;':'&#9734;';
+    go.innerHTML=`
+      <h2>All Levels Complete!</h2>
+      <div class="score">${totalScore}</div>
+      <div class="stars">${starStr}</div>
+      <p>Difficulty: ${difficulty}</p>
+      <p>Theme: ${currentTheme}</p>
+      <button onclick="document.getElementById('game-over').classList.add('hidden');document.getElementById('menu').classList.remove('hidden')">Play Again</button>
+    `;
+    go.classList.remove('hidden');
+    return;
+  }
+  rotSpeed+=0.001;
+  // Increase grid on harder levels
+  if(difficulty==='medium'&&level>=5){cols=4;rows=4}
+  if(difficulty==='hard'&&level>=7){cols=5;rows=4}
+  gameTime=0;moves=0;
+  layoutCards();initCards();
+  gameActive=true;
+}
+
+function handleClick(mx,my){
+  if(!gameActive)return;
+  ensureAudio();
+  let bestIdx=unproject(mx,my);
+  if(bestIdx>=0)clickCard(bestIdx);
+}
+
+C.addEventListener('click',e=>handleClick(e.clientX,e.clientY));
 C.addEventListener('touchstart',e=>{
   e.preventDefault();
-  if(!gameActive)return;
-  actx.resume();
-  let t=e.touches[0];
-  let mx=t.clientX,my=t.clientY;
-  let bestIdx=-1,bestD=Infinity;
-  for(let i=0;i<cards.length;i++){
-    let p=cardPos(i);
-    let pp=project3D(p.x,p.y);
-    let d=Math.hypot(mx-pp.x,my-pp.y);
-    let hitR=cardW*pp.scale*0.6;
-    if(d<hitR&&d<bestD){bestD=d;bestIdx=i}
-  }
-  if(bestIdx>=0)clickCard(bestIdx);
+  if(!e.touches[0])return;
+  handleClick(e.touches[0].clientX,e.touches[0].clientY);
 });
 
 let lastT=0;
 function loop(t){
   let dt=Math.min((t-lastT)/1000,0.05);lastT=t;
-  
-  if(gameActive)rotAngle+=rotSpeed*dt*60;
-  
+
+  if(gameActive&&!freezeActive)rotAngle+=rotSpeed*dt*60;
+
   // Update flip animations
   for(let idx in flipAnims){
     let a=flipAnims[idx];
@@ -246,18 +462,26 @@ function loop(t){
     a.progress+=a.direction*dt*4;
     a.progress=Math.max(0,Math.min(1,a.progress));
   }
-  
+
   // Render
-  ctx.clearRect(0,0,W,H);
-  
-  // Background stars
-  ctx.fillStyle='rgba(255,255,255,0.3)';
+  let theme=THEMES[currentTheme];
+  ctx.fillStyle=theme.bg;ctx.clearRect(0,0,W,H);
+  ctx.fillRect(0,0,W,H);
+
+  // Background stars/particles
+  ctx.fillStyle=theme.starColor;
   for(let i=0;i<40;i++){
     let sx=(i*137.5+Date.now()*0.001*i*0.1)%W;
     let sy=(i*97.3)%H;
-    ctx.fillRect(sx,sy,1,1);
+    ctx.fillRect(sx,sy,1.5,1.5);
   }
-  
+
+  // Freeze effect
+  if(freezeActive){
+    ctx.fillStyle='rgba(100,200,255,0.05)';
+    ctx.fillRect(0,0,W,H);
+  }
+
   // Sort cards by z for proper overlap
   let indices=[...Array(cards.length).keys()];
   indices.sort((a,b)=>{
@@ -266,7 +490,7 @@ function loop(t){
     let zb=project3D(pb.x,pb.y).z;
     return zb-za;
   });
-  
+
   for(let idx of indices){
     if(matched.has(idx))continue;
     let card=cards[idx];
@@ -274,56 +498,55 @@ function loop(t){
     let pp=project3D(pos.x,pos.y);
     let s=pp.scale;
     let w=cardW*s*0.9,h=cardH*s*0.9;
-    
+
     let flipProg=flipAnims[idx]?flipAnims[idx].progress:0;
     let isFlipped=flipProg>0.5;
     let flipScale=Math.abs(Math.cos(flipProg*Math.PI));
-    
+
+    // Hint glow
+    let isHinted=idx===hintCard;
+
     ctx.save();
     ctx.translate(pp.x,pp.y);
     ctx.scale(flipScale,1);
-    
+
     // Card shadow
     ctx.fillStyle='rgba(0,0,0,0.3)';
     roundRect(ctx,-(w/2)+3,-(h/2)+3,w,h,8*s);ctx.fill();
-    
+
+    if(isHinted){
+      ctx.shadowColor='#ffd93d';ctx.shadowBlur=20;
+    }
+
     if(isFlipped){
-      // Front face
       let grad=ctx.createLinearGradient(-w/2,-h/2,w/2,h/2);
       grad.addColorStop(0,card.color);
       grad.addColorStop(1,shadeColor(card.color,-30));
       ctx.fillStyle=grad;
       roundRect(ctx,-w/2,-h/2,w,h,8*s);ctx.fill();
-      
-      // Symbol
       ctx.font=`${28*s}px sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
       ctx.fillText(card.symbol,0,0);
     }else{
-      // Back face
       let grad=ctx.createLinearGradient(-w/2,-h/2,w/2,h/2);
-      grad.addColorStop(0,'#2d3436');grad.addColorStop(1,'#1a1a2e');
+      grad.addColorStop(0,theme.cardBack);grad.addColorStop(1,theme.cardBackAlt);
       ctx.fillStyle=grad;
       roundRect(ctx,-w/2,-h/2,w,h,8*s);ctx.fill();
-      
-      // Pattern
       ctx.strokeStyle='rgba(255,255,255,0.08)';ctx.lineWidth=1;
       for(let i=-3;i<=3;i++){
         ctx.beginPath();ctx.moveTo(-w/2+i*12*s,-h/2);ctx.lineTo(-w/2+i*12*s+h*s,h/2);ctx.stroke();
       }
-      
-      // Question mark
       ctx.fillStyle='rgba(255,255,255,0.15)';
       ctx.font=`bold ${20*s}px sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
       ctx.fillText('?',0,0);
     }
-    
-    // Border
-    ctx.strokeStyle='rgba(255,255,255,0.15)';ctx.lineWidth=1;
+
+    ctx.shadowBlur=0;
+    ctx.strokeStyle=isHinted?'rgba(255,217,61,0.6)':'rgba(255,255,255,0.15)';ctx.lineWidth=isHinted?2:1;
     roundRect(ctx,-w/2,-h/2,w,h,8*s);ctx.stroke();
-    
+
     ctx.restore();
   }
-  
+
   // Match particles
   for(let i=matchParticles.length-1;i>=0;i--){
     let p=matchParticles[i];
@@ -333,8 +556,8 @@ function loop(t){
     ctx.beginPath();ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);ctx.fill();
     ctx.globalAlpha=1;
   }
-  
-  // Matched cards fade effect
+
+  // Matched card glow
   matched.forEach(idx=>{
     let pos=cardPos(idx);
     let pp=project3D(pos.x,pos.y);
@@ -343,7 +566,7 @@ function loop(t){
     ctx.beginPath();ctx.arc(pp.x,pp.y,8*pp.scale,0,Math.PI*2);ctx.fill();
     ctx.globalAlpha=1;
   });
-  
+
   requestAnimationFrame(loop);
 }
 

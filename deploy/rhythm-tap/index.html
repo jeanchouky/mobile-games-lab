@@ -36,8 +36,15 @@ canvas{display:block}
     <button class="diff-btn active" data-diff="normal">Normal<br><span style="font-size:0.7rem;color:#888">3 lanes</span></button>
     <button class="diff-btn" data-diff="hard">Hard<br><span style="font-size:0.7rem;color:#888">4 lanes</span></button>
   </div>
+  <div style="color:#666;font-size:0.8rem;margin-bottom:4px">Theme</div>
+  <div class="diff-btns" id="theme-btns">
+    <button class="diff-btn active" data-theme="neon" style="border-color:#ff006e">Neon</button>
+    <button class="diff-btn" data-theme="sunset">Sunset</button>
+    <button class="diff-btn" data-theme="ocean">Ocean</button>
+    <button class="diff-btn" data-theme="forest">Forest</button>
+  </div>
   <button class="btn" id="start-btn">PLAY</button>
-  <div class="controls-hint">Keyboard: D F J K for lanes<br>Touch: Tap on lane</div>
+  <div class="controls-hint">Keyboard: D F J K for lanes | Touch: Tap on lane<br>Hit notes as they cross the line. Chain combos for more points!</div>
 </div>
 
 <div class="overlay hidden" id="results">
@@ -57,9 +64,15 @@ let W,H;
 function resize(){W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight}
 window.addEventListener('resize',resize);resize();
 
-let audioCtx,difficulty='normal';
+let audioCtx,difficulty='normal',theme='neon';
 const CONFIGS={easy:{lanes:2,bpm:100,noteInterval:600},normal:{lanes:3,bpm:120,noteInterval:450},hard:{lanes:4,bpm:140,noteInterval:350}};
-const LANE_COLORS=['#ff006e','#8338ec','#3a86ff','#ff9500'];
+const THEMES={
+  neon:{bg:'#0a0014',laneColors:['#ff006e','#8338ec','#3a86ff','#ff9500'],accent:'#ff006e'},
+  sunset:{bg:'#1a0a00',laneColors:['#ff6b35','#f7c59f','#efefd0','#004e89'],accent:'#ff6b35'},
+  ocean:{bg:'#001220',laneColors:['#0077b6','#00b4d8','#90e0ef','#48cae4'],accent:'#00b4d8'},
+  forest:{bg:'#0a1400',laneColors:['#2d6a4f','#52b788','#95d5b2','#b7e4c7'],accent:'#52b788'},
+};
+let LANE_COLORS=THEMES.neon.laneColors;
 const HIT_LINE_Y_PCT=0.82;
 
 let notes,score,combo,maxCombo,perfects,goods,misses,particles;
@@ -68,7 +81,10 @@ let hitEffects=[];
 let laneFlash=[]; // per-lane flash on tap
 let bgPulse=0;
 
-function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)()}
+function ensureAudio(){
+  if(!audioCtx){try{audioCtx=new(window.AudioContext||window.webkitAudioContext)()}catch(e){}}
+  if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume().catch(()=>{});
+}
 
 function playNote(freq,dur=0.12,type='square',vol=0.08){
   if(!audioCtx)return;
@@ -110,6 +126,41 @@ function playHit(quality){
 
 function playMiss(){playNote(200,0.15,'sawtooth',0.04)}
 
+// Song style templates for variety
+const SONG_STYLES=[
+  {name:'EDM Drop',
+   sections:[
+     {start:2000,end:8000,density:0.5,name:'intro'},
+     {start:8000,end:16000,density:0.7,name:'build'},
+     {start:16000,end:24000,density:0.9,name:'chorus'},
+     {start:24000,end:28000,density:0.4,name:'break'},
+     {start:28000,end:34000,density:0.95,name:'chorus2'},
+   ],halfBeatChance:0.3,doubleChance:0.25},
+  {name:'Staircase',
+   sections:[
+     {start:2000,end:7000,density:0.4,name:'intro'},
+     {start:7000,end:14000,density:0.6,name:'build'},
+     {start:14000,end:20000,density:0.75,name:'chorus'},
+     {start:20000,end:26000,density:0.85,name:'chorus'},
+     {start:26000,end:34000,density:0.95,name:'chorus2'},
+   ],halfBeatChance:0.15,doubleChance:0.35,staircase:true},
+  {name:'Call & Response',
+   sections:[
+     {start:2000,end:10000,density:0.6,name:'call'},
+     {start:10000,end:18000,density:0.6,name:'response'},
+     {start:18000,end:26000,density:0.8,name:'chorus'},
+     {start:26000,end:34000,density:0.9,name:'chorus2'},
+   ],halfBeatChance:0.2,doubleChance:0.2,callResponse:true},
+  {name:'Burst',
+   sections:[
+     {start:2000,end:6000,density:0.45,name:'intro'},
+     {start:6000,end:12000,density:0.3,name:'break'},
+     {start:12000,end:18000,density:0.95,name:'chorus'},
+     {start:18000,end:24000,density:0.3,name:'break'},
+     {start:24000,end:34000,density:0.95,name:'chorus2'},
+   ],halfBeatChance:0.4,doubleChance:0.3},
+];
+
 // Generate musical patterns with structure
 function generatePattern(cfg){
   const pattern=[];
@@ -117,46 +168,58 @@ function generatePattern(cfg){
   const beatMs=60000/cfg.bpm;
   let t=2000;
   const lanes=cfg.lanes;
-  
-  // Create sections: intro, build, chorus, break, chorus, outro
-  const sections=[
-    {start:2000,end:8000,density:0.5,name:'intro'},
-    {start:8000,end:16000,density:0.7,name:'build'},
-    {start:16000,end:24000,density:0.9,name:'chorus'},
-    {start:24000,end:28000,density:0.4,name:'break'},
-    {start:28000,end:34000,density:0.95,name:'chorus2'},
-  ];
-  
+  const style=SONG_STYLES[Math.floor(Math.random()*SONG_STYLES.length)];
+  let stairLane=0;
+  let callSide=0; // 0=left lanes, 1=right lanes
+
   while(t<duration){
-    const section=sections.find(s=>t>=s.start&&t<s.end)||{density:0.3};
-    
+    const section=style.sections.find(s=>t>=s.start&&t<s.end)||{density:0.3};
+
     if(Math.random()<section.density){
-      const lane=Math.floor(Math.random()*lanes);
+      let lane;
+      if(style.staircase){
+        lane=stairLane%lanes;stairLane++;
+      }else if(style.callResponse&&(section.name==='call'||section.name==='response')){
+        const half=Math.max(1,Math.floor(lanes/2));
+        lane=section.name==='call'?Math.floor(Math.random()*half):half+Math.floor(Math.random()*(lanes-half));
+      }else{
+        lane=Math.floor(Math.random()*lanes);
+      }
       pattern.push({time:t,lane});
-      
+
       // Double notes in chorus
-      if(section.name?.includes('chorus')&&Math.random()<0.25){
+      if(section.name?.includes('chorus')&&Math.random()<style.doubleChance){
         let lane2;
         do{lane2=Math.floor(Math.random()*lanes)}while(lane2===lane);
         pattern.push({time:t,lane:lane2});
       }
     }
-    
+
     // Occasional half-beat notes
-    if(Math.random()<section.density*0.3){
+    if(Math.random()<section.density*style.halfBeatChance){
       const lane=Math.floor(Math.random()*lanes);
       pattern.push({time:t+beatMs/2,lane});
     }
-    
+
     t+=beatMs;
   }
   return{pattern,duration};
 }
 
-document.querySelectorAll('.diff-btn').forEach(b=>{
+document.querySelectorAll('.diff-btn[data-diff]').forEach(b=>{
   b.addEventListener('click',()=>{
-    document.querySelectorAll('.diff-btn').forEach(x=>x.classList.remove('active'));
-    b.classList.add('active');difficulty=b.dataset.diff;
+    document.querySelectorAll('.diff-btn[data-diff]').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');b.style.borderColor=THEMES[theme].accent;difficulty=b.dataset.diff;
+  });
+});
+document.querySelectorAll('.diff-btn[data-theme]').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('.diff-btn[data-theme]').forEach(x=>{x.classList.remove('active');x.style.borderColor='rgba(255,255,255,0.1)';});
+    b.classList.add('active');theme=b.dataset.theme;b.style.borderColor=THEMES[theme].accent;
+    LANE_COLORS=THEMES[theme].laneColors;
+    document.body.style.background=THEMES[theme].bg;
+    // Update diff buttons accent
+    document.querySelectorAll('.diff-btn[data-diff].active').forEach(x=>x.style.borderColor=THEMES[theme].accent);
   });
 });
 
@@ -164,10 +227,11 @@ document.getElementById('start-btn').addEventListener('click',startGame);
 document.getElementById('retry-btn').addEventListener('click',startGame);
 
 function startGame(){
-  initAudio();
+  ensureAudio();
   document.getElementById('menu').classList.add('hidden');
   document.getElementById('results').classList.add('hidden');
   
+  LANE_COLORS=THEMES[theme].laneColors;
   const cfg=CONFIGS[difficulty];
   const song=generatePattern(cfg);
   notePattern=song;
@@ -193,8 +257,8 @@ function startGame(){
     beatTimer+=dt;
     halfBeatTimer+=dt;
     
-    if(beatTimer>=beatMs){beatTimer-=beatMs;playBeat();bgPulse=1}
-    if(halfBeatTimer>=beatMs/2){halfBeatTimer-=beatMs/2;if(Math.random()<0.3)playHihat()}
+    if(beatTimer>=beatMs){beatTimer=beatTimer%beatMs;playBeat();bgPulse=1}
+    if(halfBeatTimer>=beatMs/2){halfBeatTimer=halfBeatTimer%(beatMs/2);if(Math.random()<0.3)playHihat()}
     
     while(patIdx<song.pattern.length){
       const n=song.pattern[patIdx];
@@ -290,10 +354,12 @@ document.addEventListener('keydown',e=>{
   if(lane!==undefined)tryHit(lane);
 });
 document.addEventListener('keyup',e=>keyDown.delete(e.key));
+window.addEventListener('blur',()=>keyDown.clear());
 
 function draw(cfg,hitLineY,beatPhase){
-  // Background with fade
-  ctx.fillStyle=`rgba(10,0,20,${0.35+bgPulse*0.1})`;ctx.fillRect(0,0,W,H);
+  // Background with fade - parse theme bg
+  const tb=THEMES[theme].bg,r=parseInt(tb.slice(1,3),16),g=parseInt(tb.slice(3,5),16),b=parseInt(tb.slice(5,7),16);
+  ctx.fillStyle=`rgba(${r},${g},${b},${0.35+bgPulse*0.1})`;ctx.fillRect(0,0,W,H);
   
   const lanes=cfg.lanes;
   const laneW=W/lanes;
@@ -388,7 +454,7 @@ function draw(cfg,hitLineY,beatPhase){
   // Combo with scaling effect
   if(combo>1){
     const comboScale=combo>10?1.3:combo>5?1.15:1;
-    ctx.fillStyle=combo>20?'#ff006e':combo>10?'#ffd700':'#fff';
+    ctx.fillStyle=combo>20?THEMES[theme].accent:combo>10?'#ffd700':'#fff';
     ctx.font=`bold ${1*comboScale}rem sans-serif`;ctx.textAlign='center';
     ctx.fillText(`${combo}x`,W/2,32);
   }
@@ -397,7 +463,7 @@ function draw(cfg,hitLineY,beatPhase){
   const prog=Math.min(songTime/(notePattern.duration),1);
   ctx.fillStyle='rgba(255,255,255,0.08)';ctx.fillRect(0,H-4,W,4);
   const progGrad=ctx.createLinearGradient(0,0,W*prog,0);
-  progGrad.addColorStop(0,'#ff006e');progGrad.addColorStop(1,'#3a86ff');
+  progGrad.addColorStop(0,THEMES[theme].accent);progGrad.addColorStop(1,LANE_COLORS[Math.min(2,LANE_COLORS.length-1)]);
   ctx.fillStyle=progGrad;ctx.fillRect(0,H-4,W*prog,4);
 }
 
@@ -415,14 +481,15 @@ function showResults(){
   document.getElementById('r-acc').textContent=`Perfect: ${perfects} | Good: ${goods} | Miss: ${misses}`;
   
   const key=`rhythmtap_${difficulty}`;
-  const best=parseInt(localStorage.getItem(key))||0;
-  if(score>best)localStorage.setItem(key,score);
-  document.getElementById('r-best').textContent=score>best?'🎉 NEW HIGH SCORE!':`Best: ${Math.max(best,score)}`;
+  let best=0;
+  try{best=parseInt(localStorage.getItem(key))||0}catch(e){}
+  if(score>best){try{localStorage.setItem(key,score)}catch(e){}}
+  document.getElementById('r-best').textContent=score>best?'NEW HIGH SCORE!':`Best: ${Math.max(best,score)}`;
   
   document.getElementById('results').classList.remove('hidden');
 }
 
-ctx.fillStyle='#0a0014';ctx.fillRect(0,0,W,H);
+ctx.fillStyle=THEMES[theme].bg;ctx.fillRect(0,0,W,H);
 </script>
 </body>
 </html>

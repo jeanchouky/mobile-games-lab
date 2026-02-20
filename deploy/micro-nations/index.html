@@ -42,11 +42,13 @@ canvas {
   background: #4a90e2;
   color: white;
   border: none;
-  padding: 8px 16px;
-  border-radius: 4px;
+  padding: 10px 16px;
+  border-radius: 6px;
   font-size: 14px;
   cursor: pointer;
   margin: 4px;
+  min-height: 44px;
+  min-width: 44px;
 }
 .btn:active { background: #357abd; }
 .btn.danger { background: #e74c3c; }
@@ -91,7 +93,8 @@ let state = {
   buildMode: null,
   diplomacyUnlocked: false,
   neighboringIslands: [],
-  milestones: { pop50: false, pop100: false }
+  milestones: { pop50: false, pop100: false },
+  tech: { farming: false, fishing: false, masonry: false, education: false, medicine: false }
 };
 
 // Input
@@ -106,7 +109,7 @@ let audioMuted = false;
 
 // Island grid (50x50 tiles)
 const GRID_SIZE = 50;
-const grid = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill({ type: 'water', elevation: 0 }));
+const grid = Array(GRID_SIZE).fill(null).map(() => Array.from({length:GRID_SIZE}, () => ({ type: 'water', elevation: 0 })));
 
 // Names database
 const FIRST_NAMES = [
@@ -149,7 +152,8 @@ function init() {
   if (saved) {
     try {
       state = JSON.parse(saved);
-      console.log('Loaded save:', state);
+      // Migrate old saves
+      if (!state.tech) state.tech = { farming: false, fishing: false, masonry: false, education: false, medicine: false };
     } catch (e) {
       console.warn('Failed to load save, starting fresh');
       initNewGame();
@@ -158,11 +162,15 @@ function init() {
     initNewGame();
   }
   
-  // Center camera on island
-  // Center on island center (GRID_SIZE/2, GRID_SIZE/2)
+  // Center camera on island center
   const ctr = isoToWorld(GRID_SIZE / 2, GRID_SIZE / 2);
   camera.x = -ctr.x;
   camera.y = -ctr.y;
+  // Start zoomed out enough to see the island
+  const islandPixelRadius = 12 * TILE_SIZE * 2;
+  const fitZoom = Math.min(W, H) / (islandPixelRadius * 1.2);
+  camera.zoom = Math.max(0.5, Math.min(2, fitZoom));
+  camera.targetZoom = camera.zoom;
   
   // Start game loop
   requestAnimationFrame(loop);
@@ -259,13 +267,15 @@ function saveGame() {
 // ============================================================
 function ensureAudio() {
   if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    masterGain = audioCtx.createGain();
-    masterGain.gain.value = audioMuted ? 0 : 0.3;
-    masterGain.connect(audioCtx.destination);
-    startAmbientSound();
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = audioMuted ? 0 : 0.3;
+      masterGain.connect(audioCtx.destination);
+      startAmbientSound();
+    } catch(e){}
   }
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
 }
 
 function startAmbientSound() {
@@ -493,8 +503,9 @@ function updateCitizen(c, dt) {
   c.stateTimer += dt;
   c.workTimer += dt;
   
-  // Needs decay
-  c.hunger += dt * 0.005;
+  // Needs decay (medicine slows hunger)
+  const hungerRate = state.tech.medicine ? 0.003 : 0.005;
+  c.hunger += dt * hungerRate;
   c.energy -= dt * 0.003;
   
   const timeOfDay = state.timeOfDay;
@@ -597,20 +608,20 @@ function findWorkLocation(citizen) {
 function produceResources(citizen) {
   switch (citizen.job) {
     case 'farmer':
-      state.resources.food += 3;
+      state.resources.food += state.tech.farming ? 5 : 3;
       break;
     case 'fisher':
-      state.resources.food += 2;
+      state.resources.food += state.tech.fishing ? 4 : 2;
       break;
     case 'builder':
       state.resources.wood += 1;
-      state.resources.stone += 1;
+      state.resources.stone += state.tech.masonry ? 3 : 1;
       break;
     case 'gatherer':
       state.resources.wood += 2;
       break;
     case 'scholar':
-      state.resources.knowledge += 1;
+      state.resources.knowledge += state.tech.education ? 3 : 1;
       break;
   }
   sfxClick();
@@ -632,9 +643,9 @@ function attemptBirth() {
 }
 
 function spawnRandomEvent() {
-  const eventTypes = ['dispute', 'storm', 'marriage', 'death'];
+  const eventTypes = ['dispute', 'storm', 'marriage', 'death', 'earthquake', 'plague', 'festival', 'discovery'];
   const type = eventTypes[Math.floor(Math.random() * eventTypes.length)];
-  
+
   switch (type) {
     case 'dispute':
       if (state.citizens.length >= 2) {
@@ -650,6 +661,42 @@ function spawnRandomEvent() {
       addEvent('A storm damaged crops!', 'storm');
       sfxEvent();
       break;
+    case 'earthquake': {
+      const dmg = 1 + Math.floor(Math.random() * 3);
+      if (state.buildings.length > 1) {
+        for (let i = 0; i < dmg && state.buildings.length > 1; i++) {
+          const idx = 1 + Math.floor(Math.random() * (state.buildings.length - 1));
+          state.buildings.splice(idx, 1);
+        }
+        addEvent(`An earthquake destroyed ${dmg} building(s)!`, 'earthquake');
+      } else {
+        state.resources.stone = Math.max(0, state.resources.stone - 10);
+        addEvent('An earthquake shook the island!', 'earthquake');
+      }
+      sfxEvent();
+      break;
+    }
+    case 'plague': {
+      const sick = state.citizens.filter(c => c.energy < 0.5);
+      if (sick.length > 0) {
+        sick.forEach(c => { c.happiness = Math.max(0, c.happiness - 0.3); c.energy = Math.max(0.1, c.energy - 0.2); });
+        addEvent(`A plague spread among ${sick.length} weary citizens!`, 'plague');
+      } else {
+        addEvent('A mild illness passed through — everyone recovered.', 'plague');
+      }
+      sfxEvent();
+      break;
+    }
+    case 'festival':
+      state.citizens.forEach(c => c.happiness = Math.min(1, c.happiness + 0.1));
+      addEvent('A festival lifted everyone\'s spirits!', 'festival');
+      sfxChime();
+      break;
+    case 'discovery':
+      state.resources.knowledge += 3;
+      addEvent('Scholars made a breakthrough! +3 Knowledge', 'discovery');
+      sfxChime();
+      break;
     case 'marriage':
       if (state.citizens.length >= 2) {
         const c1 = state.citizens.find(c => c.age >= 18 && c.happiness > 0.7);
@@ -661,7 +708,7 @@ function spawnRandomEvent() {
         }
       }
       break;
-    case 'death':
+    case 'death': {
       const old = state.citizens.find(c => c.age > 70 && Math.random() < 0.3);
       if (old) {
         addEvent(`${old.name} passed away at age ${old.age}.`, 'death');
@@ -669,6 +716,7 @@ function spawnRandomEvent() {
         state.population--;
       }
       break;
+    }
   }
 }
 
@@ -842,16 +890,19 @@ function updateUI() {
     ui.appendChild(panel);
   }
   
-  // Build menu
+  // Build + Tech buttons
   if (!state.selectedCitizen && !state.selectedBuilding) {
-    const buildBtn = document.createElement('div');
-    buildBtn.style.cssText = 'position:absolute;bottom:20px;right:20px;';
-    buildBtn.innerHTML = `
+    const actBtns = document.createElement('div');
+    actBtns.style.cssText = 'position:absolute;bottom:20px;right:20px;display:flex;flex-direction:column;gap:8px;';
+    actBtns.innerHTML = `
+      <button class="btn" onclick="showTechTree()" style="font-size:14px;padding:12px 20px;">
+        📚 Tech (${state.resources.knowledge})
+      </button>
       <button class="btn success" onclick="showBuildMenu()" style="font-size:14px;padding:12px 20px;">
         🏗️ Build
       </button>
     `;
-    ui.appendChild(buildBtn);
+    ui.appendChild(actBtns);
   }
   
   // Events panel
@@ -911,6 +962,66 @@ function updateUI() {
     ui.appendChild(pauseMenu);
   }
 }
+
+// Tech tree definitions
+const TECH_TREE = {
+  farming:   { name: 'Agriculture',   cost: { knowledge: 5 },  desc: 'Farmers produce +2 food', icon: '🌾' },
+  fishing:   { name: 'Fishing Nets',  cost: { knowledge: 5 },  desc: 'Fishers produce +2 food', icon: '🎣' },
+  masonry:   { name: 'Masonry',       cost: { knowledge: 8 },  desc: 'Builders produce +2 stone', icon: '🧱' },
+  education: { name: 'Education',     cost: { knowledge: 10 }, desc: 'Scholars produce +2 knowledge', icon: '📖' },
+  medicine:  { name: 'Medicine',      cost: { knowledge: 12 }, desc: 'Plague resistance, slower hunger', icon: '💊' },
+};
+
+window.showTechTree = () => {
+  const panel = document.createElement('div');
+  panel.id = 'techPanel';
+  panel.className = 'panel';
+  panel.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);max-width:350px;width:90%;max-height:80vh;overflow-y:auto;';
+  panel.innerHTML = `
+    <h3 style="margin-bottom:12px;">Technology Tree</h3>
+    <div style="font-size:11px;color:#666;margin-bottom:10px;">Knowledge: ${state.resources.knowledge}</div>
+    ${Object.entries(TECH_TREE).map(([key, tech]) => {
+      const researched = state.tech[key];
+      const canAfford = Object.entries(tech.cost).every(([r, a]) => state.resources[r] >= a);
+      return `
+        <div style="padding:10px;background:${researched ? 'rgba(39,174,96,0.15)' : 'rgba(200,220,240,0.2)'};border-radius:6px;margin-bottom:6px;border:1px solid ${researched ? '#27ae60' : '#ddd'};">
+          <div style="font-weight:600;">${tech.icon} ${tech.name} ${researched ? '(Researched)' : ''}</div>
+          <div style="font-size:11px;color:#666;margin:4px 0;">${tech.desc}</div>
+          ${!researched ? `
+            <button class="btn ${canAfford ? 'success' : ''}" onclick="researchTech('${key}')"
+              style="font-size:12px;padding:8px 12px;margin-top:4px;" ${canAfford ? '' : 'disabled'}>
+              Research (${Object.entries(tech.cost).map(([r,a]) => `${a} ${r}`).join(', ')})
+            </button>
+          ` : ''}
+        </div>
+      `;
+    }).join('')}
+    <button class="btn" onclick="closeTechTree()" style="width:100%;margin-top:12px;">Close</button>
+  `;
+  ui.appendChild(panel);
+};
+
+window.closeTechTree = () => {
+  const panel = document.getElementById('techPanel');
+  if (panel) panel.remove();
+};
+
+window.researchTech = (key) => {
+  const tech = TECH_TREE[key];
+  if (!tech || state.tech[key]) return;
+  for (const [r, a] of Object.entries(tech.cost)) {
+    if (state.resources[r] < a) return;
+  }
+  for (const [r, a] of Object.entries(tech.cost)) {
+    state.resources[r] -= a;
+  }
+  state.tech[key] = true;
+  sfxChime();
+  addEvent(`Researched ${tech.name}!`, 'tech');
+  closeTechTree();
+  showTechTree();
+  updateUI();
+};
 
 // Global functions for UI callbacks
 window.assignJob = (citizenId, job) => {

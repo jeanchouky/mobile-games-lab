@@ -110,8 +110,8 @@ let selectedCategory = 'all';
 // --- AUDIO ---
 let audioCtx = null;
 function ensureAudio() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
 }
 
 function playTone(freq, dur, type = 'square', vol = 0.06) {
@@ -276,7 +276,12 @@ function drawMenu() {
   drawText('⚔️', centerX - 130, centerY - 130, 40, '#fff');
   drawText('⚔️', centerX + 130, centerY - 130, 40, '#fff');
   
-  drawText('Build armies • Deploy tactics • Win!', centerX, centerY - 85, 15, '#b8a0d4');
+  drawText('Build armies, deploy tactics, win!', centerX, centerY - 85, 15, '#b8a0d4');
+
+  // How-to-play
+  drawRR(centerX, centerY - 175, W - 60, 50, 10, 'rgba(255,255,255,0.04)');
+  drawText('Build an army of 3-8 units. Drag cards onto lanes to deploy.', centerX, centerY - 183, 10, '#887eac');
+  drawText('Type advantage: Melee > Ranged > Magic > Melee. Touch units for stats.', centerX, centerY - 168, 10, '#887eac');
   
   // Wave indicator
   drawRR(centerX, centerY - 50, 200, 30, 12, 'rgba(255,255,255,0.08)');
@@ -519,19 +524,37 @@ function generateEnemyArmy() {
   const army = [];
   const budget = (difficulty === 'easy' ? 16 : difficulty === 'hard' ? 28 : 22) + wave * 2;
   let spent = 0;
-  
-  while (army.length < 8 && spent < budget) {
+
+  // Ensure type diversity: pick at least 2 different types
+  const typePool = {};
+  available.forEach(e => { const t = emojiDB[e].type; if(!typePool[t]) typePool[t] = []; typePool[t].push(e); });
+  const types = Object.keys(typePool);
+
+  // Seed with one unit from 2 different types to ensure diversity
+  if (types.length >= 2) {
+    const shuffled = types.sort(() => Math.random() - 0.5);
+    for (let t = 0; t < Math.min(2, shuffled.length); t++) {
+      const pool = typePool[shuffled[t]];
+      const e = pool[Math.floor(Math.random() * pool.length)];
+      if (spent + emojiDB[e].cost <= budget) { army.push(e); spent += emojiDB[e].cost; }
+    }
+  }
+
+  let attempts = 0;
+  while (army.length < 8 && spent < budget && attempts < 50) {
+    attempts++;
     let pool = available;
     if (difficulty === 'hard') {
-      // Smart counter-picking
-      const types = {};
-      playerArmy.forEach(e => { const t = emojiDB[e].type; types[t] = (types[t]||0)+1; });
-      const dom = Object.keys(types).sort((a,b) => types[b]-types[a])[0];
+      const pTypes = {};
+      playerArmy.forEach(e => { const t = emojiDB[e].type; pTypes[t] = (pTypes[t]||0)+1; });
+      const dom = Object.keys(pTypes).sort((a,b) => pTypes[b]-pTypes[a])[0];
       const counter = { melee: 'magic', ranged: 'melee', magic: 'ranged' }[dom] || 'creature';
       if (Math.random() < 0.5) pool = available.filter(e => emojiDB[e].type === counter);
       if (pool.length === 0) pool = available;
     }
     const e = pool[Math.floor(Math.random() * pool.length)];
+    // Prevent more than 3 of same unit
+    if (army.filter(a => a === e).length >= 3) continue;
     if (spent + emojiDB[e].cost <= budget) { army.push(e); spent += emojiDB[e].cost; }
     else break;
   }
@@ -779,12 +802,14 @@ function updateBattle() {
         }
       }
     }
-    if (ev.type === 'release' && dragState.emoji) {
-      const battleTop2 = 80; const battleBot2 = H - 140;
-      if (ev.y >= battleTop2 && ev.y <= battleBot2) {
-        const laneW = (W * 0.8) / 3;
-        const lane = Math.min(2, Math.max(0, Math.floor((ev.x - W * 0.1) / laneW)));
-        deployUnit(dragState.emoji, lane, 'player');
+    if (ev.type === 'release') {
+      if (dragState.emoji) {
+        const battleTop2 = 80; const battleBot2 = H - 140;
+        if (ev.y >= battleTop2 && ev.y <= battleBot2) {
+          const laneW = (W * 0.8) / 3;
+          const lane = Math.min(2, Math.max(0, Math.floor((ev.x - W * 0.1) / laneW)));
+          deployUnit(dragState.emoji, lane, 'player');
+        }
       }
       dragState.emoji = null; selectedCard = -1;
     }
@@ -918,6 +943,26 @@ function drawBattle() {
     drawText(`💀 ${killCount}`, W - 20, ey, 11, '#888', 'right');
   }
   
+  // Unit stats tooltip on hover/touch
+  if (dragState.active && !dragState.emoji) {
+    for (const u of units) {
+      if (Math.abs(dragState.x - u.x) < 20 && Math.abs(dragState.y - u.y) < 20) {
+        const d = emojiDB[u.emoji];
+        const tipX = Math.min(W - 70, Math.max(70, u.x));
+        const tipY = u.y > centerY ? u.y - 55 : u.y + 40;
+        drawRR(tipX, tipY, 130, 46, 8, 'rgba(0,0,0,0.85)', typeColors[d.type]);
+        drawText(`${d.name} (${d.type})`, tipX, tipY - 12, 10, '#fff', 'center', '700');
+        drawText(`HP:${Math.floor(u.hp)}/${u.maxHp}  ATK:${d.atk}  DEF:${d.def}`, tipX, tipY + 4, 8, '#ccc', 'center');
+        const effects = [];
+        if (u.poisoned) effects.push('POISON');
+        if (u.slowed) effects.push('SLOW');
+        if (u.buffed) effects.push('BUFF');
+        if (effects.length) drawText(effects.join(' '), tipX, tipY + 16, 8, '#fd4', 'center');
+        break;
+      }
+    }
+  }
+
   // Player hand
   const cardY = H - 70;
   const cardCount = playerHand.length;

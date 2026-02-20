@@ -71,11 +71,36 @@ let objectPulse = {};
 
 const REQUIRED_DISCOVERIES = 5;
 
+// Accessibility: reduce flashing
+let reducedMotion = false;
+try { const rm = localStorage.getItem('dejaVuReducedMotion'); if (rm === 'true') reducedMotion = true; } catch(e) {}
+function toggleReducedMotion() {
+  reducedMotion = !reducedMotion;
+  try { localStorage.setItem('dejaVuReducedMotion', reducedMotion.toString()); } catch(e) {}
+}
+
+// Multiple endings tracking
+let endingType = 'normal'; // normal, mirror, sleep, speed
+let mirrorDeathCount = 0;
+
+// Loop variation: loop length decreases with more loops, new items appear
+function getLoopDuration() {
+  if (loopNumber <= 2) return 60;
+  if (loopNumber <= 5) return 50;
+  if (loopNumber <= 10) return 45;
+  return 40;
+}
+
+// New interactable: candle (appears after loop 3)
+let candleLit = false;
+
 function resetObjectStates() {
   objectStates = {
     clockExamined: false, drawerOpened: false, mirrorExamined: false,
-    noteFound: false, doorUnlocked: false, windowExamined: false, bedExamined: false
+    noteFound: false, doorUnlocked: false, windowExamined: false, bedExamined: false,
+    candleLit: false
   };
+  candleLit = false;
 }
 resetObjectStates();
 
@@ -484,6 +509,7 @@ function getObjects() {
     window: { x: centerX + 110 * scale, y: rY - 75 * scale, w: 45 * scale, h: 45 * scale },
     bed: { x: centerX - 95 * scale, y: rY + 90 * scale, w: 55 * scale, h: 35 * scale },
     note: { x: centerX - 50 * scale, y: rY + 115 * scale, w: 25 * scale, h: 18 * scale },
+    candle: { x: centerX - 100 * scale, y: rY - 50 * scale, w: 30 * scale, h: 40 * scale },
     journal: { x: W - 50 * scale, y: 35 * scale, w: 75 * scale, h: 28 * scale }
   };
 }
@@ -512,6 +538,17 @@ function loadSave() {
     if (l) loopNumber = parseInt(l);
     const dd = localStorage.getItem('dejaVuDeaths');
     if (dd) totalDeaths = parseInt(dd);
+    const md = localStorage.getItem('dejaVuMirrorDeaths');
+    if (md) mirrorDeathCount = parseInt(md) || 0;
+  } catch(e) {}
+}
+
+function saveSession() {
+  try {
+    localStorage.setItem('dejaVuDiscoveries', JSON.stringify(discoveries));
+    localStorage.setItem('dejaVuLoop', loopNumber.toString());
+    localStorage.setItem('dejaVuDeaths', totalDeaths.toString());
+    localStorage.setItem('dejaVuMirrorDeaths', mirrorDeathCount.toString());
   } catch(e) {}
 }
 
@@ -521,6 +558,13 @@ function loadSave() {
 function updateTitle() {
   for (const ev of inputEvents) {
     if (ev.type === 'tap') {
+      // Check if tapping the accessibility toggle
+      const toggleX = W - 30 * scale, toggleY = H - 30 * scale;
+      if (hitTest(ev.x, ev.y, toggleX, toggleY, 50 * scale, 30 * scale)) {
+        toggleReducedMotion();
+        sfxClick();
+        return;
+      }
       sfxClick();
       startWaking();
     }
@@ -583,7 +627,15 @@ function drawTitle() {
   if (loopNumber > 1 || totalDeaths > 0) {
     drawText(`Loop ${loopNumber} · Deaths: ${totalDeaths} · Discoveries: ${discoveries.length}`, centerX, H - 40*scale, 10, '#999');
   }
-  
+
+  // Accessibility toggle
+  const toggleX = W - 30 * scale, toggleY = H - 30 * scale;
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  wobblyRect(toggleX - 22*scale, toggleY - 12*scale, 44*scale, 24*scale, '#888', reducedMotion ? '#dfd' : '#f0e4cc', 1);
+  drawText(reducedMotion ? '◉ safe' : '○ safe', toggleX, toggleY, 8, '#666');
+  ctx.restore();
+
   drawVignette(0.25);
 }
 
@@ -611,15 +663,15 @@ function updateWaking() {
   
   if (wakeProgress >= 1) {
     gameState = 'playing';
-    loopTimer = 60;
+    loopTimer = getLoopDuration();
     lastTickSec = -1;
   }
-  
+
   // Allow skip
   for (const ev of inputEvents) {
     if (ev.type === 'tap' && wakeProgress > 0.3) {
       gameState = 'playing';
-      loopTimer = 60;
+      loopTimer = getLoopDuration();
       lastTickSec = -1;
     }
   }
@@ -704,6 +756,7 @@ function updatePlaying() {
       const noteVisible = totalDeaths >= 3 || objectStates.noteFound;
       if (!noteVisible) continue;
     }
+    if (name === 'candle' && loopNumber < 3) continue;
     if (hitTest(mouseX, mouseY, o.x, o.y, o.w, o.h)) {
       currentHover = name;
     }
@@ -718,6 +771,7 @@ function updatePlaying() {
     for (const [name, o] of Object.entries(objs)) {
       if (name === 'room') continue;
       if (name === 'note' && !(totalDeaths >= 3 || objectStates.noteFound)) continue;
+      if (name === 'candle' && loopNumber < 3) continue;
       if (hitTest(ev.x, ev.y, o.x, o.y, o.w, o.h)) tapped = name;
     }
     
@@ -768,6 +822,12 @@ function updatePlaying() {
         shake(6);
       } else {
         shake(15);
+        mirrorDeathCount++;
+        saveSession();
+        if (mirrorDeathCount >= 5) {
+          // Mirror ending unlocked
+          addDiscovery('The mirror recognizes you now.', 'warning');
+        }
         die('The reflection smiled. You shouldn\'t have looked again.');
         return;
       }
@@ -789,9 +849,20 @@ function updatePlaying() {
         }
       } else {
         if (objectStates.noteFound && objectStates.windowExamined) {
+          // Determine ending type
+          if (mirrorDeathCount >= 5 && objectStates.mirrorExamined) {
+            endingType = 'mirror';
+          } else if (loopNumber <= 2 && totalDeaths === 0) {
+            endingType = 'speed';
+          } else if (candleLit) {
+            endingType = 'candle';
+          } else {
+            endingType = 'normal';
+          }
           gameState = 'victory';
           sfxUnlock();
           spawnParticles(centerX, centerY, 40, '#da2', { speed: 1.5, size: 1.2 });
+          saveSession();
           return;
         } else {
           addDiscovery('Door is open but... something\'s missing.', 'warning');
@@ -828,6 +899,18 @@ function updatePlaying() {
         spawnParticles(objs.note.x, objs.note.y, 10, '#4a4', { size: 0.6 });
       } else {
         addDiscovery('The note is fading. Like everything.', 'observation');
+      }
+    }
+
+    if (tapped === 'candle') {
+      if (!objectStates.candleLit) {
+        objectStates.candleLit = true;
+        candleLit = true;
+        addDiscovery('Lit the candle. Shadows dance on the walls.', 'observation');
+        sfxClick();
+        spawnParticles(objs.candle.x, objs.candle.y - 20 * scale, 8, '#fa4', { rise: true, size: 0.5 });
+      } else {
+        addDiscovery('The flame flickers with each passing second.', 'observation');
       }
     }
   }
@@ -999,6 +1082,51 @@ function drawPlayingRoom() {
     drawText('?', n.x, n.y, 9, '#654321');
     ctx.restore();
   }
+
+  // --- CANDLE (appears after loop 3) ---
+  if (loopNumber >= 3) {
+    const cn = objs.candle;
+    const cnHover = currentHover === 'candle';
+    const cnColor = cnHover ? '#b33' : '#654321';
+    // Candle body - small pillar
+    const cw = 8 * scale, ch = 22 * scale;
+    const cx = cn.x, cy = cn.y + 5 * scale;
+    wobblyRect(cx - cw/2, cy - ch/2, cw, ch, cnColor, '#e8d8b8', cnHover ? 2 : 1.2);
+    // Wick
+    wobblyLine(cx, cy - ch/2, cx, cy - ch/2 - 6*scale, '#333', 0.8);
+    // Saucer
+    wobblyLine(cx - 12*scale, cy + ch/2, cx + 12*scale, cy + ch/2, cnColor, 1);
+    if (candleLit) {
+      // Flame - animated teardrop
+      const flameH = (10 + Math.sin(gameTime * 8) * 2) * scale;
+      const flameW = (5 + Math.sin(gameTime * 6 + 1) * 1) * scale;
+      const flameY = cy - ch/2 - 6*scale;
+      // Outer glow
+      ctx.save();
+      const glow = ctx.createRadialGradient(cx, flameY - flameH/2, 0, cx, flameY - flameH/2, 30*scale);
+      glow.addColorStop(0, 'rgba(255,180,50,0.15)');
+      glow.addColorStop(1, 'rgba(255,180,50,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(cx - 35*scale, flameY - flameH - 30*scale, 70*scale, 65*scale);
+      ctx.restore();
+      // Flame shape
+      ctx.save();
+      ctx.fillStyle = '#fa4';
+      ctx.beginPath();
+      ctx.moveTo(cx, flameY - flameH);
+      ctx.quadraticCurveTo(cx + flameW, flameY - flameH * 0.3, cx, flameY);
+      ctx.quadraticCurveTo(cx - flameW, flameY - flameH * 0.3, cx, flameY - flameH);
+      ctx.fill();
+      // Inner bright core
+      ctx.fillStyle = '#ffe';
+      ctx.beginPath();
+      ctx.moveTo(cx, flameY - flameH * 0.8);
+      ctx.quadraticCurveTo(cx + flameW * 0.4, flameY - flameH * 0.3, cx, flameY - 2*scale);
+      ctx.quadraticCurveTo(cx - flameW * 0.4, flameY - flameH * 0.3, cx, flameY - flameH * 0.8);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
 }
 
 function drawPlaying() {
@@ -1021,7 +1149,7 @@ function drawPlaying() {
   const barX = centerX - barW/2, barY = timerY + 18*scale;
   ctx.fillStyle = 'rgba(0,0,0,0.1)';
   ctx.fillRect(barX, barY, barW, barH);
-  const frac = Math.max(0, loopTimer / 60);
+  const frac = Math.max(0, loopTimer / getLoopDuration());
   const barColor = urgent ? '#b33' : frac > 0.5 ? '#6a6' : '#da5';
   ctx.fillStyle = barColor;
   ctx.fillRect(barX, barY, barW * frac, barH);
@@ -1058,7 +1186,8 @@ function drawPlaying() {
       door: objectStates.doorUnlocked ? 'Try to leave' : 'Locked door',
       window: 'Look outside',
       bed: objectStates.bedExamined ? 'Go back to sleep?' : 'Your bed',
-      note: 'A hidden note'
+      note: 'A hidden note',
+      candle: candleLit ? 'The flame dances' : 'An unlit candle'
     };
     const tip = tips[currentHover];
     if (tip) {
@@ -1143,12 +1272,20 @@ function drawPlaying() {
     ctx.restore();
   }
   
-  // Flicker overlay (urgency)
-  if (flickerAmount > 0.01) {
+  // Flicker overlay (urgency) - respects reduced motion
+  if (flickerAmount > 0.01 && !reducedMotion) {
     ctx.save();
     ctx.globalAlpha = flickerAmount * (0.5 + Math.random() * 0.5);
     ctx.fillStyle = '#b33';
     ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  } else if (flickerAmount > 0.01 && reducedMotion) {
+    // Gentle border glow instead of full-screen flash
+    ctx.save();
+    ctx.globalAlpha = flickerAmount * 0.5;
+    ctx.strokeStyle = '#b33';
+    ctx.lineWidth = 4 * scale;
+    ctx.strokeRect(0, 0, W, H);
     ctx.restore();
   }
   
@@ -1345,7 +1482,7 @@ function drawDying() {
 function resetLoop() {
   loopNumber++;
   localStorage.setItem('dejaVuLoop', loopNumber);
-  loopTimer = 60;
+  loopTimer = getLoopDuration();
   lastTickSec = -1;
   resetObjectStates();
   gameState = 'waking';
@@ -1393,30 +1530,41 @@ function drawVictory() {
   
   const t = Math.min(1, victoryTimer * 0.5);
   
+  // Ending-specific text
+  const endings = {
+    normal: { title: 'ESCAPED', subtitle: 'You broke the loop.', epilogue: 'But the clock still reads 3:47.', color: '#2a7a2a' },
+    mirror: { title: 'REFLECTED', subtitle: 'The mirror let you through.', epilogue: 'Your reflection stays behind, trapped.', color: '#4488bb' },
+    speed: { title: 'TRANSCENDED', subtitle: 'First try. No deaths.', epilogue: 'Were you ever really trapped?', color: '#da2' },
+    candle: { title: 'ILLUMINATED', subtitle: 'The candlelight showed the way.', epilogue: 'Some loops have more than one exit.', color: '#fa4' },
+  };
+  const end = endings[endingType] || endings.normal;
+
   ctx.save();
   ctx.globalAlpha = t;
-  drawTextBold('ESCAPED', centerX, centerY - 80*scale, 38, '#2a7a2a');
+  drawTextBold(end.title, centerX, centerY - 80*scale, 38, end.color);
   ctx.restore();
-  
+
   if (victoryTimer > 0.5) {
     ctx.save();
     ctx.globalAlpha = Math.min(1, (victoryTimer - 0.5) * 1.5);
-    drawText('You broke the loop.', centerX, centerY - 30*scale, 16, '#3a3a3a');
+    drawText(end.subtitle, centerX, centerY - 30*scale, 16, '#3a3a3a');
     ctx.restore();
   }
-  
+
   if (victoryTimer > 1) {
     ctx.save();
     ctx.globalAlpha = Math.min(1, (victoryTimer - 1) * 1.5);
     drawText(`${loopNumber} loops · ${totalDeaths} deaths · ${discoveries.length} discoveries`, centerX, centerY + 10*scale, 11, '#888');
+    // Ending badge
+    drawText(`Ending: ${end.title}`, centerX, centerY + 30*scale, 10, end.color);
     ctx.restore();
   }
-  
+
   if (victoryTimer > 2) {
     ctx.save();
     ctx.globalAlpha = Math.min(1, (victoryTimer - 2));
-    drawText('But the clock still reads 3:47.', centerX, centerY + 60*scale, 12, '#b33');
-    
+    drawText(end.epilogue, centerX, centerY + 60*scale, 12, '#b33');
+
     const pulse = 0.4 + Math.sin(gameTime * 2) * 0.3;
     ctx.globalAlpha = pulse * Math.min(1, victoryTimer - 2.5);
     drawText('TAP TO WAKE UP AGAIN', centerX, H - 60*scale, 14, '#3a3a3a');

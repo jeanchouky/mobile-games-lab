@@ -298,23 +298,23 @@ function startRoomAmbient(roomIndex) {
 function startTickingClock() {
   const tick = () => {
     if (currentRoom !== 2 || audioMuted || roomState.expired) return;
-    
+
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
-    
+
     osc.frequency.value = 800;
     osc.type = 'sine';
-    
+
     gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
-    
+
     osc.connect(gain);
     gain.connect(sfxGain);
-    
+
     osc.start();
     osc.stop(audioCtx.currentTime + 0.05);
-    
-    setTimeout(tick, 500);
+
+    ambientTimeoutIds.push(setTimeout(tick, 500));
   };
   tick();
 }
@@ -322,25 +322,25 @@ function startTickingClock() {
 function startTypingSounds() {
   const type = () => {
     if (currentRoom !== 5 || audioMuted || roomState.dismissed) return;
-    
+
     if (Math.random() < 0.3) {
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
-      
+
       osc.frequency.value = 100 + Math.random() * 200;
       osc.type = 'square';
-      
+
       gain.gain.setValueAtTime(0.02, audioCtx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.03);
-      
+
       osc.connect(gain);
       gain.connect(sfxGain);
-      
+
       osc.start();
       osc.stop(audioCtx.currentTime + 0.03);
     }
-    
-    setTimeout(type, 50 + Math.random() * 150);
+
+    ambientTimeoutIds.push(setTimeout(type, 50 + Math.random() * 150));
   };
   type();
 }
@@ -376,61 +376,61 @@ function startWindAmbience() {
 function startEchoAmbience() {
   const pulse = () => {
     if (currentRoom !== 8 || audioMuted) return;
-    
+
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
-    
+
     osc.frequency.value = 220;
     osc.type = 'sine';
-    
+
     gain.gain.setValueAtTime(0, audioCtx.currentTime);
     gain.gain.linearRampToValueAtTime(0.02, audioCtx.currentTime + 0.1);
     gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 2);
-    
+
     osc.connect(gain);
     gain.connect(sfxGain);
-    
+
     osc.start();
     osc.stop(audioCtx.currentTime + 2);
-    
-    setTimeout(pulse, 3000 + Math.random() * 2000);
+
+    ambientTimeoutIds.push(setTimeout(pulse, 3000 + Math.random() * 2000));
   };
   pulse();
 }
 
 function startTrollAmbience() {
-  // Low rumbling breathing
   const breathe = () => {
     if (currentRoom !== 9 || audioMuted) return;
-    
+
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
-    
+
     osc.frequency.value = 80;
     osc.type = 'sawtooth';
-    
+
     gain.gain.setValueAtTime(0, audioCtx.currentTime);
     gain.gain.linearRampToValueAtTime(0.015, audioCtx.currentTime + 0.8);
     gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 1.6);
-    
+
     osc.connect(gain);
     gain.connect(sfxGain);
-    
+
     osc.start();
     osc.stop(audioCtx.currentTime + 1.6);
-    
-    setTimeout(breathe, 2000);
+
+    ambientTimeoutIds.push(setTimeout(breathe, 2000));
   };
   breathe();
 }
 
+let ambientTimeoutIds = [];
 function stopAllAmbient() {
   currentAmbientNodes.forEach(ambient => {
-    try {
-      ambient.node.stop();
-    } catch(e) {}
+    try { ambient.node.stop(); } catch(e) {}
   });
   currentAmbientNodes = [];
+  ambientTimeoutIds.forEach(id => clearTimeout(id));
+  ambientTimeoutIds = [];
 }
 
 // === SOUND EFFECTS ===
@@ -954,6 +954,11 @@ function die(message, animType = 'default', shakeAmt = 12) {
   spawnParticles(stickFigure.x || centerX, stickFigure.y || centerY, 15, '#ff4444');
   stickFigure.eyeState = 'dead';
   
+  // Achievement checks
+  if (totalDeaths === 1) unlock('firstdeath');
+  if (totalDeaths >= 50) unlock('persistent');
+  if (totalDeaths >= 100) unlock('masochist');
+
   // Auto-respawn after delay
   setTimeout(() => {
     showingDeath = false;
@@ -1373,6 +1378,7 @@ rooms[0] = {
           speedrunMode = !speedrunMode;
           speedrunTime = 0;
           speedrunRunning = false;
+          if (speedrunMode) speedrunStartTime = gameTime;
           sfxClick();
         }
       }
@@ -3152,7 +3158,7 @@ rooms[12] = {
       window.removeEventListener('deviceorientation', roomState._orientHandler);
       window.removeEventListener('mousemove', roomState._mouseHandler);
       canvas.removeEventListener('touchmove', roomState._touchMoveHandler);
-      showChapterComplete();
+      fadeToRoom(13);
       return;
     }
 
@@ -3232,6 +3238,412 @@ rooms[12] = {
   }
 };
 
+// --- ROOM 13: Fake Crash ---
+rooms[13] = {
+  init() {
+    roomState.phase = 'crash'; // crash -> recovery -> solved
+    roomState.timer = 0;
+    roomState.tapCount = 0;
+    roomState.glitchLines = [];
+    for (let i = 0; i < 20; i++) {
+      roomState.glitchLines.push({
+        y: Math.random() * H, w: Math.random() * W, h: 2 + Math.random() * 6,
+        offset: (Math.random() - 0.5) * 40, speed: 1 + Math.random() * 3
+      });
+    }
+    stickFigure.visible = false;
+  },
+  update() {
+    roomState.timer += deltaTime;
+    if (roomState.phase === 'crash') {
+      // Wait for user to tap "anywhere"
+      for (const ev of inputEvents) {
+        if (showingDeath) continue;
+        if (ev.type === 'tap') {
+          roomState.tapCount++;
+          if (roomState.tapCount <= 2) {
+            // The tap makes it worse
+            shake(8);
+          } else if (roomState.tapCount === 3) {
+            // Reveal the secret
+            roomState.phase = 'recovery';
+            roomState.timer = 0;
+          }
+        }
+      }
+      // If they wait long enough without tapping
+      if (roomState.timer > 8 && roomState.tapCount === 0) {
+        roomState.phase = 'recovery';
+        roomState.timer = 0;
+      }
+    } else if (roomState.phase === 'recovery') {
+      for (const ev of inputEvents) {
+        if (showingDeath) continue;
+        if (ev.type === 'tap') {
+          // Tap the "OK" on the real dialog
+          const okX = centerX;
+          const okY = centerY + 60 * scale;
+          if (hitTest(ev.x, ev.y, okX, okY, 80 * scale, 40 * scale)) {
+            die('💀 That OK was also a lie. Keep learning.');
+            return;
+          }
+          // Tiny hidden "x" in top left corner of screen
+          if (ev.x < 30 * scale && ev.y < 30 * scale) {
+            sfxWin();
+            spawnParticles(ev.x, ev.y, 15, '#44ff44');
+            fadeToRoom(14);
+            return;
+          }
+        }
+      }
+    }
+  },
+  draw() {
+    if (roomState.phase === 'crash') {
+      // Fake crash screen
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, W, H);
+      // Glitch lines
+      for (const gl of roomState.glitchLines) {
+        gl.y += gl.speed;
+        if (gl.y > H) gl.y = -gl.h;
+        ctx.save();
+        ctx.fillStyle = `rgba(${100+Math.random()*155},${Math.random()*100},${Math.random()*255},${0.1 + Math.random() * 0.2})`;
+        ctx.fillRect(gl.offset + Math.sin(gameTime * 3) * 10, gl.y, gl.w, gl.h);
+        ctx.restore();
+      }
+      const crashMsgs = [
+        'FATAL ERROR: Reality not found',
+        'The game has stopped responding.',
+        roomState.tapCount > 0 ? 'Tapping makes it worse.' : '',
+        roomState.tapCount > 1 ? 'SERIOUSLY. STOP TAPPING.' : '',
+      ];
+      crashMsgs.forEach((msg, i) => {
+        if (msg) drawCleanText(msg, centerX, centerY - 60 * scale + i * 30 * scale, 14, '#ff4444');
+      });
+      if (roomState.timer > 3) {
+        const alpha = 0.1 + Math.sin(gameTime * 2) * 0.05;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        drawCleanText('(wait... or try something unusual)', centerX, H - 40 * scale, 10, '#555');
+        ctx.restore();
+      }
+    } else {
+      drawSketchBackground();
+      drawText('Room 14: Fake Crash', centerX, 25 * scale, 12, '#999');
+      // "Recovery" dialog
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.25)';
+      ctx.shadowBlur = 15 * scale;
+      ctx.fillStyle = '#f8f8f8';
+      roundRect(centerX - 130 * scale, centerY - 70 * scale, 260 * scale, 160 * scale, 14 * scale);
+      ctx.fill();
+      ctx.restore();
+      drawCleanText('Game recovered!', centerX, centerY - 40 * scale, 16, '#000', 'center', '600');
+      drawCleanText('Press OK to continue.', centerX, centerY - 10 * scale, 12, '#666');
+      drawCleanButton(centerX, centerY + 60 * scale, 80 * scale, 40 * scale, 'OK', '#007AFF');
+      // Hidden x in top left
+      if (hintLevel >= 3) {
+        ctx.save();
+        ctx.globalAlpha = 0.15 + Math.sin(gameTime * 4) * 0.1;
+        ctx.fillStyle = '#44ff44';
+        ctx.beginPath();
+        ctx.arc(15 * scale, 15 * scale, 12 * scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.save();
+      ctx.globalAlpha = 0.08;
+      ctx.font = `${8 * scale}px sans-serif`;
+      ctx.fillStyle = '#888';
+      ctx.textAlign = 'left';
+      ctx.fillText('x', 11 * scale, 18 * scale);
+      ctx.restore();
+    }
+  }
+};
+
+// --- ROOM 14: The Moving Button ---
+rooms[14] = {
+  init() {
+    roomState.btnX = centerX;
+    roomState.btnY = centerY + 30 * scale;
+    roomState.btnSpeed = 1;
+    roomState.attempts = 0;
+    roomState.frozen = false;
+    roomState.freezeTimer = 0;
+    stickFigure.x = centerX;
+    stickFigure.y = centerY - 60 * scale;
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'normal';
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 2;
+    // Move the button away from last tap location
+    if (!roomState.frozen) {
+      roomState.btnX += Math.sin(gameTime * roomState.btnSpeed * 2) * 1.5 * scale;
+      roomState.btnY += Math.cos(gameTime * roomState.btnSpeed * 1.7) * 1.0 * scale;
+      // Keep in bounds
+      roomState.btnX = Math.max(60 * scale, Math.min(W - 60 * scale, roomState.btnX));
+      roomState.btnY = Math.max(80 * scale, Math.min(H - 80 * scale, roomState.btnY));
+    } else {
+      roomState.freezeTimer += deltaTime;
+    }
+
+    for (const ev of inputEvents) {
+      if (showingDeath) continue;
+      if (ev.type === 'tap') {
+        const bw = 100 * scale, bh = 45 * scale;
+        if (hitTest(ev.x, ev.y, roomState.btnX, roomState.btnY, bw, bh)) {
+          if (roomState.frozen) {
+            // Win!
+            sfxWin();
+            spawnParticles(ev.x, ev.y, 20, '#44ff44');
+            fadeToRoom(15);
+            return;
+          }
+          roomState.attempts++;
+          roomState.btnSpeed += 0.5;
+          sfxClick();
+          // Button runs away
+          roomState.btnX += (roomState.btnX < centerX ? 1 : -1) * 80 * scale;
+          roomState.btnY += (Math.random() - 0.5) * 60 * scale;
+          if (roomState.attempts >= 5) {
+            // Button gets tired and freezes
+            roomState.frozen = true;
+            roomState.freezeTimer = 0;
+          }
+        } else {
+          // Missed - might die
+          if (roomState.attempts > 2 && Math.random() < 0.3) {
+            die('💀 You missed. The button is judging you.');
+          }
+        }
+      }
+    }
+  },
+  draw() {
+    drawSketchBackground();
+    drawText('Room 15: Catch Me', centerX, 25 * scale, 12, '#999');
+    drawStickFigure(stickFigure.x, stickFigure.y, 0.7, stickFigure.eyeState);
+    // The moving button
+    const bw = 100 * scale, bh = 45 * scale;
+    const bx = roomState.btnX - bw / 2;
+    const by = roomState.btnY - bh / 2;
+    if (roomState.frozen) {
+      // Exhausted button
+      const tremble = Math.sin(gameTime * 20) * scale;
+      wobblyRect(bx + tremble, by + tremble, bw, bh, '#cc3333', '#ffcccc', 2);
+      drawText('OK fine...', roomState.btnX, roomState.btnY, 12, '#cc3333');
+      if (hintLevel >= 2) {
+        ctx.save();
+        ctx.globalAlpha = 0.4 + Math.sin(gameTime * 3) * 0.2;
+        drawText('tap me', roomState.btnX, roomState.btnY + 22 * scale, 8, '#22aa22');
+        ctx.restore();
+      }
+    } else {
+      wobblyRect(bx, by, bw, bh, '#222', '#ffd700', 2.5);
+      drawText(roomState.attempts > 3 ? 'HAHA!' : 'CONTINUE', roomState.btnX, roomState.btnY, 13, '#222');
+      // Taunting text
+      if (roomState.attempts > 0) {
+        const taunts = ['Too slow!', 'Missed me!', 'Try again!', 'Getting tired?', 'Almost!'];
+        const tauntIdx = Math.min(roomState.attempts - 1, taunts.length - 1);
+        ctx.save();
+        ctx.globalAlpha = 0.6;
+        drawText(taunts[tauntIdx], roomState.btnX, roomState.btnY - 35 * scale, 10, '#cc3333');
+        ctx.restore();
+      }
+    }
+  }
+};
+
+// --- ROOM 15: The Liar Score ---
+rooms[15] = {
+  init() {
+    roomState.fakeScore = 99999;
+    roomState.realScore = 0;
+    roomState.phase = 'lying'; // lying -> truth
+    roomState.tapCount = 0;
+    roomState.shownTruth = false;
+    stickFigure.x = centerX;
+    stickFigure.y = centerY + 90 * scale;
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'happy';
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 2;
+    if (roomState.phase === 'lying') {
+      // The score keeps going up (fake)
+      roomState.fakeScore += deltaTime * 100;
+      roomState.realScore = totalDeaths;
+    }
+    for (const ev of inputEvents) {
+      if (showingDeath) continue;
+      if (ev.type === 'tap') {
+        if (roomState.phase === 'lying') {
+          // Tap the score to "question" it
+          const scoreY = centerY - 40 * scale;
+          if (hitTest(ev.x, ev.y, centerX, scoreY, 200 * scale, 50 * scale)) {
+            roomState.tapCount++;
+            sfxClick();
+            if (roomState.tapCount >= 3) {
+              roomState.phase = 'truth';
+              roomState.shownTruth = true;
+              stickFigure.eyeState = 'confused';
+              sfxSadTrombone();
+              shake(10);
+            }
+          }
+          // Claim prize button
+          const prizeY = centerY + 30 * scale;
+          if (hitTest(ev.x, ev.y, centerX, prizeY, 140 * scale, 40 * scale)) {
+            die('💀 There is no prize. There was never a prize.');
+            return;
+          }
+        } else {
+          // Truth phase - tap the tiny real exit
+          if (ev.x > W - 50 * scale && ev.y > H - 50 * scale) {
+            sfxWin();
+            spawnParticles(ev.x, ev.y, 25, '#44ff44');
+            unlock('truthseeker');
+            showChapterComplete();
+            return;
+          }
+          // Tap the fake big exit
+          const fakeExitY = centerY + 50 * scale;
+          if (hitTest(ev.x, ev.y, centerX, fakeExitY, 160 * scale, 50 * scale)) {
+            die('💀 That exit is just as fake as the score was.');
+            return;
+          }
+        }
+      }
+    }
+  },
+  draw() {
+    drawSketchBackground();
+    drawText('Room 16: Your Score', centerX, 25 * scale, 12, '#999');
+    drawStickFigure(stickFigure.x, stickFigure.y, 0.7, stickFigure.eyeState);
+    if (roomState.phase === 'lying') {
+      // Big fake score
+      ctx.save();
+      ctx.font = `bold ${48 * scale}px 'Comic Sans MS', cursive`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ffd700';
+      ctx.shadowColor = '#ffd700';
+      ctx.shadowBlur = 20 * scale;
+      ctx.fillText(Math.floor(roomState.fakeScore).toLocaleString(), centerX, centerY - 40 * scale);
+      ctx.restore();
+      drawText('YOUR AMAZING SCORE!', centerX, centerY - 80 * scale, 16, '#222');
+      drawSketchButton(centerX, centerY + 30 * scale, 140 * scale, 40 * scale, 'CLAIM PRIZE!', '#fff', '#ff8800');
+      if (roomState.tapCount > 0) {
+        ctx.save();
+        ctx.globalAlpha = 0.3 + roomState.tapCount * 0.2;
+        drawText('Hmm... is this real?', centerX, centerY + 70 * scale, 11, '#cc3333');
+        ctx.restore();
+      }
+    } else {
+      // Truth revealed
+      ctx.save();
+      ctx.font = `bold ${28 * scale}px 'Comic Sans MS', cursive`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#cc3333';
+      ctx.fillText('REAL SCORE:', centerX, centerY - 60 * scale);
+      ctx.font = `bold ${40 * scale}px 'Comic Sans MS', cursive`;
+      ctx.fillText(`${totalDeaths} deaths`, centerX, centerY - 20 * scale);
+      ctx.restore();
+      drawText("That's your real score.", centerX, centerY + 10 * scale, 14, '#666');
+      // Fake big exit
+      drawSketchButton(centerX, centerY + 50 * scale, 160 * scale, 50 * scale, 'CONTINUE', '#fff', '#ff8800');
+      // Real tiny exit
+      ctx.save();
+      ctx.globalAlpha = 0.12 + (hintLevel >= 3 ? Math.sin(gameTime * 4) * 0.1 : 0);
+      ctx.font = `${7 * scale}px sans-serif`;
+      ctx.fillStyle = '#888';
+      ctx.textAlign = 'right';
+      ctx.fillText('exit', W - 12 * scale, H - 12 * scale);
+      ctx.restore();
+    }
+  }
+};
+
+// ============================================================
+// ACHIEVEMENTS
+// ============================================================
+let achievements = {};
+try { const a = localStorage.getItem('trustnothing_ach'); if (a) achievements = JSON.parse(a); } catch(e) {}
+function saveAchievements() { try { localStorage.setItem('trustnothing_ach', JSON.stringify(achievements)); } catch(e) {} }
+
+let achievementPopup = null;
+let achievementPopupTimer = 0;
+
+const ACHIEVEMENTS = {
+  firstdeath: { name: 'Welcome to Pain', desc: 'Die for the first time' },
+  speedster: { name: 'Speed Demon', desc: 'Complete all rooms in under 3 minutes' },
+  persistent: { name: 'Never Give Up', desc: 'Die 50 times total' },
+  truthseeker: { name: 'Truth Seeker', desc: 'Question the fake score' },
+  nodeath5: { name: 'Untouchable', desc: 'Clear a room with 0 deaths' },
+  masochist: { name: 'Masochist', desc: 'Die 100 times total' },
+};
+
+function unlock(id) {
+  if (achievements[id]) return;
+  achievements[id] = { time: Date.now() };
+  saveAchievements();
+  achievementPopup = ACHIEVEMENTS[id];
+  achievementPopupTimer = 3;
+}
+
+function drawAchievementPopup() {
+  if (!achievementPopup || achievementPopupTimer <= 0) return;
+  achievementPopupTimer -= deltaTime;
+  const alpha = Math.min(1, achievementPopupTimer, (3 - (3 - achievementPopupTimer)) > 2.5 ? (3 - achievementPopupTimer) * 2 : 1);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  const popW = 240 * scale;
+  const popH = 50 * scale;
+  const popX = centerX - popW / 2;
+  const popY = 50 * scale;
+  ctx.fillStyle = 'rgba(0,0,0,0.85)';
+  roundRect(popX, popY, popW, popH, 8 * scale);
+  ctx.fill();
+  ctx.strokeStyle = '#ffd700';
+  ctx.lineWidth = 2 * scale;
+  roundRect(popX, popY, popW, popH, 8 * scale);
+  ctx.stroke();
+  drawCleanText('🏆 ' + achievementPopup.name, centerX, popY + 18 * scale, 13, '#ffd700', 'center', '700');
+  drawCleanText(achievementPopup.desc, centerX, popY + 38 * scale, 10, '#aaa');
+  ctx.restore();
+  if (achievementPopupTimer <= 0) achievementPopup = null;
+}
+
+// ============================================================
+// SPEEDRUN TIMER
+// ============================================================
+let speedrunMode = false;
+let speedrunStartTime = 0;
+let speedrunBestTime = Infinity;
+try { const st = localStorage.getItem('trustnothing_speedrun'); if (st) speedrunBestTime = parseFloat(st) || Infinity; } catch(e) {}
+function saveSpeedrunBest() { try { localStorage.setItem('trustnothing_speedrun', speedrunBestTime.toString()); } catch(e) {} }
+
+function drawSpeedrunTimer() {
+  if (!speedrunMode) return;
+  const elapsed = gameTime - speedrunStartTime;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  roundRect(W - 120 * scale, 40 * scale, 110 * scale, 28 * scale, 4 * scale);
+  ctx.fill();
+  ctx.font = `bold ${12 * scale}px monospace`;
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#00ff88';
+  ctx.fillText(`⏱ ${elapsed.toFixed(1)}s`, W - 16 * scale, 59 * scale);
+  if (speedrunBestTime < Infinity) {
+    ctx.fillStyle = '#888';
+    ctx.font = `${9 * scale}px monospace`;
+    ctx.fillText(`Best: ${speedrunBestTime.toFixed(1)}s`, W - 16 * scale, 72 * scale);
+  }
+  ctx.restore();
+}
+
 // ============================================================
 // CHAPTER COMPLETE SCREEN
 // ============================================================
@@ -3248,6 +3660,19 @@ function showChapterComplete() {
       saveGameProgress();
     }
   }
+  // Speedrun check (batch system)
+  if (speedrunMode) {
+    const elapsed = gameTime - speedrunStartTime;
+    if (elapsed < speedrunBestTime) {
+      speedrunBestTime = elapsed;
+      saveSpeedrunBest();
+    }
+    if (elapsed < 180) unlock('speedster');
+  }
+  // Achievement checks
+  if (roomDeaths === 0) unlock('nodeath5');
+  if (totalDeaths >= 50) unlock('persistent');
+  if (totalDeaths >= 100) unlock('masochist');
 }
 
 function drawChapterComplete() {
@@ -3295,6 +3720,20 @@ function drawChapterComplete() {
     spawnParticles(Math.random() * W, -10, 1, colors[Math.floor(Math.random() * colors.length)], 2);
   }
 
+  // Speedrun result
+  if (speedrunMode) {
+    const elapsed = gameTime - speedrunStartTime;
+    drawText(`Speedrun: ${elapsed.toFixed(1)}s`, centerX, centerY + 120 * scale, 14, '#00ff88');
+    if (speedrunBestTime < Infinity) {
+      drawText(`Best: ${speedrunBestTime.toFixed(1)}s`, centerX, centerY + 145 * scale, 11, '#888');
+    }
+  }
+
+  // Achievements earned
+  const achCount = Object.keys(achievements).length;
+  const achTotal = Object.keys(ACHIEVEMENTS).length;
+  drawText(`Achievements: ${achCount}/${achTotal}`, centerX, H - 130 * scale, 12, '#ffd700');
+
   // Play Again button
   const btnW = 160 * scale;
   const btnH = 45 * scale;
@@ -3302,7 +3741,8 @@ function drawChapterComplete() {
   drawSketchButton(centerX, btnY, btnW, btnH, '↺ Play Again', '#222', '#e8fce8', true);
   roomState.playAgainBtn = { x: centerX, y: btnY, w: btnW, h: btnH };
 
-  drawText('Chapter 2 coming soon...', centerX, H - 50 * scale, 11, '#ccc');
+  drawText('Thanks for playing!', centerX, H - 55 * scale, 14, '#aaa');
+  drawText('Chapter 2 coming soon...', centerX, H - 35 * scale, 11, '#ccc');
 }
 
 // ============================================================
@@ -3404,6 +3844,12 @@ function gameLoop(timestamp) {
   // Hint button + hint overlay
   drawHintButton();
   drawHintOverlay();
+
+  // Speedrun timer
+  drawSpeedrunTimer();
+
+  // Achievement popup
+  drawAchievementPopup();
 
   // Mute button (always visible)
   drawMuteButton();

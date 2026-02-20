@@ -77,6 +77,14 @@ let touchControls = { left: false, right: false, jump: false, action: false };
 let gs_levelClearing = false;
 let gs_victory = false;
 
+// Tutorial overlay
+let tutorialStep = 0; // 0=off, 1-4=tutorial steps
+let tutorialTimer = 0;
+let showTutorial = true;
+
+// Visual recording feedback
+let recordingPulse = 0;
+
 // --- RESIZE ---
 function resize() {
   const dpr = window.devicePixelRatio || 1;
@@ -143,9 +151,20 @@ function startRecording() {
   recordingState.audioData = [];
   recordingState.sampleRate = audioCtx.sampleRate;
   
-  // Create a ScriptProcessorNode to capture audio data
+  // Create a ScriptProcessorNode to capture audio data (deprecated but widely supported)
   const bufferSize = 4096;
-  const recorder = audioCtx.createScriptProcessor(bufferSize, 1, 1);
+  let recorder;
+  try {
+    recorder = audioCtx.createScriptProcessor(bufferSize, 1, 1);
+  } catch(e) {
+    // Fallback if ScriptProcessorNode removed in future
+    recordingState.active = false;
+    const proceduralSound = createProceduralSound();
+    soundInventory.push(proceduralSound);
+    playSfx('success');
+    gameState = 'PLAYING';
+    return;
+  }
   const source = audioCtx.createMediaStreamSource(micStream);
   
   recorder.onaudioprocess = (e) => {
@@ -164,11 +183,13 @@ function startRecording() {
 function stopRecording() {
   if (!recordingState.active) return;
   recordingState.active = false;
-  
-  // Disconnect recorder
+
+  // Disconnect recorder safely (avoid double-disconnect)
   if (recordingState.recorder) {
-    recordingState.source.disconnect();
-    recordingState.recorder.disconnect();
+    try { recordingState.source.disconnect(); } catch(e) {}
+    try { recordingState.recorder.disconnect(); } catch(e) {}
+    recordingState.recorder = null;
+    recordingState.source = null;
   }
   
   // Merge audio chunks
@@ -593,8 +614,34 @@ function drawPlayer() {
   ctx.beginPath();
   ctx.arc(px + player.radius, py + player.radius, player.radius * 0.6, 0, Math.PI * 2);
   ctx.stroke();
-  
+
   ctx.restore();
+
+  // Visual recording feedback: show sound energy ring when sounds are ready
+  const readySounds = soundInventory.filter(s => s.cooldown <= 0).length;
+  if (readySounds > 0) {
+    ctx.save();
+    const ringPulse = Math.sin(gameTime * 4) * 0.15 + 0.25;
+    ctx.globalAlpha = ringPulse;
+    ctx.strokeStyle = '#4caf50';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(px + player.radius, py + player.radius, player.radius * 2 + Math.sin(gameTime * 3) * 4, 0, Math.PI * 2);
+    ctx.stroke();
+    // Mini waveform around the ring
+    ctx.strokeStyle = '#64b5f6';
+    ctx.beginPath();
+    const ringR = player.radius * 2.5;
+    for (let a = 0; a < Math.PI * 2; a += 0.1) {
+      const waveOff = Math.sin(a * 8 + gameTime * 5) * 3;
+      const rx = px + player.radius + Math.cos(a) * (ringR + waveOff);
+      const ry = py + player.radius + Math.sin(a) * (ringR + waveOff);
+      if (a === 0) ctx.moveTo(rx, ry); else ctx.lineTo(rx, ry);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 // ============================================================
@@ -603,6 +650,7 @@ function drawPlayer() {
 
 function createEnemy(x, y, type = 'silence') {
   const enemy = {
+    id: Date.now() + Math.random(),
     x, y, vx: 0, vy: 0,
     w: 30, h: 30,
     hp: 30,
@@ -610,7 +658,8 @@ function createEnemy(x, y, type = 'silence') {
     type: type,
     color: '#ff0080',
     phase: Math.random() * Math.PI * 2,
-    weakness: 'loud' // weak to loud sounds
+    weakness: 'loud', // weak to loud sounds
+    shielded: false
   };
   
   if (type === 'echo') {
@@ -626,8 +675,23 @@ function createEnemy(x, y, type = 'silence') {
     enemy.weakness = 'high';
     enemy.hp = 40;
     enemy.maxHp = 40;
+  } else if (type === 'resonator') {
+    // Resonator: shields nearby enemies, weak to low sounds
+    enemy.color = '#ff9800';
+    enemy.weakness = 'low';
+    enemy.hp = 35;
+    enemy.maxHp = 35;
+    enemy.shieldRadius = 80;
+  } else if (type === 'absorber') {
+    // Absorber: eats projectiles until overloaded (3 hits), then pops
+    enemy.color = '#7e57c2';
+    enemy.weakness = 'loud';
+    enemy.hp = 60;
+    enemy.maxHp = 60;
+    enemy.absorbed = 0;
+    enemy.absorbMax = 3;
   }
-  
+
   enemies.push(enemy);
 }
 
@@ -658,21 +722,50 @@ function updateEnemies() {
       player.vy = -4;
     }
     
+    // Resonator: shield nearby allies
+    if (e.type === 'resonator' && e.shieldRadius) {
+      for (const ally of enemies) {
+        if (ally.id === e.id) continue;
+        if (Math.hypot(ally.x - e.x, ally.y - e.y) < e.shieldRadius) {
+          ally.shielded = true;
+        }
+      }
+    }
+
     // Check projectile hits
     for (let j = projectiles.length - 1; j >= 0; j--) {
       const proj = projectiles[j];
       if (checkCollision(proj, e)) {
+        // Absorber: eats projectiles
+        if (e.type === 'absorber' && e.absorbed < e.absorbMax) {
+          e.absorbed++;
+          spawnParticles(e.x, e.y, 3, '#7e57c2');
+          projectiles.splice(j, 1);
+          if (e.absorbed >= e.absorbMax) {
+            // Overloaded: takes massive damage
+            e.hp -= 100;
+            spawnParticles(e.x, e.y, 25, '#7e57c2');
+            playSfx('hit');
+          }
+          break;
+        }
+
         let damage = proj.damage;
         // Bonus damage for hitting weakness
         if (proj.type === e.weakness) {
           damage *= 2;
           spawnParticles(e.x, e.y, 10, '#ffd700');
         }
+        // Shielded enemies take reduced damage
+        if (e.shielded) {
+          damage = Math.floor(damage * 0.3);
+          e.shielded = false;
+        }
         e.hp -= damage;
         spawnParticles(e.x, e.y, 5, proj.color);
         playSfx('hit');
         projectiles.splice(j, 1);
-        
+
         if (e.hp <= 0) {
           spawnParticles(e.x, e.y, 20, e.color);
           resonance += 10;
@@ -701,6 +794,31 @@ function drawEnemies() {
     ctx.fill();
     ctx.stroke();
     
+    // Resonator shield radius indicator
+    if (e.type === 'resonator') {
+      ctx.globalAlpha = 0.12;
+      ctx.strokeStyle = '#ff9800';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.arc(ex + e.w/2, ey + e.h/2, e.shieldRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+    }
+
+    // Absorber: show absorbed count
+    if (e.type === 'absorber') {
+      for (let a = 0; a < e.absorbed; a++) {
+        ctx.fillStyle = '#fff';
+        ctx.globalAlpha = 0.5;
+        ctx.beginPath();
+        ctx.arc(ex + e.w/2 + (a - 1) * 8, ey - 16, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
     // HP bar
     const barW = e.w;
     const barH = 4;
@@ -709,7 +827,7 @@ function drawEnemies() {
     ctx.fillRect(ex, ey - 10, barW, barH);
     ctx.fillStyle = '#ff6b6b';
     ctx.fillRect(ex, ey - 10, barW * hpPct, barH);
-    
+
     ctx.restore();
   }
 }
@@ -851,8 +969,42 @@ function loadLevel(levelIndex) {
     createEnemy(450, 310, 'noise');
     createEnemy(650, 410, 'silence');
   }
-  // Level 5: Boss - Harmonic Guardian
+  // Level 5: Resonance Chamber
   else if (levelIndex === 4) {
+    platforms.push({ x: 0, y: 500, w: 400, h: 40 });
+    platforms.push({ x: 500, y: 400, w: 200, h: 20 });
+    platforms.push({ x: 800, y: 500, w: 400, h: 40 });
+    // Resonator shields others
+    createEnemy(600, 360, 'resonator');
+    createEnemy(700, 460, 'silence');
+    createEnemy(900, 460, 'echo');
+  }
+  // Level 6: The Absorber Den
+  else if (levelIndex === 5) {
+    platforms.push({ x: 0, y: 550, w: 200, h: 40 });
+    platforms.push({ x: 250, y: 450, w: 150, h: 20 });
+    platforms.push({ x: 450, y: 350, w: 150, h: 20 });
+    platforms.push({ x: 650, y: 450, w: 150, h: 20 });
+    platforms.push({ x: 850, y: 550, w: 200, h: 40 });
+    createEnemy(300, 410, 'absorber');
+    createEnemy(500, 310, 'absorber');
+    createEnemy(700, 410, 'noise');
+  }
+  // Level 7: Fortress
+  else if (levelIndex === 6) {
+    platforms.push({ x: 0, y: 500, w: 300, h: 40 });
+    platforms.push({ x: 350, y: 400, w: 100, h: 20 });
+    platforms.push({ x: 500, y: 300, w: 200, h: 20 });
+    platforms.push({ x: 750, y: 400, w: 100, h: 20 });
+    platforms.push({ x: 900, y: 500, w: 300, h: 40 });
+    // Resonator + absorber combo
+    createEnemy(550, 260, 'resonator');
+    createEnemy(600, 260, 'absorber');
+    createEnemy(950, 460, 'harmonic');
+    createEnemy(1050, 460, 'noise');
+  }
+  // Level 8: Boss - Harmonic Guardian
+  else if (levelIndex === 7) {
     platforms.push({ x: 0, y: 500, w: 1000, h: 40 });
     // Boss enemy
     const boss = {
@@ -868,7 +1020,7 @@ function loadLevel(levelIndex) {
     };
     enemies.push(boss);
   }
-  
+
   currentLevel = levelIndex;
 }
 
@@ -921,9 +1073,10 @@ function drawUI() {
   ctx.fillText(`Resonance: ${resonance}`, W - 160, 25);
   
   // Level
+  const levelNames = ['Tutorial', 'Echo Chamber', 'Harmonic Gate', 'Noise Pit', 'Resonance Chamber', 'Absorber Den', 'Fortress', 'Harmonic Guardian'];
   ctx.fillStyle = '#64b5f6';
   ctx.font = `12px sans-serif`;
-  ctx.fillText(`Level ${currentLevel + 1}`, 10, 50);
+  ctx.fillText(`Level ${currentLevel + 1}: ${levelNames[currentLevel] || '???'}`, 10, 50);
   
   ctx.restore();
   
@@ -1017,6 +1170,13 @@ function drawSoundInventory() {
       ctx.fillStyle = '#fff';
       ctx.font = `bold 11px sans-serif`;
       ctx.fillText(`${i + 1}`, slotX + 5, slotY + 15);
+
+      // Delete button (small X in top-right corner)
+      ctx.fillStyle = '#ff6b6b';
+      ctx.font = `bold 10px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('x', slotX + slotW - 18, slotY + 10);
+      ctx.textAlign = 'left';
     } else {
       // Empty slot
       ctx.fillStyle = '#666';
@@ -1177,6 +1337,58 @@ function drawRecordingScreen() {
 }
 
 // ============================================================
+// TUTORIAL OVERLAY
+// ============================================================
+
+const TUTORIAL_STEPS = [
+  { text: 'Move with arrows or tap left/right', icon: '< >', highlight: 'controls' },
+  { text: 'Tap the REC button to capture sounds', icon: '🎤', highlight: 'rec' },
+  { text: 'Tap sound slots to fire at enemies', icon: '🔊', highlight: 'inventory' },
+  { text: 'Match sound TYPES to enemy weaknesses!', icon: '⚡', highlight: 'enemy' }
+];
+
+function drawTutorial() {
+  if (!showTutorial || tutorialStep < 1 || tutorialStep > TUTORIAL_STEPS.length) return;
+  const step = TUTORIAL_STEPS[tutorialStep - 1];
+
+  // Semi-transparent overlay
+  ctx.save();
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Tutorial card
+  const cardW = Math.min(W - 40, 320);
+  const cardH = 120;
+  const cardX = centerX - cardW / 2;
+  const cardY = centerY - cardH / 2;
+
+  ctx.fillStyle = '#1a2040';
+  ctx.fillRect(cardX, cardY, cardW, cardH);
+  ctx.strokeStyle = '#64b5f6';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(cardX, cardY, cardW, cardH);
+
+  // Icon
+  ctx.font = `32px sans-serif`;
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.fillText(step.icon, centerX, cardY + 35);
+
+  // Text
+  ctx.font = `14px sans-serif`;
+  ctx.fillStyle = '#ccc';
+  ctx.fillText(step.text, centerX, cardY + 70);
+
+  // Step indicator
+  ctx.font = `11px sans-serif`;
+  ctx.fillStyle = '#888';
+  ctx.fillText(`${tutorialStep}/${TUTORIAL_STEPS.length} - Tap to continue`, centerX, cardY + 100);
+
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
+// ============================================================
 // TITLE SCREEN
 // ============================================================
 
@@ -1229,7 +1441,14 @@ function drawTitleScreen() {
     ctx.font = `${10 * scale}px sans-serif`;
     ctx.fillText('(Fallback mode: tap-to-shoot)', centerX, centerY + 100);
   }
-  
+
+  // How to play
+  ctx.font = `${11 * scale}px sans-serif`;
+  ctx.fillStyle = '#888';
+  ctx.fillText('Record real sounds with your mic', centerX, centerY + 140);
+  ctx.fillText('to create unique weapons!', centerX, centerY + 158);
+  ctx.fillText(`8 levels | ${Object.keys({silence:1,echo:1,harmonic:1,noise:1,resonator:1,absorber:1}).length} enemy types`, centerX, centerY + 185);
+
   ctx.restore();
 }
 
@@ -1336,12 +1555,24 @@ function handleInput(x, y, type) {
         y > H - 130 && y < H - 90) {
       recordingState.active = false;
       if (recordingState.recorder) {
-        recordingState.source.disconnect();
-        recordingState.recorder.disconnect();
+        try { recordingState.source.disconnect(); } catch(e) {}
+        try { recordingState.recorder.disconnect(); } catch(e) {}
+        recordingState.recorder = null;
+        recordingState.source = null;
       }
       gameState = 'PLAYING';
     }
   } else if (gameState === 'PLAYING') {
+    // Tutorial overlay intercepts taps
+    if (tutorialStep > 0 && tutorialStep <= TUTORIAL_STEPS.length) {
+      tutorialStep++;
+      if (tutorialStep > TUTORIAL_STEPS.length) {
+        tutorialStep = 0;
+        showTutorial = false;
+      }
+      return;
+    }
+
     // Touch controls
     const btnSize = 50;
     const margin = 20;
@@ -1377,7 +1608,14 @@ function handleInput(x, y, type) {
     if (y > slotY && y < slotY + slotH) {
       const slotIndex = Math.floor((x - 10) / slotW);
       if (slotIndex >= 0 && slotIndex < 5 && soundInventory[slotIndex]) {
-        playSound(soundInventory[slotIndex]);
+        // Check if tapping the delete X (top-right corner of slot)
+        const slotXPos = 10 + slotIndex * slotW;
+        if (x > slotXPos + slotW - 25 && y < slotY + 18) {
+          soundInventory.splice(slotIndex, 1);
+          playSfx('error');
+        } else {
+          playSound(soundInventory[slotIndex]);
+        }
       }
     }
     
@@ -1417,6 +1655,10 @@ async function startGame() {
   
   loadLevel(0);
   gameState = 'PLAYING';
+  if (showTutorial) {
+    tutorialStep = 1;
+    tutorialTimer = 0;
+  }
 }
 
 function startRecordingMode() {
@@ -1488,7 +1730,7 @@ function update() {
     // Check level completion
     if (enemies.length === 0 && !gs_levelClearing) {
       gs_levelClearing = true;
-      if (currentLevel < 4) {
+      if (currentLevel < 7) {
         setTimeout(() => {
           loadLevel(currentLevel + 1);
           gs_levelClearing = false;
@@ -1530,6 +1772,7 @@ function draw() {
     drawProjectiles();
     drawParticles();
     drawUI();
+    drawTutorial();
   } else if (gameState === 'GAME_OVER') {
     drawGameOver();
   }

@@ -16,11 +16,13 @@ html,body{width:100%;height:100%;overflow:hidden;background:#1a1a2e;font-family:
 #board-wrap{position:relative;width:min(90vw,90vh - 200px);height:min(90vw,90vh - 200px);max-width:460px;max-height:460px}
 canvas{width:100%;height:100%;border-radius:12px;image-rendering:pixelated}
 #colors{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;padding:8px}
-.color-btn{width:48px;height:48px;border-radius:50%;border:3px solid transparent;cursor:pointer;transition:all 0.2s;box-shadow:0 2px 8px rgba(0,0,0,0.3)}
+.color-btn{width:48px;height:48px;border-radius:50%;border:3px solid transparent;cursor:pointer;transition:all 0.2s;box-shadow:0 2px 8px rgba(0,0,0,0.3);position:relative}
 .color-btn:hover{transform:scale(1.1)}
 .color-btn:active{transform:scale(0.9)}
 .color-btn.current{border-color:#fff;transform:scale(1.15);box-shadow:0 0 15px rgba(255,255,255,0.3)}
 .color-btn.disabled{opacity:0.3;pointer-events:none}
+.color-btn .preview-count{position:absolute;top:-6px;right:-6px;background:#fff;color:#1a1a2e;font-size:0.65rem;font-weight:900;border-radius:10px;padding:1px 5px;min-width:18px;text-align:center;opacity:0;transition:opacity 0.2s;pointer-events:none}
+.color-btn:not(.disabled) .preview-count{opacity:1}
 #message{color:#fff;font-size:1.2rem;font-weight:700;min-height:1.5em;text-align:center;transition:opacity 0.3s}
 #move-diff{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-size:2rem;font-weight:900;pointer-events:none;z-index:20;opacity:0;transition:all 0.4s}
 .overlay{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(26,26,46,0.95);z-index:10}
@@ -28,17 +30,19 @@ canvas{width:100%;height:100%;border-radius:12px;image-rendering:pixelated}
 .overlay h1 span{display:inline-block}
 .overlay .sub{color:#888;margin-bottom:24px;font-size:0.9rem}
 .overlay .result{color:#fff;font-size:1.5rem;font-weight:700;margin:8px 0}
-.btn{background:linear-gradient(135deg,#e94560,#7b2ff7);border:none;color:#fff;font-weight:800;font-size:1rem;padding:14px 36px;border-radius:50px;cursor:pointer;margin:6px;letter-spacing:1px;transition:transform 0.15s}
+.btn{background:linear-gradient(135deg,#e94560,#7b2ff7);border:none;color:#fff;font-weight:800;font-size:1rem;padding:14px 36px;border-radius:50px;cursor:pointer;margin:6px;letter-spacing:1px;transition:transform 0.15s;min-height:48px}
 .btn:active{transform:scale(0.95)}
 .btn.secondary{background:rgba(255,255,255,0.1)}
 .size-btns{display:flex;gap:8px;margin:16px 0}
-.size-btn{padding:10px 20px;border-radius:12px;border:2px solid rgba(255,255,255,0.1);background:none;color:#fff;font-weight:700;cursor:pointer;font-size:0.9rem;transition:all 0.15s}
+.size-btn{padding:10px 20px;border-radius:12px;border:2px solid rgba(255,255,255,0.1);background:none;color:#fff;font-weight:700;cursor:pointer;font-size:0.9rem;transition:all 0.15s;min-height:48px}
 .size-btn.active{border-color:#e94560;background:rgba(233,69,96,0.15)}
 .size-btn:active{transform:scale(0.95)}
 .hidden{display:none!important}
 .stars{color:#ffd700;font-size:1.8rem;margin:8px 0}
-#undo-btn{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);color:#fff;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:0.8rem;font-weight:700}
-#undo-btn:disabled{opacity:0.3;cursor:default}
+#undo-btn,#hint-btn{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);color:#fff;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:0.8rem;font-weight:700;min-height:44px}
+#undo-btn:disabled,#hint-btn:disabled{opacity:0.3;cursor:default}
+.how-to-play{color:#aaa;font-size:0.78rem;text-align:center;max-width:340px;line-height:1.5;margin-bottom:12px;padding:10px 16px;background:rgba(255,255,255,0.04);border-radius:10px}
+.how-to-play b{color:#ddd}
 </style>
 </head>
 <body>
@@ -52,8 +56,9 @@ canvas{width:100%;height:100%;border-radius:12px;image-rendering:pixelated}
   </div>
   <div id="board-wrap"><canvas id="c"></canvas></div>
   <div id="colors"></div>
-  <div style="display:flex;gap:12px;align-items:center;justify-content:center">
-    <button id="undo-btn" onclick="undoMove()" disabled>↩ Undo</button>
+  <div style="display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap">
+    <button id="undo-btn" onclick="undoMove()" disabled>&#8617; Undo</button>
+    <button id="hint-btn" onclick="showHint()">&#128161; Hint</button>
     <div id="message"></div>
   </div>
 </div>
@@ -62,18 +67,23 @@ canvas{width:100%;height:100%;border-radius:12px;image-rendering:pixelated}
 <div class="overlay" id="menu">
   <h1><span style="color:#e94560">C</span><span style="color:#ffd700">o</span><span style="color:#00f5d4">l</span><span style="color:#7b2ff7">o</span><span style="color:#ff6b6b">r</span> <span style="color:#4ecdc4">F</span><span style="color:#f7dc6f">l</span><span style="color:#a29bfe">o</span><span style="color:#fd79a8">o</span><span style="color:#6c5ce7">d</span></h1>
   <div class="sub">Flood the board with a single color</div>
+  <div class="how-to-play">
+    <b>How to play:</b> Pick a color to change your flood region (top-left corner).
+    Each move absorbs adjacent cells of that color. Capture the entire board under par!
+    <br>Badges show how many cells each color would capture.
+  </div>
   <div style="color:#aaa;font-size:0.8rem;margin-bottom:8px">Board Size</div>
   <div class="size-btns">
-    <button class="size-btn" data-size="10">10×10<br><span style="font-size:0.7rem;color:#888">Easy</span></button>
-    <button class="size-btn active" data-size="14">14×14<br><span style="font-size:0.7rem;color:#888">Medium</span></button>
-    <button class="size-btn" data-size="18">18×18<br><span style="font-size:0.7rem;color:#888">Hard</span></button>
+    <button class="size-btn" data-size="10">10x10<br><span style="font-size:0.7rem;color:#888">Easy</span></button>
+    <button class="size-btn active" data-size="14">14x14<br><span style="font-size:0.7rem;color:#888">Medium</span></button>
+    <button class="size-btn" data-size="18">18x18<br><span style="font-size:0.7rem;color:#888">Hard</span></button>
   </div>
   <button class="btn" onclick="startGame()">PLAY</button>
 </div>
 
 <div class="overlay hidden" id="win-screen">
-  <div class="result" id="win-text">🎉 Board Cleared!</div>
-  <div class="stars" id="win-stars">★★★</div>
+  <div class="result" id="win-text">Board Cleared!</div>
+  <div class="stars" id="win-stars">&#9733;&#9733;&#9733;</div>
   <div class="sub" id="win-detail"></div>
   <button class="btn" onclick="startGame()">PLAY AGAIN</button>
   <button class="btn secondary" onclick="showMenu()">MENU</button>
@@ -90,14 +100,24 @@ const PAR={10:18,14:25,18:32};
 let boardSize=14,board,colors,moves,totalCells,captured,canvas,ctx,cellSize;
 let audioCtx;
 let history=[];
-let animCells=new Map(); // cell key -> {from,to,progress}
+let animCells=new Map();
+let animRunning=false;
+let hintColor=-1;
 
-function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)()}
+function ensureAudio(){
+  if(!audioCtx){
+    try{audioCtx=new(window.AudioContext||window.webkitAudioContext)()}catch(e){}
+  }
+  if(audioCtx&&audioCtx.state==='suspended'){audioCtx.resume().catch(()=>{})}
+}
 function playTone(f,d=0.08,v=0.1){
-  if(!audioCtx)return;const o=audioCtx.createOscillator(),g=audioCtx.createGain();
-  o.type='sine';o.frequency.value=f;g.gain.setValueAtTime(v,audioCtx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);
-  o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+d);
+  if(!audioCtx)return;
+  try{
+    const o=audioCtx.createOscillator(),g=audioCtx.createGain();
+    o.type='sine';o.frequency.value=f;g.gain.setValueAtTime(v,audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+d);
+    o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+d);
+  }catch(e){}
 }
 
 function showMenu(){
@@ -114,36 +134,41 @@ document.querySelectorAll('.size-btn').forEach(b=>{
 });
 
 function startGame(){
-  initAudio();
+  ensureAudio();
   document.getElementById('menu').classList.add('hidden');
   document.getElementById('win-screen').classList.add('hidden');
   document.getElementById('game').classList.remove('hidden');
-  
+
   colors=PALETTES[Math.floor(Math.random()*PALETTES.length)];
   totalCells=boardSize*boardSize;
-  board=[];moves=0;history=[];animCells.clear();
-  
+  board=[];moves=0;history=[];animCells.clear();animRunning=false;hintColor=-1;
+
   for(let y=0;y<boardSize;y++){
     board[y]=[];
     for(let x=0;x<boardSize;x++)board[y][x]=Math.floor(Math.random()*colors.length);
   }
-  
+
   canvas=document.getElementById('c');ctx=canvas.getContext('2d');
   canvas.width=canvas.height=boardSize*20;
   cellSize=20;
-  
+
   const colDiv=document.getElementById('colors');
   colDiv.innerHTML='';
   colors.forEach((c,i)=>{
     const btn=document.createElement('div');
     btn.className='color-btn';btn.style.background=c;
+    const badge=document.createElement('span');
+    badge.className='preview-count';badge.id='preview-'+i;
+    btn.appendChild(badge);
     btn.addEventListener('click',()=>makeMove(i));
     colDiv.appendChild(btn);
   });
-  
-  updateCaptured();updateUI();drawBoard();
-  const hs=localStorage.getItem(`colorflood_${boardSize}`);
-  document.getElementById('best').textContent=hs||'-';
+
+  updateCaptured();updateUI();updatePreviews();drawBoard();
+  try{
+    const hs=localStorage.getItem(`colorflood_${boardSize}`);
+    document.getElementById('best').textContent=hs||'-';
+  }catch(e){document.getElementById('best').textContent='-'}
   document.getElementById('undo-btn').disabled=true;
 }
 
@@ -165,53 +190,93 @@ function getConnected(color,startBoard){
   return result;
 }
 
+function simulateMove(colorIdx){
+  const tempBoard=board.map(r=>[...r]);
+  const currentColor=tempBoard[0][0];
+  if(colorIdx===currentColor)return 0;
+  const region=getConnected(currentColor,tempBoard);
+  region.forEach(p=>tempBoard[p.y][p.x]=colorIdx);
+  const newRegion=getConnected(colorIdx,tempBoard);
+  return newRegion.length-region.length;
+}
+
+function updatePreviews(){
+  if(!colors)return;
+  const currentColor=board[0][0];
+  colors.forEach((c,i)=>{
+    const el=document.getElementById('preview-'+i);
+    if(!el)return;
+    if(i===currentColor){el.textContent='';return}
+    const gain=simulateMove(i);
+    el.textContent=gain>0?'+'+gain:'0';
+  });
+}
+
+function getBestMove(){
+  const currentColor=board[0][0];
+  let best=-1,bestGain=-1;
+  colors.forEach((c,i)=>{
+    if(i===currentColor)return;
+    const gain=simulateMove(i);
+    if(gain>bestGain){bestGain=gain;best=i}
+  });
+  return best;
+}
+
+function showHint(){
+  ensureAudio();
+  const best=getBestMove();
+  if(best<0)return;
+  hintColor=best;
+  playTone(600,0.06);
+  drawBoard();
+  const btns=document.querySelectorAll('.color-btn');
+  if(btns[best]){
+    btns[best].style.boxShadow='0 0 20px 4px rgba(255,255,255,0.7)';
+    setTimeout(()=>{btns[best].style.boxShadow='';hintColor=-1;drawBoard()},1200);
+  }
+}
+
 function makeMove(colorIdx){
+  ensureAudio();
   const currentColor=board[0][0];
   if(colorIdx===currentColor)return;
-  
-  // Save history for undo
+
   history.push(board.map(r=>[...r]));
   if(history.length>20)history.shift();
   document.getElementById('undo-btn').disabled=false;
-  
+
   moves++;
   const region=getConnected(currentColor);
-  
-  // Animate the flood: find border cells that will be absorbed
   const regionSet=new Set(region.map(p=>p.x+','+p.y));
-  const newCells=[];
-  
+
   region.forEach(p=>board[p.y][p.x]=colorIdx);
   let newRegion=getConnected(colorIdx);
-  
-  // Find cells that are new to the region
+
   newRegion.forEach(p=>{
     const key=p.x+','+p.y;
     if(!regionSet.has(key)){
-      newCells.push(p);
       animCells.set(key,{progress:0});
     }
   });
-  
+
   captured=newRegion.length;
-  const oldPct=Math.round((region.length)/totalCells*100);
-  const newPct=Math.round(captured/totalCells*100);
-  
-  // Sound pitch based on capture %
+
   playTone(250+captured/totalCells*500,0.12);
-  if(newCells.length>3)playTone(400+newCells.length*20,0.08,0.06);
-  
-  // Show big capture feedback
-  if(newCells.length>=5){
+  if(newRegion.length-region.length>3)playTone(400+(newRegion.length-region.length)*20,0.08,0.06);
+
+  const gained=newRegion.length-region.length;
+  if(gained>=5){
     const el=document.getElementById('move-diff');
-    el.textContent=`+${newCells.length} cells!`;
+    el.textContent=`+${gained} cells!`;
     el.style.color=colors[colorIdx];
     el.style.opacity='1';el.style.transform='translate(-50%,-50%) scale(1.2)';
     setTimeout(()=>{el.style.opacity='0';el.style.transform='translate(-50%,-50%) scale(0.8)'},800);
   }
-  
-  updateUI();drawBoard();
-  
+
+  hintColor=-1;
+  updateUI();updatePreviews();drawBoard();
+
   if(captured===totalCells){
     setTimeout(()=>winGame(),300);
   }
@@ -221,8 +286,8 @@ function undoMove(){
   if(!history.length)return;
   board=history.pop();
   moves=Math.max(0,moves-1);
-  animCells.clear();
-  updateCaptured();updateUI();drawBoard();
+  animCells.clear();animRunning=false;
+  updateCaptured();updateUI();updatePreviews();drawBoard();
   document.getElementById('undo-btn').disabled=!history.length;
   playTone(300,0.06);
 }
@@ -239,9 +304,9 @@ function updateUI(){
   document.getElementById('par').textContent=PAR[boardSize];
   document.getElementById('pct').textContent=Math.round(captured/totalCells*100)+'%';
   document.getElementById('message').textContent=
-    captured===totalCells?'🎉 Complete!':
+    captured===totalCells?'Complete!':
     moves>=PAR[boardSize]?'Over par...':'';
-  
+
   const currentColor=board[0][0];
   document.querySelectorAll('.color-btn').forEach((btn,i)=>{
     btn.classList.toggle('current',i===currentColor);
@@ -251,12 +316,12 @@ function updateUI(){
 
 function drawBoard(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
+  let needsAnim=false;
   for(let y=0;y<boardSize;y++){
     for(let x=0;x<boardSize;x++){
       ctx.fillStyle=colors[board[y][x]];
       ctx.fillRect(x*cellSize,y*cellSize,cellSize,cellSize);
-      
-      // Animate new cells with a scale effect
+
       const key=x+','+y;
       const anim=animCells.get(key);
       if(anim&&anim.progress<1){
@@ -264,17 +329,18 @@ function drawBoard(){
         ctx.fillStyle='rgba(255,255,255,'+(0.3*(1-anim.progress))+')';
         ctx.fillRect(x*cellSize,y*cellSize,cellSize,cellSize);
         if(anim.progress>=1)animCells.delete(key);
+        else needsAnim=true;
       }
     }
   }
-  
+
   // Grid lines
   ctx.strokeStyle='rgba(0,0,0,0.1)';ctx.lineWidth=0.5;
   for(let i=0;i<=boardSize;i++){
     ctx.beginPath();ctx.moveTo(i*cellSize,0);ctx.lineTo(i*cellSize,boardSize*cellSize);ctx.stroke();
     ctx.beginPath();ctx.moveTo(0,i*cellSize);ctx.lineTo(boardSize*cellSize,i*cellSize);ctx.stroke();
   }
-  
+
   // Region border highlight
   const region=getConnected(board[0][0]);
   const regionSet=new Set(region.map(p=>p.x+','+p.y));
@@ -285,24 +351,43 @@ function drawBoard(){
     if(!regionSet.has((x-1)+','+y)){ctx.beginPath();ctx.moveTo(x*cellSize,y*cellSize);ctx.lineTo(x*cellSize,(y+1)*cellSize);ctx.stroke()}
     if(!regionSet.has((x+1)+','+y)){ctx.beginPath();ctx.moveTo((x+1)*cellSize,y*cellSize);ctx.lineTo((x+1)*cellSize,(y+1)*cellSize);ctx.stroke()}
   }
-  
-  // Keep animating if needed
-  if(animCells.size>0)requestAnimationFrame(()=>drawBoard());
+
+  // Hint highlight: pulse border cells adjacent to hint color
+  if(hintColor>=0){
+    ctx.fillStyle='rgba(255,255,255,0.25)';
+    for(const{x,y}of region){
+      for(const[dx,dy]of[[0,1],[0,-1],[1,0],[-1,0]]){
+        const nx=x+dx,ny=y+dy;
+        if(nx>=0&&nx<boardSize&&ny>=0&&ny<boardSize&&!regionSet.has(nx+','+ny)&&board[ny][nx]===hintColor){
+          ctx.fillRect(nx*cellSize,ny*cellSize,cellSize,cellSize);
+        }
+      }
+    }
+  }
+
+  if(needsAnim){
+    animRunning=true;
+    requestAnimationFrame(()=>drawBoard());
+  }else{
+    animRunning=false;
+  }
 }
 
 function winGame(){
   const par=PAR[boardSize];
   const stars=moves<=par-5?3:moves<=par?2:1;
   const key=`colorflood_${boardSize}`;
-  const prev=parseInt(localStorage.getItem(key))||999;
-  if(moves<prev)localStorage.setItem(key,moves);
-  
+  try{
+    const prev=parseInt(localStorage.getItem(key))||999;
+    if(moves<prev)localStorage.setItem(key,moves);
+  }catch(e){}
+
   document.getElementById('win-text').textContent=
-    stars===3?'🎉 Perfect!':stars===2?'✨ Well Done!':'Board Cleared!';
-  document.getElementById('win-stars').textContent='★'.repeat(stars)+'☆'.repeat(3-stars);
-  document.getElementById('win-detail').textContent=`${moves} moves (par: ${par})${moves<prev?' — New Best!':''}`;
+    stars===3?'Perfect!':stars===2?'Well Done!':'Board Cleared!';
+  document.getElementById('win-stars').textContent='\u2605'.repeat(stars)+'\u2606'.repeat(3-stars);
+  document.getElementById('win-detail').textContent=`${moves} moves (par: ${par})`;
   document.getElementById('win-screen').classList.remove('hidden');
-  
+
   playTone(523,0.15);setTimeout(()=>playTone(659,0.15),100);setTimeout(()=>playTone(784,0.2),200);
 }
 
@@ -311,6 +396,7 @@ document.addEventListener('keydown',e=>{
   const n=parseInt(e.key);
   if(n>=1&&n<=6&&colors)makeMove(n-1);
   if(e.key==='z'&&(e.ctrlKey||e.metaKey))undoMove();
+  if(e.key==='h')showHint();
 });
 </script>
 </body>

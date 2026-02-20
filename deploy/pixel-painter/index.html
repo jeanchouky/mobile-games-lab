@@ -7,54 +7,118 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-user-select:none;user-select:none}
 body{background:#1a1a2e;overflow:hidden;font-family:-apple-system,system-ui,sans-serif;color:#fff;display:flex;flex-direction:column;height:100vh;touch-action:none}
-#toolbar{display:flex;align-items:center;padding:8px;gap:6px;background:rgba(0,0,0,0.4);backdrop-filter:blur(8px);z-index:10;flex-wrap:wrap}
-#toolbar button{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);color:#fff;padding:8px 12px;border-radius:8px;font-size:14px;cursor:pointer;min-width:36px}
+#toolbar{display:flex;align-items:center;padding:6px;gap:4px;background:rgba(0,0,0,0.4);backdrop-filter:blur(8px);z-index:10;flex-wrap:wrap}
+#toolbar button{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);color:#fff;padding:8px 10px;border-radius:8px;font-size:13px;cursor:pointer;min-width:36px;min-height:36px}
 #toolbar button.active{background:rgba(255,217,61,0.2);border-color:#ffd93d}
 #toolbar button:active{transform:scale(0.95)}
 #size-display{font-size:11px;color:#888;margin-left:auto}
 canvas{flex:1;display:block;background:#16213e}
-#palette{display:flex;padding:6px;gap:4px;background:rgba(0,0,0,0.4);flex-wrap:wrap;justify-content:center}
-.swatch{width:32px;height:32px;border-radius:6px;border:2px solid transparent;cursor:pointer;transition:all .1s}
+#palette{display:flex;padding:4px;gap:3px;background:rgba(0,0,0,0.4);flex-wrap:wrap;justify-content:center;align-items:center}
+.swatch{width:28px;height:28px;border-radius:6px;border:2px solid transparent;cursor:pointer;transition:all .1s}
 .swatch.active{border-color:#fff;transform:scale(1.15);box-shadow:0 0 10px rgba(255,255,255,0.3)}
-#bottom-bar{display:flex;padding:8px;gap:6px;background:rgba(0,0,0,0.4);justify-content:center}
-#bottom-bar button{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);color:#fff;padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer}
+#custom-color{width:28px;height:28px;border-radius:6px;border:2px solid rgba(255,255,255,0.3);cursor:pointer;background:none;padding:0;appearance:none;-webkit-appearance:none}
+#custom-color::-webkit-color-swatch-wrapper{padding:0}
+#custom-color::-webkit-color-swatch{border:none;border-radius:4px}
+#bottom-bar{display:flex;padding:6px;gap:4px;background:rgba(0,0,0,0.4);justify-content:center;flex-wrap:wrap}
+#bottom-bar button{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);color:#fff;padding:8px 12px;border-radius:8px;font-size:12px;cursor:pointer;min-height:36px}
 #bottom-bar button:active{transform:scale(0.95)}
+#bottom-bar button.mode-active{background:rgba(233,69,96,0.2);border-color:#e94560}
+
+/* Gallery */
 #gallery{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(26,26,46,0.97);z-index:20;overflow-y:auto;padding:16px}
 #gallery h2{text-align:center;margin-bottom:16px}
-#gallery .gallery-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:10px}
-#gallery .gallery-item{aspect-ratio:1;background:#16213e;border-radius:8px;overflow:hidden;cursor:pointer;border:2px solid rgba(255,255,255,0.1)}
+#gallery .gallery-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:8px}
+#gallery .gallery-item{aspect-ratio:1;background:#16213e;border-radius:8px;overflow:hidden;cursor:pointer;border:2px solid rgba(255,255,255,0.1);position:relative}
 #gallery .gallery-item img{width:100%;height:100%;object-fit:contain;image-rendering:pixelated}
+#gallery .gallery-item .del-btn{position:absolute;top:2px;right:2px;background:rgba(233,69,96,0.8);border:none;color:#fff;width:22px;height:22px;border-radius:50%;font-size:12px;cursor:pointer;display:none}
+#gallery .gallery-item:hover .del-btn{display:block}
 #gallery .close-btn{position:fixed;top:16px;right:16px;background:rgba(255,255,255,0.1);border:none;color:#fff;width:40px;height:40px;border-radius:50%;font-size:20px;cursor:pointer}
 .hidden{display:none!important}
-#prompt-bar{text-align:center;padding:6px;background:rgba(255,217,61,0.1);font-size:12px;color:#ffd93d}
+
+/* Mode bar */
+#mode-bar{text-align:center;padding:6px;background:rgba(255,217,61,0.1);font-size:12px;color:#ffd93d}
+#mode-bar.challenge-mode{background:rgba(233,69,96,0.15);color:#e94560}
+
+/* Challenge overlay */
+#challenge-overlay{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(26,26,46,0.95);z-index:25;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px}
+#challenge-overlay h2{font-size:24px;margin-bottom:8px}
+#challenge-overlay p{color:#888;margin-bottom:16px;font-size:14px}
+#challenge-overlay button{background:linear-gradient(135deg,#e94560,#c23152);border:none;color:#fff;padding:14px 28px;border-radius:50px;font-size:16px;font-weight:700;cursor:pointer;margin:6px}
+#challenge-overlay button:active{transform:scale(0.95)}
+#challenge-overlay button.sec{background:rgba(255,255,255,0.1)}
+#challenge-overlay .ref-canvas{border:2px solid rgba(255,255,255,0.2);border-radius:8px;image-rendering:pixelated;margin:12px 0}
+
+/* Score display */
+#score-popup{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:30;text-align:center;background:rgba(26,26,46,0.95);border-radius:20px;padding:30px;border:1px solid rgba(255,255,255,0.1);backdrop-filter:blur(10px)}
+#score-popup h2{font-size:28px;margin-bottom:8px}
+#score-popup .score-num{font-size:48px;font-weight:900;background:linear-gradient(135deg,#ffd93d,#e94560);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+#score-popup .star{font-size:32px}
+#score-popup p{color:#888;margin:6px 0}
+#score-popup button{background:linear-gradient(135deg,#4d96ff,#a55eea);border:none;color:#fff;padding:12px 28px;border-radius:50px;font-size:15px;font-weight:700;cursor:pointer;margin-top:12px}
+
+/* Tutorial */
+#tutorial{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(26,26,46,0.97);z-index:30;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px}
+#tutorial h2{font-size:26px;margin-bottom:16px}
+#tutorial .tut-item{display:flex;align-items:center;gap:12px;text-align:left;padding:8px 0;width:100%;max-width:300px}
+#tutorial .tut-icon{font-size:24px;min-width:36px;text-align:center}
+#tutorial .tut-text{font-size:13px;color:#ccc}
+#tutorial .tut-text b{color:#fff}
+#tutorial button{background:linear-gradient(135deg,#6bcb77,#1dd1a1);border:none;color:#fff;padding:14px 36px;border-radius:50px;font-size:16px;font-weight:700;cursor:pointer;margin-top:20px}
+
+/* Layer indicator */
+#layer-bar{display:flex;gap:4px;align-items:center;padding:2px 6px;background:rgba(0,0,0,0.3);border-radius:6px;margin-left:4px}
+#layer-bar button{font-size:11px;padding:4px 8px;min-width:unset;min-height:unset}
+#layer-bar button.active{background:rgba(255,217,61,0.3);border-color:#ffd93d}
 </style>
 </head>
 <body>
-<div id="prompt-bar">✏️ Daily Prompt: <span id="daily-prompt">Loading...</span></div>
+<div id="mode-bar">Free Draw Mode - Daily Prompt: <span id="daily-prompt">Loading...</span></div>
 <div id="toolbar">
-  <button id="btn-draw" class="active" onclick="setTool('draw')">✏️</button>
-  <button id="btn-erase" onclick="setTool('erase')">🧹</button>
-  <button id="btn-fill" onclick="setTool('fill')">🪣</button>
-  <button id="btn-pick" onclick="setTool('pick')">💉</button>
-  <button id="btn-mirror" onclick="toggleMirror()">🪞</button>
-  <button id="btn-undo" onclick="undo()">↩️</button>
-  <button id="btn-redo" onclick="redo()">↪️</button>
-  <button onclick="clearCanvas()">🗑️</button>
-  <span id="size-display">16×16</span>
+  <button id="btn-draw" class="active" onclick="setTool('draw')">&#9999;&#65039;</button>
+  <button id="btn-erase" onclick="setTool('erase')">&#128465;</button>
+  <button id="btn-fill" onclick="setTool('fill')">&#127912;</button>
+  <button id="btn-pick" onclick="setTool('pick')">&#128083;</button>
+  <button id="btn-line" onclick="setTool('line')">&#9585;</button>
+  <button id="btn-mirror" onclick="toggleMirror()">&#129693;</button>
+  <button id="btn-undo" onclick="undo()">&#8617;</button>
+  <button id="btn-redo" onclick="redo()">&#8618;</button>
+  <div id="layer-bar">
+    <button class="active" onclick="setLayer(0)" id="layer0-btn">BG</button>
+    <button onclick="setLayer(1)" id="layer1-btn">FG</button>
+  </div>
+  <span id="size-display">16x16</span>
 </div>
 <canvas id="c"></canvas>
 <div id="palette"></div>
 <div id="bottom-bar">
-  <button onclick="changeSize(-4)">➖ Size</button>
-  <button onclick="changeSize(4)">➕ Size</button>
-  <button onclick="saveToGallery()">💾 Save</button>
-  <button onclick="showGallery()">🖼️ Gallery</button>
-  <button onclick="shareArt()">📤 Share</button>
+  <button onclick="changeSize(-4)">- Size</button>
+  <button onclick="changeSize(4)">+ Size</button>
+  <button onclick="saveToGallery()">Save</button>
+  <button onclick="showGallery()">Gallery</button>
+  <button onclick="exportPNG()">PNG</button>
+  <button id="btn-challenge" onclick="showChallengeMenu()">Challenge</button>
+  <button onclick="clearCanvas()">Clear</button>
 </div>
 <div id="gallery" class="hidden">
-  <button class="close-btn" onclick="hideGallery()">✕</button>
-  <h2>🖼️ Gallery</h2>
+  <button class="close-btn" onclick="hideGallery()">&#10005;</button>
+  <h2>Gallery</h2>
   <div class="gallery-grid" id="gallery-grid"></div>
+</div>
+
+<div id="challenge-overlay" class="hidden"></div>
+<div id="score-popup" class="hidden"></div>
+
+<div id="tutorial" class="hidden">
+  <h2>How to Play</h2>
+  <div class="tut-item"><div class="tut-icon">&#9999;&#65039;</div><div class="tut-text"><b>Draw</b> - Tap pixels to paint them</div></div>
+  <div class="tut-item"><div class="tut-icon">&#128465;</div><div class="tut-text"><b>Erase</b> - Remove pixels</div></div>
+  <div class="tut-item"><div class="tut-icon">&#127912;</div><div class="tut-text"><b>Fill</b> - Flood fill an area</div></div>
+  <div class="tut-item"><div class="tut-icon">&#128083;</div><div class="tut-text"><b>Eyedropper</b> - Pick a color from canvas</div></div>
+  <div class="tut-item"><div class="tut-icon">&#9585;</div><div class="tut-text"><b>Line</b> - Draw straight lines</div></div>
+  <div class="tut-item"><div class="tut-icon">&#129693;</div><div class="tut-text"><b>Mirror</b> - Symmetric drawing mode</div></div>
+  <div class="tut-item"><div class="tut-icon">BG/FG</div><div class="tut-text"><b>Layers</b> - Background and foreground layers</div></div>
+  <div class="tut-item"><div class="tut-icon">&#127942;</div><div class="tut-text"><b>Challenge</b> - Recreate reference art for a score!</div></div>
+  <button onclick="closeTutorial()">Got it!</button>
 </div>
 
 <script>
@@ -67,40 +131,115 @@ const COLORS=[
   '#fab1a0','#ffeaa7','#55efc4','#81ecec','#a29bfe','#fd79a8'
 ];
 
-let gridSize=16,pixels=[],tool='draw',currentColor='#ff6b6b';
+let audioCtx;
+function ensureAudio(){
+  if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  if(audioCtx.state==='suspended')audioCtx.resume();
+  return audioCtx;
+}
+function snd(f,d,t='sine',v=0.06){
+  try{
+    let a=ensureAudio();
+    const o=a.createOscillator(),g=a.createGain();
+    o.type=t;o.frequency.value=f;g.gain.setValueAtTime(v,a.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,a.currentTime+d);
+    o.connect(g);g.connect(a.destination);o.start();o.stop(a.currentTime+d);
+  }catch(e){}
+}
+
+function saveData(key,data){try{localStorage.setItem(key,JSON.stringify(data))}catch(e){}}
+function loadData(key){try{return JSON.parse(localStorage.getItem(key))}catch(e){return null}}
+
+let gridSize=16;
+let layers=[[],[]]; // [background, foreground]
+let currentLayer=1; // default to foreground
+let tool='draw',currentColor='#ff6b6b';
 let history=[],historyIdx=-1,maxHistory=50;
 let cellPx,offX,offY,drawing=false;
 let mirrorMode=false;
+let lineStart=null;
 
-function toggleMirror(){
-  mirrorMode=!mirrorMode;
-  document.getElementById('btn-mirror').classList.toggle('active',mirrorMode);
-}
+// Challenge mode state
+let challengeMode=null; // null, 'pixel-art', 'timed-draw', 'daily'
+let challengeRef=null; // reference pixel data for pixel-art challenge
+let challengeTimer=0;
+let challengeTimerInterval=null;
+let challengePromptText='';
 
-const PROMPTS=['a sunset','your pet','a robot','a tree','a spaceship','a castle','a dragon','pizza','a ghost','the ocean','a mountain','a flower','a cat face','a mushroom','a sword','rainy day','a star','your mood','a burger','the moon','a house','a bird','a fish','a heart','a skull','fire','ice cream','a rainbow','a crown','lightning'];
+const PROMPTS=['a sunset','your pet','a robot','a tree','a spaceship','a castle','a dragon','pizza','a ghost','the ocean','a mountain','a flower','a cat face','a mushroom','a sword','rainy day','a star','your mood','a burger','the moon','a house','a bird','a fish','a heart','a skull','fire','ice cream','a rainbow','a crown','lightning','a cactus','clouds','a boat','a volcano','a diamond','a trophy','a rocket','an alien','a planet','a cookie'];
 
-function initPixels(){
-  pixels=[];
-  for(let y=0;y<gridSize;y++){
-    pixels[y]=[];
-    for(let x=0;x<gridSize;x++)pixels[y][x]=null;
+// Reference pixel art patterns (8x8 for challenges)
+const REF_PATTERNS=[
+  {name:'Heart',size:8,colors:['#e94560'],data:[
+    [0,0,0,0,0,0,0,0],[0,0,1,0,0,1,0,0],[0,1,1,1,1,1,1,0],[0,1,1,1,1,1,1,0],
+    [0,1,1,1,1,1,1,0],[0,0,1,1,1,1,0,0],[0,0,0,1,1,0,0,0],[0,0,0,0,0,0,0,0]]},
+  {name:'Star',size:8,colors:['#ffd93d'],data:[
+    [0,0,0,1,0,0,0,0],[0,0,0,1,0,0,0,0],[0,1,1,1,1,1,0,0],[0,0,1,1,1,0,0,0],
+    [0,1,1,0,1,1,0,0],[0,1,0,0,0,1,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0]]},
+  {name:'Mushroom',size:8,colors:['#e94560','#ffeaa7','#8d6e63'],data:[
+    [0,0,1,1,1,0,0,0],[0,1,1,1,1,1,0,0],[1,1,0,1,0,1,1,0],[1,1,1,1,1,1,1,0],
+    [0,2,2,2,2,2,0,0],[0,0,2,2,2,0,0,0],[0,0,3,3,3,0,0,0],[0,0,3,3,3,0,0,0]]},
+  {name:'Smiley',size:8,colors:['#ffd93d','#000000'],data:[
+    [0,0,1,1,1,1,0,0],[0,1,1,1,1,1,1,0],[1,1,2,1,1,2,1,0],[1,1,1,1,1,1,1,0],
+    [1,2,1,1,1,1,2,0],[1,1,2,2,2,2,1,0],[0,1,1,1,1,1,1,0],[0,0,1,1,1,1,0,0]]},
+  {name:'Sword',size:8,colors:['#bdbdbd','#8d6e63','#ffd93d'],data:[
+    [0,0,0,0,0,0,1,0],[0,0,0,0,0,1,1,0],[0,0,0,0,1,1,0,0],[0,0,0,1,1,0,0,0],
+    [0,3,1,1,0,0,0,0],[0,2,3,0,0,0,0,0],[0,2,0,0,0,0,0,0],[0,0,0,0,0,0,0,0]]},
+  {name:'Alien',size:8,colors:['#1dd1a1','#000000'],data:[
+    [0,0,1,1,1,1,0,0],[0,1,1,1,1,1,1,0],[1,2,2,1,1,2,2,0],[1,1,1,1,1,1,1,0],
+    [0,1,2,1,2,1,0,0],[0,0,1,1,1,0,0,0],[0,1,0,0,0,1,0,0],[1,0,0,0,0,0,1,0]]},
+  {name:'Tree',size:8,colors:['#6bcb77','#8d6e63'],data:[
+    [0,0,0,1,0,0,0,0],[0,0,1,1,1,0,0,0],[0,1,1,1,1,1,0,0],[1,1,1,1,1,1,1,0],
+    [0,1,1,1,1,1,0,0],[0,0,0,2,0,0,0,0],[0,0,0,2,0,0,0,0],[0,0,0,2,0,0,0,0]]},
+  {name:'Ghost',size:8,colors:['#dfe6e9','#000000'],data:[
+    [0,0,1,1,1,0,0,0],[0,1,1,1,1,1,0,0],[1,2,2,1,2,2,1,0],[1,1,1,1,1,1,1,0],
+    [1,1,1,1,1,1,1,0],[1,1,1,1,1,1,1,0],[1,0,1,0,1,0,1,0],[0,0,0,0,0,0,0,0]]}
+];
+
+function initLayers(){
+  layers=[[],[]];
+  for(let l=0;l<2;l++){
+    layers[l]=[];
+    for(let y=0;y<gridSize;y++){
+      layers[l][y]=[];
+      for(let x=0;x<gridSize;x++)layers[l][y][x]=null;
+    }
   }
   history=[];historyIdx=-1;
   pushHistory();
 }
 
+function getPixels(){return layers[currentLayer]}
+function getAllPixels(){
+  // Composite: background then foreground
+  let result=[];
+  for(let y=0;y<gridSize;y++){
+    result[y]=[];
+    for(let x=0;x<gridSize;x++){
+      result[y][x]=layers[1][y]&&layers[1][y][x]?layers[1][y][x]:(layers[0][y]&&layers[0][y][x]?layers[0][y][x]:null);
+    }
+  }
+  return result;
+}
+
+function toggleMirror(){
+  mirrorMode=!mirrorMode;
+  document.getElementById('btn-mirror').classList.toggle('active',mirrorMode);
+  snd(mirrorMode?600:400,0.1);
+}
+
 function pushHistory(){
   history=history.slice(0,historyIdx+1);
-  history.push(JSON.parse(JSON.stringify(pixels)));
+  history.push(JSON.parse(JSON.stringify(layers)));
   if(history.length>maxHistory)history.shift();
   historyIdx=history.length-1;
 }
 
 function undo(){
-  if(historyIdx>0){historyIdx--;pixels=JSON.parse(JSON.stringify(history[historyIdx]))}
+  if(historyIdx>0){historyIdx--;layers=JSON.parse(JSON.stringify(history[historyIdx]));snd(300,0.05)}
 }
 function redo(){
-  if(historyIdx<history.length-1){historyIdx++;pixels=JSON.parse(JSON.stringify(history[historyIdx]))}
+  if(historyIdx<history.length-1){historyIdx++;layers=JSON.parse(JSON.stringify(history[historyIdx]));snd(500,0.05)}
 }
 
 function resize(){
@@ -109,8 +248,8 @@ function resize(){
   let toolbarH=document.getElementById('toolbar').offsetHeight;
   let paletteH=document.getElementById('palette').offsetHeight;
   let bottomH=document.getElementById('bottom-bar').offsetHeight;
-  let promptH=document.getElementById('prompt-bar').offsetHeight;
-  let h=window.innerHeight-toolbarH-paletteH-bottomH-promptH;
+  let modeH=document.getElementById('mode-bar').offsetHeight;
+  let h=window.innerHeight-toolbarH-paletteH-bottomH-modeH;
   C.width=w*dpr;C.height=h*dpr;
   C.style.width=w+'px';C.style.height=h+'px';
   X.setTransform(dpr,0,0,dpr,0,0);
@@ -123,35 +262,73 @@ function render(){
   let w=C.width/(window.devicePixelRatio||1);
   let h=C.height/(window.devicePixelRatio||1);
   X.fillStyle='#16213e';X.fillRect(0,0,w,h);
-  
+
+  let composite=getAllPixels();
+
   // Grid
   for(let y=0;y<gridSize;y++){
     for(let x=0;x<gridSize;x++){
       let px=offX+x*cellPx,py=offY+y*cellPx;
-      if(pixels[y][x]){
-        X.fillStyle=pixels[y][x];
+      if(composite[y]&&composite[y][x]){
+        X.fillStyle=composite[y][x];
         X.fillRect(px,py,cellPx,cellPx);
+        // Show foreground indicator
+        if(layers[1][y]&&layers[1][y][x]&&layers[0][y]&&layers[0][y][x]){
+          X.fillStyle='rgba(255,255,255,0.1)';
+          X.fillRect(px,py,3,3);
+        }
       }else{
         X.fillStyle=(x+y)%2===0?'rgba(255,255,255,0.03)':'rgba(255,255,255,0.06)';
         X.fillRect(px,py,cellPx,cellPx);
       }
     }
   }
-  
+
+  // Challenge mode: show reference overlay
+  if(challengeMode==='pixel-art'&&challengeRef){
+    let refSize=challengeRef.length;
+    let scale=gridSize/refSize;
+    X.globalAlpha=0.15;
+    for(let y=0;y<refSize;y++){
+      for(let x=0;x<refSize;x++){
+        if(challengeRef[y][x]){
+          X.fillStyle=challengeRef[y][x];
+          let px=offX+x*scale*cellPx,py=offY+y*scale*cellPx;
+          X.fillRect(px,py,cellPx*scale,cellPx*scale);
+        }
+      }
+    }
+    X.globalAlpha=1;
+  }
+
   // Grid lines
   X.strokeStyle='rgba(255,255,255,0.08)';X.lineWidth=0.5;
   for(let i=0;i<=gridSize;i++){
     X.beginPath();X.moveTo(offX+i*cellPx,offY);X.lineTo(offX+i*cellPx,offY+gridSize*cellPx);X.stroke();
     X.beginPath();X.moveTo(offX,offY+i*cellPx);X.lineTo(offX+gridSize*cellPx,offY+i*cellPx);X.stroke();
   }
-  
+
+  // Line preview
+  if(tool==='line'&&lineStart&&drawing){
+    X.strokeStyle=currentColor;X.lineWidth=2;X.globalAlpha=0.5;
+    let sx=offX+lineStart.x*cellPx+cellPx/2,sy=offY+lineStart.y*cellPx+cellPx/2;
+    let ex=offX+(lineEnd?lineEnd.x:lineStart.x)*cellPx+cellPx/2;
+    let ey=offY+(lineEnd?lineEnd.y:lineStart.y)*cellPx+cellPx/2;
+    X.beginPath();X.moveTo(sx,sy);X.lineTo(ex,ey);X.stroke();
+    X.globalAlpha=1;
+  }
+
   requestAnimationFrame(render);
 }
 
+let lineEnd=null;
+
 function getCellFromEvent(e){
   let rect=C.getBoundingClientRect();
-  let px=(e.clientX||e.touches[0].clientX)-rect.left;
-  let py=(e.clientY||e.touches[0].clientY)-rect.top;
+  let cx=e.clientX||(e.touches&&e.touches[0]?e.touches[0].clientX:0);
+  let cy=e.clientY||(e.touches&&e.touches[0]?e.touches[0].clientY:0);
+  let px=cx-rect.left;
+  let py=cy-rect.top;
   let x=Math.floor((px-offX)/cellPx);
   let y=Math.floor((py-offY)/cellPx);
   if(x<0||x>=gridSize||y<0||y>=gridSize)return null;
@@ -160,11 +337,13 @@ function getCellFromEvent(e){
 
 function paint(cell){
   if(!cell)return;
+  let pixels=getPixels();
   if(tool==='pick'){
-    if(pixels[cell.y][cell.x]){
-      currentColor=pixels[cell.y][cell.x];
+    let composite=getAllPixels();
+    if(composite[cell.y][cell.x]){
+      currentColor=composite[cell.y][cell.x];
       document.querySelectorAll('.swatch').forEach(s=>{
-        s.classList.toggle('active',s.style.background===currentColor);
+        s.classList.toggle('active',s.dataset.color===currentColor);
       });
       tool='draw';setTool('draw');
     }
@@ -172,7 +351,7 @@ function paint(cell){
   }
   if(tool==='draw'){
     pixels[cell.y][cell.x]=currentColor;
-    if(mirrorMode)pixels[cell.y][gridSize-1-cell.x]=currentColor;
+    if(mirrorMode&&gridSize-1-cell.x!==cell.x)pixels[cell.y][gridSize-1-cell.x]=currentColor;
   }
   else if(tool==='erase'){
     pixels[cell.y][cell.x]=null;
@@ -181,8 +360,26 @@ function paint(cell){
   else if(tool==='fill'){floodFill(cell.x,cell.y,pixels[cell.y][cell.x],currentColor)}
 }
 
+function drawLine(x0,y0,x1,y1){
+  let pixels=getPixels();
+  let dx=Math.abs(x1-x0),dy=Math.abs(y1-y0);
+  let sx=x0<x1?1:-1,sy=y0<y1?1:-1;
+  let err=dx-dy;
+  while(true){
+    if(x0>=0&&x0<gridSize&&y0>=0&&y0<gridSize){
+      pixels[y0][x0]=currentColor;
+      if(mirrorMode)pixels[y0][gridSize-1-x0]=currentColor;
+    }
+    if(x0===x1&&y0===y1)break;
+    let e2=2*err;
+    if(e2>-dy){err-=dy;x0+=sx}
+    if(e2<dx){err+=dx;y0+=sy}
+  }
+}
+
 function floodFill(x,y,target,fill){
   if(target===fill)return;
+  let pixels=getPixels();
   let stack=[{x,y}];
   let visited=new Set();
   while(stack.length){
@@ -197,67 +394,144 @@ function floodFill(x,y,target,fill){
   }
 }
 
-C.addEventListener('touchstart',e=>{e.preventDefault();drawing=true;let c=getCellFromEvent(e);paint(c)});
-C.addEventListener('touchmove',e=>{e.preventDefault();if(drawing){let c=getCellFromEvent(e);paint(c)}});
-C.addEventListener('touchend',e=>{e.preventDefault();if(drawing){drawing=false;pushHistory()}});
-C.addEventListener('mousedown',e=>{drawing=true;paint(getCellFromEvent(e))});
-C.addEventListener('mousemove',e=>{if(drawing)paint(getCellFromEvent(e))});
-C.addEventListener('mouseup',()=>{if(drawing){drawing=false;pushHistory()}});
+C.addEventListener('touchstart',e=>{
+  e.preventDefault();ensureAudio();drawing=true;
+  let c=getCellFromEvent(e);
+  if(tool==='line'){lineStart=c;lineEnd=c}
+  else paint(c);
+});
+C.addEventListener('touchmove',e=>{
+  e.preventDefault();
+  if(drawing){
+    let c=getCellFromEvent(e);
+    if(tool==='line'){lineEnd=c}
+    else paint(c);
+  }
+});
+C.addEventListener('touchend',e=>{
+  e.preventDefault();
+  if(drawing){
+    if(tool==='line'&&lineStart&&lineEnd){
+      drawLine(lineStart.x,lineStart.y,lineEnd.x,lineEnd.y);
+      lineStart=null;lineEnd=null;
+    }
+    drawing=false;pushHistory();
+  }
+});
+C.addEventListener('mousedown',e=>{
+  ensureAudio();drawing=true;
+  let c=getCellFromEvent(e);
+  if(tool==='line'){lineStart=c;lineEnd=c}
+  else paint(c);
+});
+C.addEventListener('mousemove',e=>{
+  if(drawing){
+    let c=getCellFromEvent(e);
+    if(tool==='line'){lineEnd=c}
+    else paint(c);
+  }
+});
+C.addEventListener('mouseup',()=>{
+  if(drawing){
+    if(tool==='line'&&lineStart&&lineEnd){
+      drawLine(lineStart.x,lineStart.y,lineEnd.x,lineEnd.y);
+      lineStart=null;lineEnd=null;
+    }
+    drawing=false;pushHistory();
+  }
+});
 
 function setTool(t){
-  tool=t;
+  tool=t;lineStart=null;lineEnd=null;
   document.querySelectorAll('#toolbar button').forEach(b=>b.classList.remove('active'));
-  document.getElementById('btn-'+t)?.classList.add('active');
+  let btn=document.getElementById('btn-'+t);
+  if(btn)btn.classList.add('active');
+  if(mirrorMode)document.getElementById('btn-mirror').classList.add('active');
+}
+
+function setLayer(l){
+  currentLayer=l;
+  document.getElementById('layer0-btn').classList.toggle('active',l===0);
+  document.getElementById('layer1-btn').classList.toggle('active',l===1);
+  snd(l?500:400,0.05);
 }
 
 function clearCanvas(){
-  for(let y=0;y<gridSize;y++)for(let x=0;x<gridSize;x++)pixels[y][x]=null;
-  pushHistory();
+  for(let y=0;y<gridSize;y++)for(let x=0;x<gridSize;x++){
+    layers[0][y][x]=null;layers[1][y][x]=null;
+  }
+  pushHistory();snd(200,0.1);
 }
 
 function changeSize(d){
   gridSize=Math.max(8,Math.min(64,gridSize+d));
-  document.getElementById('size-display').textContent=`${gridSize}×${gridSize}`;
-  initPixels();resize();
+  document.getElementById('size-display').textContent=`${gridSize}x${gridSize}`;
+  initLayers();resize();snd(400+d*20,0.08);
 }
 
-function toDataURL(){
+function toDataURL(scale){
+  let s=scale||1;
   let tc=document.createElement('canvas');
-  tc.width=gridSize;tc.height=gridSize;
+  tc.width=gridSize*s;tc.height=gridSize*s;
   let tx=tc.getContext('2d');
+  let composite=getAllPixels();
   for(let y=0;y<gridSize;y++){
     for(let x=0;x<gridSize;x++){
-      if(pixels[y][x]){tx.fillStyle=pixels[y][x];tx.fillRect(x,y,1,1)}
+      if(composite[y][x]){tx.fillStyle=composite[y][x];tx.fillRect(x*s,y*s,s,s)}
     }
   }
   return tc.toDataURL();
 }
 
 function saveToGallery(){
-  let gallery=JSON.parse(localStorage.getItem('pixelpainter_gallery')||'[]');
+  let gallery=loadData('pixelpainter_gallery')||[];
   gallery.unshift({data:toDataURL(),date:Date.now(),size:gridSize});
   if(gallery.length>50)gallery.pop();
-  localStorage.setItem('pixelpainter_gallery',JSON.stringify(gallery));
-  // Flash feedback
+  saveData('pixelpainter_gallery',gallery);
+  snd(600,0.1);snd(800,0.08,'triangle');
   document.body.style.background='#2a2a4e';
   setTimeout(()=>document.body.style.background='#1a1a2e',200);
 }
 
 function showGallery(){
-  let gallery=JSON.parse(localStorage.getItem('pixelpainter_gallery')||'[]');
+  let gallery=loadData('pixelpainter_gallery')||[];
   let grid=document.getElementById('gallery-grid');
   grid.innerHTML='';
-  if(gallery.length===0){grid.innerHTML='<p style="color:#888;text-align:center;grid-column:1/-1">No saved art yet!</p>'}
+  if(gallery.length===0){grid.innerHTML='<p style="color:#888;text-align:center;grid-column:1/-1">No saved art yet! Draw something and hit Save.</p>'}
   gallery.forEach((item,i)=>{
     let div=document.createElement('div');div.className='gallery-item';
     let img=document.createElement('img');img.src=item.data;
-    div.appendChild(img);
+    let del=document.createElement('button');del.className='del-btn';del.textContent='x';
+    del.onclick=(e)=>{
+      e.stopPropagation();
+      gallery.splice(i,1);
+      saveData('pixelpainter_gallery',gallery);
+      showGallery();
+    };
+    div.appendChild(img);div.appendChild(del);
     div.onclick=()=>{
-      if(confirm('Load this artwork?')){
-        let tc=document.createElement('canvas');tc.width=item.size;tc.height=item.size;
-        // Load back... simplified: just show
+      // Load image back as pixels
+      let tc=document.createElement('canvas');tc.width=item.size;tc.height=item.size;
+      let tx=tc.getContext('2d');
+      let img2=new Image();
+      img2.onload=()=>{
+        tx.drawImage(img2,0,0);
+        gridSize=item.size;
+        document.getElementById('size-display').textContent=`${gridSize}x${gridSize}`;
+        initLayers();resize();
+        for(let y=0;y<gridSize;y++){
+          for(let x=0;x<gridSize;x++){
+            let d=tx.getImageData(x,y,1,1).data;
+            if(d[3]>0){
+              layers[1][y][x]=`rgb(${d[0]},${d[1]},${d[2]})`;
+            }
+          }
+        }
+        pushHistory();
         hideGallery();
-      }
+        snd(500,0.1);
+      };
+      img2.src=item.data;
     };
     grid.appendChild(div);
   });
@@ -266,34 +540,288 @@ function showGallery(){
 
 function hideGallery(){document.getElementById('gallery').classList.add('hidden')}
 
-function shareArt(){
-  let url=toDataURL();
-  if(navigator.share){
-    navigator.share({title:'My Pixel Art',url});
-  }else{
-    let a=document.createElement('a');a.href=url;a.download='pixel-art.png';a.click();
+function exportPNG(){
+  let url=toDataURL(16); // 16x scale for crisp pixels
+  let a=document.createElement('a');a.href=url;a.download='pixel-art-'+Date.now()+'.png';a.click();
+  snd(600,0.1);
+}
+
+// === CHALLENGE MODES ===
+
+function showChallengeMenu(){
+  let overlay=document.getElementById('challenge-overlay');
+  overlay.innerHTML=`
+    <h2>Challenge Modes</h2>
+    <p>Test your pixel art skills!</p>
+    <button onclick="startPixelChallenge()">Pixel Art Challenge</button>
+    <button onclick="startTimedDraw()">Timed Drawing (30s)</button>
+    <button onclick="startDailyChallenge()">Daily Challenge</button>
+    <button class="sec" onclick="closeChallengeMenu()">Back to Free Draw</button>
+  `;
+  overlay.classList.remove('hidden');
+}
+
+function closeChallengeMenu(){
+  document.getElementById('challenge-overlay').classList.add('hidden');
+  endChallenge();
+}
+
+function endChallenge(){
+  challengeMode=null;challengeRef=null;
+  if(challengeTimerInterval){clearInterval(challengeTimerInterval);challengeTimerInterval=null}
+  let bar=document.getElementById('mode-bar');
+  bar.className='';
+  let day=Math.floor(Date.now()/86400000);
+  bar.textContent='Free Draw Mode - Daily Prompt: '+PROMPTS[day%PROMPTS.length];
+}
+
+function startPixelChallenge(){
+  snd(500,0.1);
+  let pattern=REF_PATTERNS[Math.floor(Math.random()*REF_PATTERNS.length)];
+
+  // Build reference pixel data
+  let refPixels=[];
+  for(let y=0;y<pattern.size;y++){
+    refPixels[y]=[];
+    for(let x=0;x<pattern.size;x++){
+      let v=pattern.data[y][x];
+      refPixels[y][x]=v>0?pattern.colors[v-1]:null;
+    }
   }
+  challengeRef=refPixels;
+  challengeMode='pixel-art';
+
+  // Show reference preview
+  let refCanvas=document.createElement('canvas');
+  refCanvas.width=pattern.size*20;refCanvas.height=pattern.size*20;
+  let rx=refCanvas.getContext('2d');
+  for(let y=0;y<pattern.size;y++){
+    for(let x=0;x<pattern.size;x++){
+      if(refPixels[y][x]){rx.fillStyle=refPixels[y][x];rx.fillRect(x*20,y*20,20,20)}
+      else{rx.fillStyle=(x+y)%2===0?'#1a1a2e':'#1e1e3a';rx.fillRect(x*20,y*20,20,20)}
+    }
+  }
+
+  // Set grid to match
+  gridSize=pattern.size;
+  document.getElementById('size-display').textContent=`${gridSize}x${gridSize}`;
+  initLayers();resize();
+
+  let overlay=document.getElementById('challenge-overlay');
+  overlay.innerHTML=`
+    <h2>Recreate: ${pattern.name}</h2>
+    <p>Match the reference image as closely as you can!</p>
+    <img class="ref-canvas" src="${refCanvas.toDataURL()}" width="160" height="160">
+    <p style="font-size:12px;color:#666">A ghost overlay will guide you on the canvas</p>
+    <button onclick="beginPixelChallenge()">Start Drawing!</button>
+  `;
+  overlay.classList.remove('hidden');
+
+  let bar=document.getElementById('mode-bar');
+  bar.className='challenge-mode';
+  bar.textContent='Pixel Art Challenge: '+pattern.name;
+}
+
+function beginPixelChallenge(){
+  document.getElementById('challenge-overlay').classList.add('hidden');
+  // Add a submit button temporarily
+  let bar=document.getElementById('mode-bar');
+  bar.innerHTML='Pixel Art Challenge <button onclick="scorePixelChallenge()" style="background:#e94560;border:none;color:#fff;padding:4px 16px;border-radius:20px;font-size:12px;font-weight:700;cursor:pointer;margin-left:8px">Submit</button>';
+}
+
+function scorePixelChallenge(){
+  if(!challengeRef)return;
+  let total=0,correct=0;
+  let composite=getAllPixels();
+  for(let y=0;y<challengeRef.length;y++){
+    for(let x=0;x<challengeRef[y].length;x++){
+      let ref=challengeRef[y][x];
+      let cur=composite[y]?composite[y][x]:null;
+      if(ref||cur)total++;
+      if(ref&&cur){
+        // Color similarity check
+        if(ref===cur)correct++;
+        else{
+          // Partial credit for close colors
+          let sim=colorSimilarity(ref,cur);
+          if(sim>0.7)correct+=sim;
+        }
+      }else if(!ref&&!cur){
+        // Both empty = correct (don't count)
+      }
+    }
+  }
+
+  let accuracy=total>0?Math.round(correct/total*100):0;
+  let stars=accuracy>=90?3:accuracy>=70?2:accuracy>=40?1:0;
+
+  let popup=document.getElementById('score-popup');
+  popup.innerHTML=`
+    <h2>Challenge Complete!</h2>
+    <div class="score-num">${accuracy}%</div>
+    <div class="star">${'&#11088;'.repeat(stars)}${'&#9734;'.repeat(3-stars)}</div>
+    <p>${accuracy>=90?'Perfect!':accuracy>=70?'Great work!':accuracy>=40?'Nice try!':'Keep practicing!'}</p>
+    <button onclick="document.getElementById('score-popup').classList.add('hidden');showChallengeMenu()">Continue</button>
+  `;
+  popup.classList.remove('hidden');
+  snd(accuracy>=70?800:400,0.2);
+  if(accuracy>=70){snd(1000,0.15,'triangle')}
+}
+
+function colorSimilarity(c1,c2){
+  let r1=parseInt(c1.slice(1,3),16)||0,g1=parseInt(c1.slice(3,5),16)||0,b1=parseInt(c1.slice(5,7),16)||0;
+  // Handle rgb() format
+  if(c2.startsWith('rgb')){
+    let m=c2.match(/(\d+)/g);
+    if(m){
+      let r2=+m[0],g2=+m[1],b2=+m[2];
+      let dist=Math.sqrt((r1-r2)**2+(g1-g2)**2+(b1-b2)**2);
+      return Math.max(0,1-dist/441);
+    }
+  }
+  let r2=parseInt(c2.slice(1,3),16)||0,g2=parseInt(c2.slice(3,5),16)||0,b2=parseInt(c2.slice(5,7),16)||0;
+  let dist=Math.sqrt((r1-r2)**2+(g1-g2)**2+(b1-b2)**2);
+  return Math.max(0,1-dist/441);
+}
+
+function startTimedDraw(){
+  snd(500,0.1);
+  challengeMode='timed-draw';
+  challengePromptText=PROMPTS[Math.floor(Math.random()*PROMPTS.length)];
+  challengeTimer=30;
+
+  gridSize=16;
+  document.getElementById('size-display').textContent='16x16';
+  initLayers();resize();
+
+  let overlay=document.getElementById('challenge-overlay');
+  overlay.innerHTML=`
+    <h2>Timed Drawing</h2>
+    <p>You have 30 seconds to draw:</p>
+    <h2 style="color:#ffd93d;font-size:32px">${challengePromptText}</h2>
+    <button onclick="beginTimedDraw()">Start!</button>
+  `;
+  overlay.classList.remove('hidden');
+}
+
+function beginTimedDraw(){
+  document.getElementById('challenge-overlay').classList.add('hidden');
+  let bar=document.getElementById('mode-bar');
+  bar.className='challenge-mode';
+
+  challengeTimerInterval=setInterval(()=>{
+    challengeTimer--;
+    bar.textContent=`Draw: ${challengePromptText} - ${challengeTimer}s remaining`;
+    if(challengeTimer<=5)snd(600,0.05);
+    if(challengeTimer<=0){
+      clearInterval(challengeTimerInterval);
+      // Auto-save
+      saveToGallery();
+      let popup=document.getElementById('score-popup');
+      popup.innerHTML=`
+        <h2>Time's Up!</h2>
+        <p>Your drawing of "${challengePromptText}" has been saved to the gallery!</p>
+        <button onclick="document.getElementById('score-popup').classList.add('hidden');showChallengeMenu()">Continue</button>
+      `;
+      popup.classList.remove('hidden');
+      snd(400,0.2);
+    }
+  },1000);
+  bar.textContent=`Draw: ${challengePromptText} - 30s remaining`;
+}
+
+function startDailyChallenge(){
+  snd(500,0.1);
+  challengeMode='daily';
+  let day=Math.floor(Date.now()/86400000);
+  let patternIdx=day%REF_PATTERNS.length;
+  let pattern=REF_PATTERNS[patternIdx];
+
+  // Build reference
+  let refPixels=[];
+  for(let y=0;y<pattern.size;y++){
+    refPixels[y]=[];
+    for(let x=0;x<pattern.size;x++){
+      let v=pattern.data[y][x];
+      refPixels[y][x]=v>0?pattern.colors[v-1]:null;
+    }
+  }
+  challengeRef=refPixels;
+  challengeMode='pixel-art';
+
+  gridSize=pattern.size;
+  document.getElementById('size-display').textContent=`${gridSize}x${gridSize}`;
+  initLayers();resize();
+
+  let refCanvas=document.createElement('canvas');
+  refCanvas.width=pattern.size*20;refCanvas.height=pattern.size*20;
+  let rx=refCanvas.getContext('2d');
+  for(let y=0;y<pattern.size;y++){
+    for(let x=0;x<pattern.size;x++){
+      if(refPixels[y][x]){rx.fillStyle=refPixels[y][x];rx.fillRect(x*20,y*20,20,20)}
+      else{rx.fillStyle=(x+y)%2===0?'#1a1a2e':'#1e1e3a';rx.fillRect(x*20,y*20,20,20)}
+    }
+  }
+
+  // Check if already completed today
+  let dailyBest=loadData('pp_daily_'+day);
+
+  let overlay=document.getElementById('challenge-overlay');
+  overlay.innerHTML=`
+    <h2>Daily Challenge</h2>
+    <p>Today's pattern: <b>${pattern.name}</b></p>
+    <img class="ref-canvas" src="${refCanvas.toDataURL()}" width="160" height="160">
+    ${dailyBest?`<p style="color:#ffd93d">Your best today: ${dailyBest}%</p>`:''}
+    <button onclick="beginPixelChallenge()">Start!</button>
+    <button class="sec" onclick="closeChallengeMenu()">Back</button>
+  `;
+  overlay.classList.remove('hidden');
+
+  let bar=document.getElementById('mode-bar');
+  bar.className='challenge-mode';
+  bar.textContent='Daily Challenge: '+pattern.name;
 }
 
 // Build palette
 let pal=document.getElementById('palette');
 COLORS.forEach(c=>{
   let d=document.createElement('div');d.className='swatch';
+  d.dataset.color=c;
   if(c===currentColor)d.classList.add('active');
   d.style.background=c;
   d.onclick=()=>{
     currentColor=c;tool='draw';setTool('draw');
     document.querySelectorAll('.swatch').forEach(s=>s.classList.remove('active'));
     d.classList.add('active');
+    snd(400,0.03);
   };
   pal.appendChild(d);
 });
+
+// Custom color picker
+let customInput=document.createElement('input');
+customInput.type='color';customInput.id='custom-color';
+customInput.value='#ff00ff';
+customInput.oninput=()=>{
+  currentColor=customInput.value;tool='draw';setTool('draw');
+  document.querySelectorAll('.swatch').forEach(s=>s.classList.remove('active'));
+};
+pal.appendChild(customInput);
 
 // Daily prompt
 let day=Math.floor(Date.now()/86400000);
 document.getElementById('daily-prompt').textContent=PROMPTS[day%PROMPTS.length];
 
-initPixels();
+// Tutorial on first visit
+function closeTutorial(){
+  document.getElementById('tutorial').classList.add('hidden');
+  saveData('pp_tutorial_done',true);
+}
+if(!loadData('pp_tutorial_done')){
+  document.getElementById('tutorial').classList.remove('hidden');
+}
+
+initLayers();
 window.addEventListener('resize',resize);
 resize();
 render();

@@ -62,12 +62,22 @@ let ambienceGain = null;
 let sfxGain = null;
 let audioMuted = false;
 let ambienceNodes = [];
+let ambienceTimeoutIds = [];
 
 // UI state
 let showingJournal = false;
 let journalEntries = [];
 let muteButtonBounds = null;
 let lastMouseX = 0, lastMouseY = 0;
+
+// Seasons: change every 5 days (5 minutes real time)
+let currentSeason = 'spring'; // spring, summer, autumn, winter
+let seasonTimer = 0;
+const SEASON_DURATION = 300; // 5 min per season
+
+// Time-lapse mode
+let timeLapseActive = false;
+let timeLapseSpeed = 1; // multiplier
 
 // Phone usage simulation (since we can't access real data in web)
 let simulatedUsage = {
@@ -193,69 +203,69 @@ function startAmbience() {
 
 function startBirdChirps() {
   if (!audioCtx || audioMuted) return;
-  
+
   const chirp = () => {
     if (audioMuted || timeOfDay === 'night') {
-      setTimeout(chirp, 5000);
+      ambienceTimeoutIds.push(setTimeout(chirp, 5000));
       return;
     }
-    
+
     const birdCount = creatures.filter(c => c.type === 'bird').length;
     if (birdCount > 0 && Math.random() < 0.4) {
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
-      
+
       const freq = 800 + Math.random() * 800;
       osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
       osc.frequency.exponentialRampToValueAtTime(freq * 1.5, audioCtx.currentTime + 0.05);
       osc.frequency.exponentialRampToValueAtTime(freq, audioCtx.currentTime + 0.1);
-      
+
       osc.type = 'sine';
-      
+
       gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
-      
+
       osc.connect(gain);
       gain.connect(ambienceGain);
-      
+
       osc.start();
       osc.stop(audioCtx.currentTime + 0.15);
     }
-    
-    setTimeout(chirp, 3000 + Math.random() * 5000);
+
+    ambienceTimeoutIds.push(setTimeout(chirp, 3000 + Math.random() * 5000));
   };
   chirp();
 }
 
 function startInsectBuzz() {
   if (!audioCtx || audioMuted) return;
-  
+
   const buzz = () => {
     if (audioMuted || timeOfDay === 'night') {
-      setTimeout(buzz, 8000);
+      ambienceTimeoutIds.push(setTimeout(buzz, 8000));
       return;
     }
-    
+
     const insectCount = creatures.filter(c => c.type === 'insect').length;
     if (insectCount > 0 && Math.random() < 0.3) {
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
-      
+
       osc.frequency.value = 200 + Math.random() * 100;
       osc.type = 'sawtooth';
-      
+
       gain.gain.setValueAtTime(0, audioCtx.currentTime);
       gain.gain.linearRampToValueAtTime(0.04, audioCtx.currentTime + 0.2);
       gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 1);
-      
+
       osc.connect(gain);
       gain.connect(ambienceGain);
-      
+
       osc.start();
       osc.stop(audioCtx.currentTime + 1);
     }
-    
-    setTimeout(buzz, 5000 + Math.random() * 10000);
+
+    ambienceTimeoutIds.push(setTimeout(buzz, 5000 + Math.random() * 10000));
   };
   buzz();
 }
@@ -267,6 +277,8 @@ function stopAmbience() {
     } catch(e) {}
   });
   ambienceNodes = [];
+  ambienceTimeoutIds.forEach(id => clearTimeout(id));
+  ambienceTimeoutIds = [];
 }
 
 // SFX
@@ -509,7 +521,13 @@ const SPECIES = {
   
   // INSECTS
   butterfly: { type: 'insect', color: '#f48fb1', speed: 1.2, size: 4, diet: 'plant', predator: false },
-  dragonfly: { type: 'insect', color: '#64b5f6', speed: 2.0, size: 5, diet: 'insect', predator: true }
+  dragonfly: { type: 'insect', color: '#64b5f6', speed: 2.0, size: 5, diet: 'insect', predator: true },
+
+  // AMPHIBIANS
+  frog: { type: 'amphibian', color: '#66bb6a', speed: 0.8, size: 10, diet: 'insect', predator: true },
+
+  // MOLLUSKS
+  snail: { type: 'mollusk', color: '#a1887f', speed: 0.2, size: 7, diet: 'plant', predator: false }
 };
 
 function spawnCreature(speciesName, x, y) {
@@ -601,6 +619,10 @@ function updateCreatures() {
         c.targetY = H * 0.4 + Math.random() * H * 0.3; // water zone
       } else if (c.type === 'bird') {
         c.targetY = H * 0.1 + Math.random() * H * 0.3; // sky zone
+      } else if (c.type === 'amphibian') {
+        c.targetY = H * 0.5 + Math.random() * H * 0.3; // water/ground edge
+      } else if (c.type === 'mollusk') {
+        c.targetY = H * 0.7 + Math.random() * H * 0.2; // ground zone
       } else {
         c.targetY = H * 0.3 + Math.random() * H * 0.5; // mid zone
       }
@@ -703,6 +725,21 @@ function updateEcosystem() {
   const herbivoreCount = creatures.filter(c => !c.predator && c.diet !== 'meat').length;
   const predatorCount = creatures.filter(c => c.predator).length;
   
+  // Frog spawning: attracted by insects
+  const insectCount = creatures.filter(c => c.type === 'insect').length;
+  const frogCount = creatures.filter(c => c.type === 'amphibian').length;
+  if (insectCount >= 3 && frogCount < 3 && Math.random() < 0.0005) {
+    spawnCreature('frog');
+    addJournalEntry('Insects attracted a frog!');
+  }
+
+  // Snail spawning: attracted by plants
+  const snailCount = creatures.filter(c => c.type === 'mollusk').length;
+  if (plantCount > 8 && snailCount < 4 && Math.random() < 0.0004) {
+    spawnCreature('snail');
+    addJournalEntry('Plants attracted a snail!');
+  }
+
   // Ideal ratios: plants > herbivores > predators
   let healthDelta = 0;
   if (plantCount > 10) healthDelta += 0.1;
@@ -737,8 +774,8 @@ function updateSimulatedUsage() {
   }
   
   if (simulatedUsage.phoneFreeMins > 10 && Math.random() < 0.001) {
-    // Spawn herbivore
-    const herbivores = ['minnow', 'carp', 'sparrow', 'butterfly'];
+    // Spawn herbivore or passive creature
+    const herbivores = ['minnow', 'carp', 'sparrow', 'butterfly', 'snail'];
     spawnCreature(herbivores[Math.floor(Math.random() * herbivores.length)]);
     addJournalEntry('Peaceful time attracted wildlife');
   }
@@ -749,6 +786,72 @@ function updateSimulatedUsage() {
     spawnCreature(birds[0]);
     addJournalEntry('Music attracted birds');
   }
+}
+
+// ============================================================
+// SEASONS
+// ============================================================
+function updateSeason() {
+  seasonTimer += deltaTime * timeLapseSpeed;
+  if (seasonTimer >= SEASON_DURATION) {
+    seasonTimer = 0;
+    const seasons = ['spring', 'summer', 'autumn', 'winter'];
+    const idx = seasons.indexOf(currentSeason);
+    currentSeason = seasons[(idx + 1) % 4];
+    addJournalEntry(`Season changed to ${capitalize(currentSeason)}`);
+
+    // Season effects on ecosystem
+    if (currentSeason === 'spring') {
+      // Plants grow faster, spawn new ones
+      for (let i = 0; i < 3; i++) {
+        if (plants.length < 40) {
+          spawnPlant(['grass', 'bush', 'reed'][Math.floor(Math.random() * 3)]);
+        }
+      }
+      ecosystemHealth = Math.min(100, ecosystemHealth + 5);
+    } else if (currentSeason === 'winter') {
+      // Slower growth, some creatures may not survive
+      ecosystemHealth = Math.max(0, ecosystemHealth - 5);
+    }
+  }
+}
+
+function getSeasonTint() {
+  switch(currentSeason) {
+    case 'spring': return { tint: 'rgba(144, 238, 144, 0.08)', groundHue: '#c8e6c9' };
+    case 'summer': return { tint: 'rgba(255, 235, 59, 0.06)', groundHue: '#a5d6a7' };
+    case 'autumn': return { tint: 'rgba(255, 152, 0, 0.1)', groundHue: '#ffe0b2' };
+    case 'winter': return { tint: 'rgba(200, 220, 240, 0.15)', groundHue: '#e0e0e0' };
+  }
+}
+
+// ============================================================
+// BIODIVERSITY INDEX (Shannon-Wiener inspired)
+// ============================================================
+function getBiodiversityIndex() {
+  const allOrganisms = [...creatures, ...plants];
+  if (allOrganisms.length === 0) return 0;
+
+  const counts = {};
+  for (const org of allOrganisms) {
+    const sp = org.species;
+    counts[sp] = (counts[sp] || 0) + 1;
+  }
+
+  const total = allOrganisms.length;
+  const speciesCount = Object.keys(counts).length;
+  if (speciesCount <= 1) return 0;
+
+  // Shannon index: H = -sum(pi * ln(pi))
+  let H = 0;
+  for (const sp in counts) {
+    const pi = counts[sp] / total;
+    if (pi > 0) H -= pi * Math.log(pi);
+  }
+
+  // Normalize to 0-100 based on max possible (ln of species count)
+  const maxH = Math.log(speciesCount);
+  return maxH > 0 ? Math.round((H / maxH) * 100) : 0;
 }
 
 // ============================================================
@@ -844,12 +947,13 @@ function drawBackground() {
     organicBlob(x, y, r, timeColor.water, 0.25);
   }
 
-  // Ground layer (bottom 30%)
+  // Ground layer (bottom 30%) - season-tinted
+  const seasonStyle = getSeasonTint();
   for (let i = 0; i < 20; i++) {
     const x = (i / 20) * W * 1.3 - W * 0.15;
     const y = H * 0.75 + Math.sin(i * 1.5) * 20 * scale;
     const r = (35 + Math.random() * 50) * scale;
-    organicBlob(x, y, r, timeColor.ground, 0.28);
+    organicBlob(x, y, r, seasonStyle.groundHue, 0.28);
   }
 
   // Time of day tint
@@ -857,6 +961,56 @@ function drawBackground() {
   ctx.fillStyle = timeColor.tint;
   ctx.fillRect(0, 0, W, H);
   ctx.restore();
+
+  // Season tint overlay
+  ctx.save();
+  ctx.fillStyle = seasonStyle.tint;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+
+  // Seasonal particles
+  if (currentSeason === 'spring') {
+    // Floating blossom petals
+    for (let i = 0; i < 6; i++) {
+      const px = ((gameTime * 20 + i * 70) % (W + 40)) - 20;
+      const py = ((gameTime * 15 + i * 90 + Math.sin(gameTime + i) * 30) % (H * 0.7));
+      ctx.save();
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = '#ffb7c5';
+      ctx.beginPath();
+      ctx.ellipse(px, py, 3 * scale, 2 * scale, gameTime + i, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  } else if (currentSeason === 'autumn') {
+    // Falling leaves
+    for (let i = 0; i < 8; i++) {
+      const px = ((gameTime * 12 + i * 55) % (W + 40)) - 20;
+      const py = ((gameTime * 25 + i * 80) % (H * 0.8));
+      const leafColors = ['#ff8a65', '#ffb74d', '#d84315', '#c62828'];
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = leafColors[i % leafColors.length];
+      ctx.beginPath();
+      ctx.ellipse(px, py, 4 * scale, 2.5 * scale, Math.sin(gameTime * 2 + i) * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  } else if (currentSeason === 'winter') {
+    // Snowflakes
+    for (let i = 0; i < 12; i++) {
+      const px = ((gameTime * 8 + i * 40 + Math.sin(gameTime * 0.5 + i) * 20) % (W + 20)) - 10;
+      const py = ((gameTime * 18 + i * 60) % (H + 20)) - 10;
+      ctx.save();
+      ctx.globalAlpha = 0.4;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(px, py, (1.5 + Math.sin(i) * 0.5) * scale, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
 
   // Weather effects
   if (weather === 'rain' || weather === 'storm') {
@@ -1023,21 +1177,138 @@ function drawCreatures() {
       watercolorCircle(c.x, c.y, segR, c.color, 0.5);
       watercolorCircle(c.x - segR * 1.5, c.y, segR * 0.8, c.color, 0.5);
       watercolorCircle(c.x + segR * 1.5, c.y, segR * 1.2, c.color, 0.5);
-      
+
       // Wings (fluttering)
       const wingFlap = Math.abs(Math.sin(c.phase * 6)) * c.size * 0.8;
-      
+
       ctx.beginPath();
       ctx.ellipse(c.x, c.y - wingFlap, c.size * 0.6, c.size * 1.2, -Math.PI / 6, 0, Math.PI * 2);
       ctx.fillStyle = c.color;
       ctx.globalAlpha = 0.3;
       ctx.fill();
-      
+
       ctx.beginPath();
       ctx.ellipse(c.x, c.y - wingFlap, c.size * 0.6, c.size * 1.2, Math.PI / 6, 0, Math.PI * 2);
       ctx.fill();
+
+    } else if (c.type === 'amphibian') {
+      // Frog: squat body with big eyes and legs
+      const bodyW = c.size * 1.2;
+      const bodyH = c.size * 0.7;
+      const dirX = Math.sign(c.vx) || 1;
+
+      // Body
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, bodyW, bodyH, 0, 0, Math.PI * 2);
+      ctx.fillStyle = c.color;
+      ctx.globalAlpha = 0.6;
+      ctx.fill();
+
+      // Belly (lighter)
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y + bodyH * 0.2, bodyW * 0.7, bodyH * 0.5, 0, 0, Math.PI * 2);
+      ctx.fillStyle = '#a5d6a7';
+      ctx.globalAlpha = 0.4;
+      ctx.fill();
+
+      // Eyes (two big circles on top)
+      const eyeOffX = bodyW * 0.5;
+      const eyeY = c.y - bodyH * 0.7;
+      const eyeR = c.size * 0.3;
+      // Left eye
+      watercolorCircle(c.x - eyeOffX * 0.5, eyeY, eyeR, '#fff', 0.8);
+      ctx.fillStyle = '#333';
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.arc(c.x - eyeOffX * 0.5 + dirX * eyeR * 0.2, eyeY, eyeR * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+      // Right eye
+      watercolorCircle(c.x + eyeOffX * 0.5, eyeY, eyeR, '#fff', 0.8);
+      ctx.fillStyle = '#333';
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.arc(c.x + eyeOffX * 0.5 + dirX * eyeR * 0.2, eyeY, eyeR * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Back legs
+      const legBend = Math.sin(c.phase * 3) * c.size * 0.3;
+      ctx.strokeStyle = c.color;
+      ctx.lineWidth = 2 * scale;
+      ctx.globalAlpha = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(c.x - bodyW * 0.6, c.y + bodyH * 0.5);
+      ctx.lineTo(c.x - bodyW * 1.0, c.y + bodyH + legBend);
+      ctx.lineTo(c.x - bodyW * 1.3, c.y + bodyH * 0.3 + legBend);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(c.x + bodyW * 0.6, c.y + bodyH * 0.5);
+      ctx.lineTo(c.x + bodyW * 1.0, c.y + bodyH + legBend);
+      ctx.lineTo(c.x + bodyW * 1.3, c.y + bodyH * 0.3 + legBend);
+      ctx.stroke();
+
+    } else if (c.type === 'mollusk') {
+      // Snail: spiral shell + soft body
+      const bodyLen = c.size * 1.5;
+      const bodyH = c.size * 0.4;
+      const dirX = Math.sign(c.vx) || 1;
+
+      // Body (elongated blob)
+      ctx.beginPath();
+      ctx.ellipse(c.x + dirX * bodyLen * 0.2, c.y + bodyH * 0.3, bodyLen * 0.7, bodyH, 0, 0, Math.PI * 2);
+      ctx.fillStyle = '#bcaaa4';
+      ctx.globalAlpha = 0.5;
+      ctx.fill();
+
+      // Shell (spiral circle)
+      const shellX = c.x - dirX * bodyLen * 0.1;
+      const shellY = c.y - c.size * 0.3;
+      const shellR = c.size * 0.7;
+      watercolorCircle(shellX, shellY, shellR, c.color, 0.6);
+      // Spiral lines
+      ctx.strokeStyle = '#8d6e63';
+      ctx.lineWidth = 1 * scale;
+      ctx.globalAlpha = 0.4;
+      ctx.beginPath();
+      for (let t = 0; t < Math.PI * 4; t += 0.2) {
+        const sr = shellR * (1 - t / (Math.PI * 5));
+        if (sr < 1) break;
+        const sx = shellX + Math.cos(t) * sr;
+        const sy = shellY + Math.sin(t) * sr;
+        if (t === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+      }
+      ctx.stroke();
+
+      // Antennae (two stalks with eyes)
+      const headX = c.x + dirX * bodyLen * 0.6;
+      const headY = c.y;
+      ctx.strokeStyle = '#bcaaa4';
+      ctx.lineWidth = 1.5 * scale;
+      ctx.globalAlpha = 0.6;
+      ctx.beginPath();
+      ctx.moveTo(headX, headY);
+      ctx.lineTo(headX + dirX * c.size * 0.3, headY - c.size * 0.6);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(headX, headY);
+      ctx.lineTo(headX + dirX * c.size * 0.5, headY - c.size * 0.5);
+      ctx.stroke();
+      // Eye dots
+      ctx.fillStyle = '#333';
+      ctx.globalAlpha = 0.7;
+      ctx.beginPath();
+      ctx.arc(headX + dirX * c.size * 0.3, headY - c.size * 0.6, 1.5 * scale, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(headX + dirX * c.size * 0.5, headY - c.size * 0.5, 1.5 * scale, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Slime trail
+      ctx.fillStyle = 'rgba(200, 220, 200, 0.15)';
+      ctx.beginPath();
+      ctx.ellipse(c.x - dirX * bodyLen * 0.3, c.y + bodyH * 0.5, bodyLen * 0.4, bodyH * 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
     }
-    
+
     ctx.restore();
   }
 }
@@ -1056,14 +1327,15 @@ function drawUI() {
   // Title
   drawText('Pocket Ecosystem', centerX, headerH * 0.35, 20, '#3d5a3d', 'center');
   
-  // Day counter, time-of-day icon, and status
+  // Day counter, time-of-day icon, season, and status
   const status = ecosystemHealth > 80 ? 'Thriving' : ecosystemHealth > 50 ? 'Balanced' : ecosystemHealth > 20 ? 'Struggling' : 'Critical';
   const statusColor = ecosystemHealth > 80 ? '#4caf50' : ecosystemHealth > 50 ? '#ff9800' : '#f44336';
   const todIcon = timeOfDay === 'dawn' ? '🌅' : timeOfDay === 'day' ? '☀️' : timeOfDay === 'dusk' ? '🌇' : '🌙';
-  drawText(`${todIcon} Day ${daysSurvived} • ${status}`, centerX, headerH * 0.7, 12, statusColor, 'center', 0.8);
-  
-  // Bottom info panel
-  const panelH = 80 * scale;
+  const seasonIcon = currentSeason === 'spring' ? '🌸' : currentSeason === 'summer' ? '☀️' : currentSeason === 'autumn' ? '🍂' : '❄️';
+  drawText(`${todIcon} Day ${daysSurvived} • ${seasonIcon} ${capitalize(currentSeason)} • ${status}`, centerX, headerH * 0.7, 11, statusColor, 'center', 0.8);
+
+  // Ecosystem health meter (bottom info panel)
+  const panelH = 95 * scale;
   const panelY = H - panelH;
 
   ctx.save();
@@ -1078,51 +1350,66 @@ function drawUI() {
   const speciesCounts = {};
   creatures.forEach(c => { speciesCounts[c.species] = (speciesCounts[c.species] || 0) + 1; });
 
+  // Stats - 3 rows
   const leftX = 15 * scale;
   const rightX = W - 15 * scale;
-  const line1Y = panelY + 14 * scale;
-  const line2Y = panelY + 28 * scale;
+  const line1Y = panelY + 15 * scale;
+  const line2Y = panelY + 33 * scale;
+  const line3Y = panelY + 51 * scale;
 
-  // Left column: plants + fish
-  drawText(`🌱 ${plants.length} plants`, leftX, line1Y, 10, '#7cb342', 'left');
-  const fishNames = ['minnow','carp','pike'].filter(s => speciesCounts[s]);
-  const fishStr = fishNames.map(s => `${s}: ${speciesCounts[s]}`).join(', ') || 'none';
-  drawText(`🐟 ${fishStr}`, leftX, line2Y, 9, '#ff8a65', 'left');
+  // Left side: species counts with detail
+  drawText(`🌱 ${plants.length}`, leftX, line1Y, 10, '#7cb342', 'left');
+  drawText(`🐟 ${creatures.filter(c => c.type === 'fish').length}`, leftX + 45 * scale, line1Y, 10, '#ff8a65', 'left');
+  drawText(`🦅 ${creatures.filter(c => c.type === 'bird').length}`, leftX + 80 * scale, line1Y, 10, '#8d6e63', 'left');
 
-  // Right column: birds + insects
-  const birdNames = ['sparrow','hawk'].filter(s => speciesCounts[s]);
-  const birdStr = birdNames.map(s => `${s}: ${speciesCounts[s]}`).join(', ') || 'none';
-  drawText(`🦅 ${birdStr}`, rightX, line1Y, 9, '#8d6e63', 'right');
-  const insectNames = ['butterfly','dragonfly'].filter(s => speciesCounts[s]);
-  const insectStr = insectNames.map(s => `${s}: ${speciesCounts[s]}`).join(', ') || 'none';
-  drawText(`🦋 ${insectStr}`, rightX, line2Y, 9, '#f48fb1', 'right');
+  drawText(`🦋 ${creatures.filter(c => c.type === 'insect').length}`, leftX, line2Y, 10, '#f48fb1', 'left');
+  drawText(`🐸 ${creatures.filter(c => c.type === 'amphibian').length}`, leftX + 45 * scale, line2Y, 10, '#66bb6a', 'left');
+  drawText(`🐌 ${creatures.filter(c => c.type === 'mollusk').length}`, leftX + 80 * scale, line2Y, 10, '#a1887f', 'left');
 
-  // Health bar — below species counts
-  const barW = 120 * scale;
-  const barH = 8 * scale;
-  const barX = centerX - barW / 2;
-  const barY = panelY + 42 * scale;
+  drawText(`${creatures.length} creatures total`, leftX, line3Y, 8, '#999', 'left');
+
+  // Health bar (right side)
+  const barW = 100 * scale;
+  const barH = 7 * scale;
+  const barX = rightX - barW;
+  const barY1 = line1Y - 3 * scale;
 
   ctx.save();
   ctx.fillStyle = '#e0e0e0';
-  ctx.fillRect(barX, barY, barW, barH);
-
+  ctx.fillRect(barX, barY1, barW, barH);
   const healthColor = ecosystemHealth > 60 ? '#4caf50' : ecosystemHealth > 30 ? '#ff9800' : '#f44336';
   ctx.fillStyle = healthColor;
-  ctx.fillRect(barX, barY, barW * (ecosystemHealth / 100), barH);
-
+  ctx.fillRect(barX, barY1, barW * (ecosystemHealth / 100), barH);
   ctx.strokeStyle = 'rgba(0,0,0,0.2)';
   ctx.lineWidth = 1;
-  ctx.strokeRect(barX, barY, barW, barH);
+  ctx.strokeRect(barX, barY1, barW, barH);
   ctx.restore();
+  drawText(`Health: ${Math.floor(ecosystemHealth)}%`, rightX, line1Y + 10 * scale, 9, '#666', 'right');
 
-  // Health label + total creature count
-  drawText(`Health: ${Math.floor(ecosystemHealth)}%`, centerX, panelY + 58 * scale, 9, '#666', 'center');
-  drawText(`${creatures.length} creatures total`, centerX, panelY + 70 * scale, 8, '#999', 'center');
-  
+  // Biodiversity index
+  const bioIdx = getBiodiversityIndex();
+  const bioColor = bioIdx > 70 ? '#4caf50' : bioIdx > 40 ? '#ff9800' : '#f44336';
+  drawText(`Biodiversity: ${bioIdx}%`, rightX, line2Y, 10, bioColor, 'right');
+
+  // Time-lapse button
+  const tlBtnX = centerX;
+  const tlBtnY = line3Y;
+  const tlBtnW = 80 * scale;
+  const tlBtnH = 22 * scale;
+
+  ctx.save();
+  ctx.fillStyle = timeLapseActive ? 'rgba(76, 175, 80, 0.2)' : 'rgba(200, 200, 200, 0.3)';
+  ctx.fillRect(tlBtnX - tlBtnW / 2, tlBtnY - tlBtnH / 2, tlBtnW, tlBtnH);
+  ctx.strokeStyle = timeLapseActive ? '#4caf50' : '#999';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(tlBtnX - tlBtnW / 2, tlBtnY - tlBtnH / 2, tlBtnW, tlBtnH);
+  ctx.restore();
+  drawText(timeLapseActive ? '⏩ x5 FAST' : '⏩ Time-lapse', tlBtnX, tlBtnY, 9, timeLapseActive ? '#4caf50' : '#666', 'center');
+
+
   // Mute button
   drawMuteButton();
-  
+
   // Journal button
   drawJournalButton();
 }
@@ -1310,6 +1597,21 @@ function handleTap(x, y) {
     }
   }
   
+  // Check time-lapse button
+  const panelH = 95 * scale;
+  const panelY = H - panelH;
+  const tlBtnX = centerX;
+  const tlBtnY = panelY + 51 * scale;
+  const tlBtnW = 80 * scale;
+  const tlBtnH = 22 * scale;
+  if (x >= tlBtnX - tlBtnW / 2 && x <= tlBtnX + tlBtnW / 2 &&
+      y >= tlBtnY - tlBtnH / 2 && y <= tlBtnY + tlBtnH / 2) {
+    timeLapseActive = !timeLapseActive;
+    timeLapseSpeed = timeLapseActive ? 5 : 1;
+    addJournalEntry(timeLapseActive ? 'Time-lapse activated (5x)' : 'Time-lapse deactivated');
+    return;
+  }
+
   // Tap on plant to water
   for (const p of plants) {
     if (Math.hypot(x - p.x, y - p.y) < p.size) {
@@ -1405,6 +1707,8 @@ function saveState() {
     daysSurvived,
     journalEntries,
     simulatedUsage,
+    currentSeason,
+    seasonTimer,
     timestamp: Date.now()
   };
   
@@ -1436,7 +1740,9 @@ function loadState() {
     daysSurvived = state.daysSurvived || 0;
     journalEntries = state.journalEntries || [];
     simulatedUsage = state.simulatedUsage || simulatedUsage;
-    
+    currentSeason = state.currentSeason || 'spring';
+    seasonTimer = state.seasonTimer || 0;
+
     // Simulate time passed while away
     const timePassed = age / 1000; // seconds
     simulationTime += timePassed;
@@ -1491,7 +1797,7 @@ function update() {
   deltaTime = Math.min(0.1, now - lastTime);
   lastTime = now;
   gameTime = now;
-  simulationTime += deltaTime;
+  simulationTime += deltaTime * timeLapseSpeed;
   
   // Process input
   for (const ev of inputEvents) {
@@ -1501,12 +1807,19 @@ function update() {
   }
   inputEvents = [];
   
+  // Apply time-lapse speed to deltaTime for simulation
+  const simDelta = deltaTime * timeLapseSpeed;
+  const savedDelta = deltaTime;
+
   // Update simulation
   if (!showingJournal) {
+    deltaTime = simDelta;
     updateSimulatedUsage();
     updateCreatures();
     updatePlants();
     updateEcosystem();
+    updateSeason();
+    deltaTime = savedDelta;
     updateParticles();
     maybeChirp();
   }

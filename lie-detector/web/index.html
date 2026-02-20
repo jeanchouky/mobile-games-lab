@@ -110,6 +110,8 @@ let setupPlayerCount = 3;
 let setupNames = [];
 let setupCurrentInput = 0;
 let keyboardInput = '';
+let selectedCategories = new Set(['embarrassing','hypothetical','would-you-rather','personal','spicy','silly']);
+let usedQuestions = new Set();
 
 // Animations
 let titlePulse = 0;
@@ -149,25 +151,26 @@ let bgMusicNodes = [];
 
 function ensureAudio() {
   if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    masterGain = audioCtx.createGain();
-    masterGain.gain.value = audioMuted ? 0 : 1;
-    masterGain.connect(audioCtx.destination);
-    
-    musicGain = audioCtx.createGain();
-    musicGain.gain.value = 0.15;
-    musicGain.connect(masterGain);
-    
-    sfxGain = audioCtx.createGain();
-    sfxGain.gain.value = 1;
-    sfxGain.connect(masterGain);
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = audioMuted ? 0 : 1;
+      masterGain.connect(audioCtx.destination);
+
+      musicGain = audioCtx.createGain();
+      musicGain.gain.value = 0.15;
+      musicGain.connect(masterGain);
+
+      sfxGain = audioCtx.createGain();
+      sfxGain.gain.value = 1;
+      sfxGain.connect(masterGain);
+    } catch(e) {}
   }
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
 }
 
 function playTone(freq, duration, type = 'sine', vol = 0.15) {
-  if (audioMuted) return;
-  ensureAudio();
+  if (audioMuted || !audioCtx) return;
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
   osc.type = type;
@@ -495,7 +498,11 @@ const questionBank = [
 ];
 
 function getRandomQuestion() {
-  return questionBank[Math.floor(Math.random() * questionBank.length)];
+  const pool = questionBank.filter(q => selectedCategories.has(q.category) && !usedQuestions.has(q.text));
+  if (pool.length === 0) { usedQuestions.clear(); return getRandomQuestion(); }
+  const q = pool[Math.floor(Math.random() * pool.length)];
+  usedQuestions.add(q.text);
+  return q;
 }
 
 // ============================================================
@@ -547,12 +554,6 @@ function initHotSeat() {
 function initQuestion() {
   currentQuestion = getRandomQuestion();
   analysisTimer = 0;
-  
-  // Try to start camera
-  if (!cameraActive) {
-    requestCamera();
-  }
-  
   sfxDing();
 }
 
@@ -561,14 +562,22 @@ function initAnalysis() {
   scanPhase = 0;
   analysisTimer = 0;
   glitchTimer = 0;
-  
-  // Position camera feed
-  if (cameraActive) {
+
+  // Request camera on user gesture if not already active
+  if (!cameraActive && !cameraAvailable) {
+    requestCamera().then(ok => {
+      if (ok) {
+        const camW = W * 0.8;
+        const camH = camW * 0.75;
+        positionCamera(centerX, centerY - 80 * scale, camW, camH);
+      }
+    });
+  } else if (cameraActive) {
     const camW = W * 0.8;
     const camH = camW * 0.75;
     positionCamera(centerX, centerY - 80 * scale, camW, camH);
   }
-  
+
   sfxScan();
 }
 
@@ -703,8 +712,27 @@ function updateSetup() {
         }
       }
       
+      // Category toggles
+      const catY = centerY + 110 * scale;
+      const cats = ['embarrassing','hypothetical','would-you-rather','personal','spicy','silly'];
+      const catCols = 3;
+      cats.forEach((cat, i) => {
+        const col = i % catCols;
+        const row = Math.floor(i / catCols);
+        const cx = centerX - (catCols - 1) * 60 * scale + col * 120 * scale;
+        const cy = catY + row * 36 * scale;
+        if (hitTest(ev.x, ev.y, cx, cy, 110 * scale, 30 * scale)) {
+          if (selectedCategories.has(cat)) {
+            if (selectedCategories.size > 1) selectedCategories.delete(cat);
+          } else {
+            selectedCategories.add(cat);
+          }
+          sfxClick();
+        }
+      });
+
       // START button
-      const startY = centerY + 200 * scale;
+      const startY = centerY + 210 * scale;
       if (hitTest(ev.x, ev.y, centerX, startY, 200 * scale, 50 * scale)) {
         // Generate default names
         for (let i = 0; i < setupPlayerCount; i++) {
@@ -865,7 +893,7 @@ function updateConfession() {
   
   if (analysisTimer > 4) {
     // Check if game over
-    if (currentRound >= maxRounds * players.length) {
+    if (currentRound > maxRounds * players.length) {
       gameState = 'GAME_OVER';
       initGameOver();
     } else {
@@ -878,7 +906,7 @@ function updateConfession() {
   for (const ev of inputEvents) {
     if (ev.type === 'tap' && analysisTimer > 2) {
       sfxClick();
-      if (currentRound >= maxRounds * players.length) {
+      if (currentRound > maxRounds * players.length) {
         gameState = 'GAME_OVER';
         initGameOver();
       } else {
@@ -995,6 +1023,13 @@ function drawSplash() {
     strokeText(`🏆 Best: ${bestScore} pts`, centerX, centerY + 100 * scale, 14, '#ffd700', '#000', 2);
   }
 
+  // How to play
+  ctx.save();
+  ctx.globalAlpha = 0.7;
+  strokeText('A party game: answer questions while', centerX, centerY + 180 * scale, 11, '#fff', '#000', 2);
+  strokeText('the AI "scans" your face. Others vote!', centerX, centerY + 200 * scale, 11, '#fff', '#000', 2);
+  ctx.restore();
+
   // Credit
   ctx.save();
   ctx.globalAlpha = 0.5;
@@ -1034,8 +1069,25 @@ function drawSetup() {
     strokeText(name, centerX, nameY, 12, playerColors[i], '#000', 2);
   }
   
+  // Category toggles
+  const catY = centerY + 110 * scale;
+  strokeText('CATEGORIES:', centerX, catY - 20 * scale, 12, '#888', '#000', 2);
+  const cats = ['embarrassing','hypothetical','would-you-rather','personal','spicy','silly'];
+  const catLabels = {embarrassing:'Embarrassing',hypothetical:'Hypothetical','would-you-rather':'Would You Rather',personal:'Personal',spicy:'Spicy',silly:'Silly'};
+  const catIcons = {embarrassing:'😳',hypothetical:'🤔','would-you-rather':'⚖️',personal:'💭',spicy:'🌶️',silly:'🤪'};
+  const catCols = 3;
+  cats.forEach((cat, i) => {
+    const col = i % catCols;
+    const row = Math.floor(i / catCols);
+    const cx = centerX - (catCols - 1) * 60 * scale + col * 120 * scale;
+    const cy = catY + row * 36 * scale;
+    const on = selectedCategories.has(cat);
+    drawBox(cx, cy, 110 * scale, 30 * scale, on ? '#6633cc' : '#222', on ? '#9933ff' : '#444', 2);
+    strokeText(`${catIcons[cat]} ${catLabels[cat]}`, cx, cy, 9, on ? '#fff' : '#666', '#000', 1);
+  });
+
   // START button
-  const startY = centerY + 200 * scale;
+  const startY = centerY + 210 * scale;
   drawButton(centerX, startY, 200 * scale, 50 * scale, 'START GAME', '#00ff00', '#000', true);
 }
 

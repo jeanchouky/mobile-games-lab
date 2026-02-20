@@ -17,26 +17,32 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-user-select:none;user-select:none;touch-action:manipulation}
 body{background:#0a0a1e;overflow-y:auto;overflow-x:hidden;font-family:-apple-system,system-ui,sans-serif;color:#fff}
-#space{width:100%;height:55vh;position:relative;overflow:hidden;background:radial-gradient(ellipse at center,#0d1b2a,#0a0a1e)}
+#space{width:100%;height:50vh;position:relative;overflow:hidden;background:radial-gradient(ellipse at center,#0d1b2a,#0a0a1e)}
 canvas{display:block;width:100%;height:100%}
-#resources{display:flex;justify-content:center;gap:16px;padding:12px;background:rgba(0,0,0,0.5);backdrop-filter:blur(8px);flex-wrap:wrap}
-.res{display:flex;align-items:center;gap:4px;font-size:14px;font-weight:700}
-.res .icon{font-size:18px}
+#resources{display:flex;justify-content:center;gap:14px;padding:10px;background:rgba(0,0,0,0.5);backdrop-filter:blur(8px);flex-wrap:wrap}
+.res{display:flex;align-items:center;gap:4px;font-size:13px;font-weight:700}
+.res .icon{font-size:16px}
 .res .val{color:#ffd93d}
-#shop{padding:12px;max-height:45vh;overflow-y:auto}
-#shop h2{text-align:center;font-size:16px;margin-bottom:10px;color:#888}
+#tabs{display:flex;background:rgba(0,0,0,0.3);border-bottom:1px solid rgba(255,255,255,0.05)}
+#tabs button{flex:1;padding:10px;background:none;border:none;color:#666;font-size:12px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent;text-transform:uppercase;letter-spacing:0.5px}
+#tabs button.active{color:#ffd93d;border-bottom-color:#ffd93d}
+.tab-panel{display:none;padding:12px;max-height:50vh;overflow-y:auto}
+.tab-panel.active{display:block}
+#shop h2{text-align:center;font-size:14px;margin-bottom:10px;color:#888}
 .upgrade{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px;margin-bottom:8px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:all .15s}
 .upgrade:active{transform:scale(0.98);background:rgba(255,255,255,0.1)}
 .upgrade.locked{opacity:0.4}
 .upgrade.affordable{border-color:#ffd93d;box-shadow:0 0 12px rgba(255,217,61,0.3);animation:affordPulse 1.5s ease-in-out infinite}
 @keyframes affordPulse{0%,100%{box-shadow:0 0 8px rgba(255,217,61,0.2)}50%{box-shadow:0 0 18px rgba(255,217,61,0.5)}}
+.upgrade.affordable .u-cost{animation:pulse-cost 1.5s infinite}
+@keyframes pulse-cost{0%,100%{opacity:1}50%{opacity:0.6}}
 .upgrade .u-icon{font-size:28px;width:40px;text-align:center}
 .upgrade .u-info{flex:1}
 .upgrade .u-name{font-weight:700;font-size:14px}
 .upgrade .u-desc{font-size:11px;color:#888}
 .upgrade .u-cost{font-size:14px;font-weight:700;color:#ffd93d;white-space:nowrap}
 .upgrade .u-level{font-size:10px;color:#4d96ff}
-#prestige-btn{display:block;margin:12px auto;padding:12px 24px;background:linear-gradient(135deg,#a55eea,#6c5ce7);border:none;color:#fff;border-radius:50px;font-size:16px;font-weight:700;cursor:pointer}
+#prestige-btn{display:block;margin:12px auto;padding:12px 24px;background:linear-gradient(135deg,#a55eea,#6c5ce7);border:none;color:#fff;border-radius:50px;font-size:15px;font-weight:700;cursor:pointer}
 #prestige-btn:active{transform:scale(0.95)}
 #prestige-info{text-align:center;font-size:12px;color:#888;margin-bottom:8px}
 #achievements{padding:8px 0}
@@ -50,6 +56,32 @@ canvas{display:block;width:100%;height:100%}
 .mineral-item{display:inline-block;background:rgba(255,255,255,0.08);padding:3px 8px;border-radius:6px;margin:2px;font-size:12px}
 .mineral-badge{font-size:11px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 8px;display:inline-flex;align-items:center;gap:3px}
 .mineral-badge .cnt{color:#ffd93d;font-weight:700}
+
+/* Achievement toast */
+.achievement-toast{position:fixed;top:60px;left:50%;transform:translateX(-50%);background:rgba(20,20,40,0.95);border:1px solid #ffd93d;border-radius:12px;padding:12px 20px;z-index:30;display:flex;align-items:center;gap:10px;animation:toastIn 0.4s ease-out,toastOut 0.4s ease-in 2.6s forwards;backdrop-filter:blur(8px)}
+@keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(-20px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+@keyframes toastOut{to{opacity:0;transform:translateX(-50%) translateY(-20px)}}
+.achievement-toast .a-icon{font-size:28px}
+.achievement-toast .a-info{text-align:left}
+.achievement-toast .a-name{font-weight:700;font-size:14px;color:#ffd93d}
+.achievement-toast .a-desc{font-size:11px;color:#888}
+
+/* Stats panel */
+.stat-row{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.05)}
+.stat-row .s-label{color:#888;font-size:13px}
+.stat-row .s-val{font-weight:700;color:#ffd93d;font-size:13px}
+.ach-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-top:12px}
+.ach-item{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px;text-align:center;font-size:11px}
+.ach-item.unlocked{border-color:rgba(255,217,61,0.3);background:rgba(255,217,61,0.05)}
+.ach-item .a-emoji{font-size:24px;display:block;margin-bottom:4px}
+.ach-item .a-title{font-weight:700;font-size:12px}
+.ach-item .a-desc-small{color:#666;font-size:10px}
+
+/* Welcome back */
+#welcome-back{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(20,20,40,0.97);border:1px solid rgba(255,217,61,0.3);border-radius:20px;padding:30px;z-index:30;text-align:center;backdrop-filter:blur(10px);min-width:260px}
+#welcome-back h2{margin-bottom:8px;font-size:20px}
+#welcome-back .wb-amount{font-size:36px;font-weight:900;color:#ffd93d;margin:8px 0}
+#welcome-back button{background:linear-gradient(135deg,#ffd93d,#e17055);border:none;color:#1a1a2e;padding:12px 30px;border-radius:50px;font-size:15px;font-weight:700;cursor:pointer;margin-top:12px}
 </style>
 </head>
 <body>
@@ -60,12 +92,17 @@ canvas{display:block;width:100%;height:100%}
   <button onclick="endRun()" style="padding:4px 12px;background:#ff6b6b;border:none;color:#fff;border-radius:6px;font-size:12px;cursor:pointer">Return to Shop</button>
 </div>
 <div id="resources">
-  <div class="res"><span class="icon">💎</span> <span class="val" id="ore">0</span></div>
-  <div class="res"><span class="icon">⚡</span> <span class="val" id="ops">/s: 0</span></div>
-  <div class="res"><span class="icon">⭐</span> <span class="val" id="prestige-pts">0</span></div>
+  <div class="res"><span class="icon">&#128142;</span> <span class="val" id="ore">0</span></div>
+  <div class="res"><span class="icon">&#9889;</span> <span class="val" id="ops">/s: 0</span></div>
+  <div class="res"><span class="icon">&#11088;</span> <span class="val" id="prestige-pts">0</span></div>
 </div>
 <div id="run-summary" style="display:none;background:rgba(0,0,0,0.85);padding:16px;margin:8px;border-radius:12px;border:1px solid #ffd93d;text-align:center"></div>
-<div id="shop">
+<div id="tabs">
+  <button class="active" onclick="switchTab('shop')">Upgrades</button>
+  <button onclick="switchTab('stats')">Stats</button>
+  <button onclick="switchTab('achievements')">Trophies</button>
+</div>
+<div class="tab-panel active" id="shop">
   <div style="text-align:center;margin-bottom:10px">
     <button onclick="startRun()" style="padding:10px 28px;background:linear-gradient(135deg,#4d96ff,#0066cc);border:none;color:#fff;border-radius:50px;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 0 15px rgba(77,150,255,0.4)">🚀 Start Mining Run</button>
   </div>
@@ -74,33 +111,85 @@ canvas{display:block;width:100%;height:100%}
   <h2>🚀 Ship Upgrades <span style="font-size:11px;color:#888">(use minerals)</span></h2>
   <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;padding:0 4px" id="mineral-display"></div>
   <div id="ship-upgrade-list"></div>
-  <div id="achievements"></div>
   <div id="prestige-info">Prestige resets progress but gives ⭐ multiplier</div>
   <button id="prestige-btn" onclick="prestige()">🌟 Prestige (need 1M ore)</button>
+</div>
+<div class="tab-panel" id="stats">
+  <h2 style="text-align:center;font-size:14px;color:#888;margin-bottom:12px">Statistics</h2>
+  <div id="stats-content"></div>
+</div>
+<div class="tab-panel" id="achievements">
+  <h2 style="text-align:center;font-size:14px;color:#888;margin-bottom:8px">Achievements</h2>
+  <div class="ach-grid" id="ach-grid"></div>
+</div>
+<div id="welcome-back" class="hidden">
+  <h2>Welcome Back!</h2>
+  <p style="color:#888;font-size:13px">While you were away, your miners earned:</p>
+  <div class="wb-amount" id="wb-amount">0</div>
+  <button onclick="collectOffline()">Collect!</button>
 </div>
 
 <script>
 const C=document.getElementById('c'),X=C.getContext('2d');
 let W,H,dpr;
-let actx=null;
-function getAudioCtx(){if(!actx)actx=new(window.AudioContext||window.webkitAudioContext)();return actx}
-function snd(f,d,t='sine',v=0.06){try{const ctx=getAudioCtx();ctx.resume();const o=ctx.createOscillator(),g=ctx.createGain();o.type=t;o.frequency.value=f;g.gain.setValueAtTime(v,ctx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+d);o.connect(g);g.connect(ctx.destination);o.start();o.stop(ctx.currentTime+d)}catch(e){}}
 
-let ore=0,totalOre=0,prestigePoints=0,prestigeMulti=1;
+// AudioContext pattern - lazy init
+let audioCtx;
+function ensureAudio(){
+  if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  if(audioCtx.state==='suspended')audioCtx.resume();
+  return audioCtx;
+}
+function snd(f,d,t='sine',v=0.06){
+  try{
+    let a=ensureAudio();
+    const o=a.createOscillator(),g=a.createGain();
+    o.type=t;o.frequency.value=f;g.gain.setValueAtTime(v,a.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,a.currentTime+d);
+    o.connect(g);g.connect(a.destination);o.start();o.stop(a.currentTime+d);
+  }catch(e){}
+}
+
+function saveData(key,data){try{localStorage.setItem(key,JSON.stringify(data))}catch(e){}}
+function loadData(key){try{return JSON.parse(localStorage.getItem(key))}catch(e){return null}}
+
+let ore=0,totalOre=0,totalClicks=0,prestigePoints=0,prestigeMulti=1;
 let tapPower=1,autoRate=0;
 let particles=[],floatingTexts=[],asteroids=[];
 let stars=[];
+let gameStartTime=Date.now();
+let offlineEarnings=0;
+
+function formatNum(n){
+  if(n>=1e15)return(n/1e15).toFixed(1)+'Q';
+  if(n>=1e12)return(n/1e12).toFixed(1)+'T';
+  if(n>=1e9)return(n/1e9).toFixed(1)+'B';
+  if(n>=1e6)return(n/1e6).toFixed(1)+'M';
+  if(n>=1e3)return(n/1e3).toFixed(1)+'K';
+  return Math.floor(n).toString();
+}
 
 const UPGRADES=[
-  {id:'drill',name:'Better Drill',desc:'2x tap power',icon:'⛏️',baseCost:10,costMult:1.8,level:0,maxLevel:50,effect:()=>{tapPower=Math.pow(2,upgrades[0].level)*(1+upgrades[2].level*0.25)}},
-  {id:'auto',name:'Auto-Miner',desc:'+1 ore/sec per level',icon:'🤖',baseCost:50,costMult:2,level:0,maxLevel:30,effect:()=>{autoRate=upgrades[1].level*(1+upgrades[3].level*0.5)}},
-  {id:'cargo',name:'Cargo Bay',desc:'+25% tap ore per level',icon:'📦',baseCost:100,costMult:2.2,level:0,maxLevel:20,effect:()=>{tapPower=Math.pow(2,upgrades[0].level)*(1+upgrades[2].level*0.25)}},
-  {id:'speed',name:'Mining Speed',desc:'Auto-miners 50% faster',icon:'⚡',baseCost:500,costMult:2.5,level:0,maxLevel:15,effect:()=>{autoRate=upgrades[1].level*(1+upgrades[3].level*0.5)}},
-  {id:'luck',name:'Lucky Strike',desc:'10% chance of 10x ore',icon:'🍀',baseCost:200,costMult:2,level:0,maxLevel:10,effect:()=>{}},
-  {id:'magnet',name:'Ore Magnet',desc:'Auto-collect nearby ore',icon:'🧲',baseCost:1000,costMult:3,level:0,maxLevel:5,effect:()=>{}},
-  {id:'asteroid',name:'New Asteroids',desc:'Unlock richer asteroid types',icon:'☄️',baseCost:5000,costMult:4,level:0,maxLevel:4,effect:()=>{generateAsteroids()}},
+  {id:'drill',name:'Better Drill',desc:'2x tap power',icon:'⛏️',baseCost:10,costMult:1.8,level:0,maxLevel:50,
+    effect(){tapPower=Math.pow(2,upgrades[0].level)*(1+upgrades[2].level*0.25)}},
+  {id:'auto',name:'Auto-Miner',desc:'+1 ore/sec per level',icon:'🤖',baseCost:50,costMult:2,level:0,maxLevel:30,
+    effect(){recalcAuto()}},
+  {id:'cargo',name:'Cargo Bay',desc:'+25% tap ore per level',icon:'📦',baseCost:100,costMult:2.2,level:0,maxLevel:20,
+    effect(){tapPower=Math.pow(2,upgrades[0].level)*(1+upgrades[2].level*0.25)}},
+  {id:'speed',name:'Mining Speed',desc:'Auto-miners 50% faster each lvl',icon:'⚡',baseCost:500,costMult:2.5,level:0,maxLevel:15,
+    effect(){recalcAuto()}},
+  {id:'luck',name:'Lucky Strike',desc:'10% chance per lvl of 10x ore',icon:'🍀',baseCost:200,costMult:2,level:0,maxLevel:10,
+    effect(){}},
+  {id:'magnet',name:'Ore Magnet',desc:'Auto-collect nearby ore',icon:'🧲',baseCost:1000,costMult:3,level:0,maxLevel:5,
+    effect(){}},
+  {id:'asteroid',name:'New Asteroids',desc:'Unlock richer asteroid types',icon:'☄️',baseCost:5000,costMult:4,level:0,maxLevel:6,
+    effect(){generateAsteroids()}},
 ];
 let upgrades=UPGRADES;
+
+function recalcAuto(){
+  autoRate=upgrades[1].level*(1+upgrades[3].level*0.5);
+}
 
 const ASTEROID_TYPES=[
   {name:'Stone',color:'#6d4c41',value:1,size:1,mineral:'stone'},
@@ -110,6 +199,8 @@ const ASTEROID_TYPES=[
   {name:'Crystal',color:'#a55eea',value:25,size:0.85,mineral:'crystal'},
   {name:'Radioactive',color:'#44ff44',value:50,size:0.95,mineral:'radioactive',dangerous:true},
   {name:'Neutronium',color:'#00f5d4',value:100,size:1.2,mineral:'neutronium'},
+  {name:'Dark Matter',color:'#1a1a3e',value:250,size:0.75,glow:'#6c5ce7'},
+  {name:'Plasma Core',color:'#ff6b6b',value:500,size:1.3,glow:'#e94560'}
 ];
 
 // Ship stats
@@ -150,14 +241,14 @@ function generateAsteroids(){
   asteroids=[];
   let scannerBonus=SHIP_UPGRADES[3].level;
   let maxType=Math.min(upgrades[6].level+1+scannerBonus,ASTEROID_TYPES.length);
-  let count=5+Math.min(3,Math.floor(scannerBonus/2));
+  let count=Math.min(8,maxType+2)+Math.min(3,Math.floor(scannerBonus/2));
   for(let i=0;i<count;i++){
     let typeIdx=Math.min(Math.floor(Math.random()*maxType),maxType-1);
     let type=ASTEROID_TYPES[typeIdx];
-    let r=30+type.size*15;
+    let r=25+type.size*15;
     asteroids.push({
-      x:W*0.15+Math.random()*W*0.7,
-      y:H*0.15+Math.random()*H*0.6,
+      x:W*0.1+Math.random()*W*0.8,
+      y:H*0.1+Math.random()*H*0.7,
       r,type,rot:Math.random()*Math.PI*2,
       rotSpeed:(Math.random()-0.5)*0.01,
       bobPhase:Math.random()*Math.PI*2,
@@ -168,24 +259,15 @@ function generateAsteroids(){
 
 function getCost(u){return Math.floor(u.baseCost*Math.pow(u.costMult,u.level))}
 
-function formatNum(n){
-  if(n>=1e15)return(n/1e15).toFixed(1)+'Q';
-  if(n>=1e12)return(n/1e12).toFixed(1)+'T';
-  if(n>=1e9)return(n/1e9).toFixed(1)+'B';
-  if(n>=1e6)return(n/1e6).toFixed(1)+'M';
-  if(n>=1e3)return(n/1e3).toFixed(1)+'K';
-  return Math.floor(n).toString();
-}
-
 function renderUpgrades(){
   let list=document.getElementById('upgrade-list');
   list.innerHTML='';
   upgrades.forEach((u,i)=>{
     let cost=getCost(u);
     let locked=u.level>=u.maxLevel;
-    let canBuy=ore>=cost&&!locked;
+    let canAfford=ore>=cost&&!locked;
     let div=document.createElement('div');
-    div.className='upgrade'+(locked?' locked':canBuy?' affordable':'');
+    div.className='upgrade'+(locked?' locked':'')+(canAfford?' affordable':'');
     div.innerHTML=`
       <div class="u-icon">${u.icon}</div>
       <div class="u-info">
@@ -193,7 +275,7 @@ function renderUpgrades(){
         <div class="u-desc">${u.desc}</div>
         <div class="u-level">Lv ${u.level}/${u.maxLevel}</div>
       </div>
-      <div class="u-cost">${locked?'MAX':'💎 '+formatNum(cost)}</div>
+      <div class="u-cost">${locked?'MAX':'&#128142; '+formatNum(cost)}</div>
     `;
     if(!locked)div.onclick=()=>buyUpgrade(i);
     list.appendChild(div);
@@ -201,6 +283,7 @@ function renderUpgrades(){
 }
 
 function buyUpgrade(i){
+  ensureAudio();
   let u=upgrades[i];
   let cost=getCost(u);
   if(ore<cost||u.level>=u.maxLevel)return;
@@ -212,6 +295,8 @@ function buyUpgrade(i){
 }
 
 function tap(x,y){
+  ensureAudio();
+  totalClicks++;
   let hit=asteroids.find(a=>Math.hypot(x-a.x,y-a.y)<a.r+10);
   let cargoBonus=1+SHIP_UPGRADES[2].level*0.2;
   let base=tapPower*prestigeMulti*cargoBonus;
@@ -245,7 +330,7 @@ function tap(x,y){
       let maxType=Math.min(upgrades[6].level+1+scannerBonus,ASTEROID_TYPES.length);
       let typeIdx=Math.min(Math.floor(Math.random()*maxType),maxType-1);
       let type=ASTEROID_TYPES[typeIdx];
-      let r=30+type.size*15;
+      let r=25+type.size*15;
       asteroids[idx]={x:W*0.15+Math.random()*W*0.7,y:H*0.15+Math.random()*H*0.6,r,type,rot:Math.random()*Math.PI*2,rotSpeed:(Math.random()-0.5)*0.01,bobPhase:Math.random()*Math.PI*2,shake:0,hp:3+Math.floor(type.value/10)};
     }
   }
@@ -253,7 +338,12 @@ function tap(x,y){
   // Visual feedback
   if(hit)hit.shake=5;
   let color=lucky?'#ff6b6b':hit?hit.type.color:'#ffd93d';
-  floatingTexts.push({x,y,text:'+'+(lucky?'🍀':'')+formatNum(amount),life:1,color});
+
+  // Cargo Bay effect: bigger text, longer duration
+  let cargoLvl=upgrades[2].level;
+  let fontSize=16+cargoLvl*2;
+  let lifespan=1+cargoLvl*0.15;
+  floatingTexts.push({x,y,text:'+'+(lucky?'🍀':'')+formatNum(amount),life:lifespan,maxLife:lifespan,color,size:fontSize});
 
   // Particles
   for(let i=0;i<(lucky?12:5);i++){
@@ -340,6 +430,7 @@ C.addEventListener('click',e=>{
 
 function prestige(){
   if(totalOre<1e6)return;
+  ensureAudio();
   let pts=Math.floor(Math.log10(totalOre)-5);
   prestigePoints+=pts;
   prestigeMulti=1+prestigePoints*0.5;
@@ -351,10 +442,87 @@ function prestige(){
   renderUpgrades();save();
 }
 
+// Tabs
+function switchTab(tab){
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  document.querySelector(`#tabs button[onclick="switchTab('${tab}')"]`).classList.add('active');
+  document.getElementById(tab).classList.add('active');
+  if(tab==='stats')renderStats();
+  if(tab==='achievements')renderAchievements();
+}
+
+function renderStats(){
+  let elapsed=Date.now()-gameStartTime;
+  let hrs=Math.floor(elapsed/3600000);
+  let mins=Math.floor((elapsed%3600000)/60000);
+  document.getElementById('stats-content').innerHTML=`
+    <div class="stat-row"><span class="s-label">Total Ore Mined</span><span class="s-val">${formatNum(totalOre)}</span></div>
+    <div class="stat-row"><span class="s-label">Current Ore</span><span class="s-val">${formatNum(ore)}</span></div>
+    <div class="stat-row"><span class="s-label">Total Clicks</span><span class="s-val">${formatNum(totalClicks)}</span></div>
+    <div class="stat-row"><span class="s-label">Tap Power</span><span class="s-val">${formatNum(tapPower)}</span></div>
+    <div class="stat-row"><span class="s-label">Auto Rate</span><span class="s-val">${formatNum(autoRate)}/s</span></div>
+    <div class="stat-row"><span class="s-label">Prestige Points</span><span class="s-val">${prestigePoints}</span></div>
+    <div class="stat-row"><span class="s-label">Prestige Multi</span><span class="s-val">${prestigeMulti.toFixed(1)}x</span></div>
+    <div class="stat-row"><span class="s-label">Time Played</span><span class="s-val">${hrs}h ${mins}m</span></div>
+    <div class="stat-row"><span class="s-label">Asteroid Types</span><span class="s-val">${Math.min(upgrades[6].level+1,ASTEROID_TYPES.length)}</span></div>
+  `;
+}
+
+// Achievements
+const ACHIEVEMENTS=[
+  {id:'first_tap',name:'First Strike',desc:'Mine your first ore',icon:'&#9935;&#65039;',check:()=>totalOre>=1},
+  {id:'hundred',name:'Getting Started',desc:'Mine 100 ore',icon:'&#128142;',check:()=>totalOre>=100},
+  {id:'thousand',name:'Ore Hoarder',desc:'Mine 1,000 ore',icon:'&#128230;',check:()=>totalOre>=1000},
+  {id:'tenk',name:'Stockpile',desc:'Mine 10,000 ore',icon:'&#128176;',check:()=>totalOre>=10000},
+  {id:'auto',name:'Automation',desc:'Buy first auto-miner',icon:'&#129302;',check:()=>upgrades[1].level>=1},
+  {id:'speed5',name:'Speed Demon',desc:'Mining Speed level 5',icon:'&#9889;',check:()=>upgrades[3].level>=5},
+  {id:'lucky',name:'Feeling Lucky',desc:'Buy Lucky Strike',icon:'&#127808;',check:()=>upgrades[4].level>=1},
+  {id:'clicks100',name:'Clicker',desc:'Tap 100 times',icon:'&#128070;',check:()=>totalClicks>=100},
+  {id:'clicks1k',name:'Tap Master',desc:'Tap 1,000 times',icon:'&#128170;',check:()=>totalClicks>=1000},
+  {id:'prestige1',name:'Rebirth',desc:'Prestige once',icon:'&#127775;',check:()=>prestigePoints>=1},
+  {id:'million',name:'Millionaire',desc:'Mine 1M ore total',icon:'&#128176;',check:()=>totalOre>=1e6},
+  {id:'allrocks',name:'Geologist',desc:'Unlock all asteroid types',icon:'&#129704;',check:()=>upgrades[6].level>=6},
+  {id:'drill10',name:'Deep Driller',desc:'Drill level 10',icon:'&#128293;',check:()=>upgrades[0].level>=10},
+  {id:'billion',name:'Billionaire',desc:'Mine 1B ore total',icon:'&#128081;',check:()=>totalOre>=1e9}
+];
+let unlockedAchievements=new Set(loadData('astminer_ach')||[]);
+
+function checkAchievements(){
+  ACHIEVEMENTS.forEach(a=>{
+    if(!unlockedAchievements.has(a.id)&&a.check()){
+      unlockedAchievements.add(a.id);
+      saveData('astminer_ach',[...unlockedAchievements]);
+      showAchievementToast(a);
+      snd(800,0.2,'sine',0.1);snd(1000,0.15,'triangle',0.08);
+    }
+  });
+}
+
+function showAchievementToast(a){
+  let toast=document.createElement('div');
+  toast.className='achievement-toast';
+  toast.innerHTML=`<div class="a-icon">${a.icon}</div><div class="a-info"><div class="a-name">${a.name}</div><div class="a-desc">${a.desc}</div></div>`;
+  document.body.appendChild(toast);
+  setTimeout(()=>toast.remove(),3000);
+}
+
+function renderAchievements(){
+  let grid=document.getElementById('ach-grid');
+  grid.innerHTML='';
+  ACHIEVEMENTS.forEach(a=>{
+    let unlocked=unlockedAchievements.has(a.id);
+    let div=document.createElement('div');
+    div.className='ach-item'+(unlocked?' unlocked':'');
+    div.innerHTML=`<span class="a-emoji">${unlocked?a.icon:'&#128274;'}</span><div class="a-title">${unlocked?a.name:'???'}</div><div class="a-desc-small">${a.desc}</div>`;
+    grid.appendChild(div);
+  });
+}
+
 let lastT=0;
 function loop(t){
   let dt=Math.min((t-lastT)/1000,0.05);lastT=t;
-  
+
   // Auto mine with engine bonus
   if(autoRate>0){
     let engineBonus=1+SHIP_UPGRADES[1].level*0.3;
@@ -368,7 +536,8 @@ function loop(t){
   // Update HUD
   document.getElementById('ore').textContent=formatNum(ore);
   let engineBonus=1+SHIP_UPGRADES[1].level*0.3;
-  document.getElementById('ops').textContent='/s: '+formatNum(autoRate*prestigeMulti*engineBonus*(asteroids.length?asteroids.reduce((a,b)=>a.type.value>b.type.value?a:b).type.value:1));
+  let bestVal=asteroids.length?asteroids.reduce((a,b)=>a.type.value>b.type.value?a:b).type.value:1;
+  document.getElementById('ops').textContent='/s: '+formatNum(autoRate*prestigeMulti*engineBonus*bestVal);
   document.getElementById('prestige-pts').textContent=prestigePoints;
 
   // Run HUD
@@ -378,27 +547,28 @@ function loop(t){
     document.getElementById('hull-val').style.color=shipHull>shipMaxHull*0.5?'#44ff88':shipHull>shipMaxHull*0.2?'#ffd93d':'#ff4444';
     document.getElementById('run-ore').textContent=formatNum(runEarnings);
   }
-  
+
+
   // Render
   X.clearRect(0,0,W,H);
-  
+
   // Stars
   stars.forEach(s=>{
     s.b+=dt*0.5;
     X.fillStyle=`rgba(255,255,255,${0.3+Math.sin(s.b)*0.3})`;
     X.fillRect(s.x,s.y,s.s,s.s);
   });
-  
+
   // Asteroids
   asteroids.forEach(a=>{
     a.rot+=a.rotSpeed;
     let bob=Math.sin(Date.now()*0.001+a.bobPhase)*3;
     let sx=a.shake>0?(Math.random()-0.5)*a.shake:0;
     a.shake*=0.85;
-    
+
     X.save();X.translate(a.x+sx,a.y+bob);X.rotate(a.rot);
     // Glow
-    X.shadowColor=a.type.color;X.shadowBlur=20;
+    X.shadowColor=a.type.glow||a.type.color;X.shadowBlur=20;
     X.fillStyle=a.type.color;
     // Irregular shape
     X.beginPath();
@@ -423,12 +593,12 @@ function loop(t){
       X.beginPath();X.arc(a.r*0.15,-a.r*0.15,a.r*0.5,0,Math.PI*2);X.fill();
     }
     X.restore();
-    
-    // Label
+
+    // Label + value
     X.fillStyle='rgba(255,255,255,0.6)';X.font='10px sans-serif';X.textAlign='center';
-    X.fillText(a.type.name,a.x,a.y+a.r+14+bob);
+    X.fillText(a.type.name+' ('+a.type.value+'x)',a.x,a.y+a.r+14+bob);
   });
-  
+
   // Particles
   for(let i=particles.length-1;i>=0;i--){
     let p=particles[i];
@@ -438,78 +608,59 @@ function loop(t){
     X.beginPath();X.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);X.fill();
   }
   X.globalAlpha=1;
-  
+
   // Floating texts
   for(let i=floatingTexts.length-1;i>=0;i--){
     let f=floatingTexts[i];
     f.y-=40*dt;f.life-=dt*1.5;
     if(f.life<=0){floatingTexts.splice(i,1);continue}
-    X.globalAlpha=f.life;X.fillStyle=f.color;X.font='bold 16px sans-serif';X.textAlign='center';
+    let alpha=Math.min(1,f.life/(f.maxLife*0.3));
+    X.globalAlpha=alpha;X.fillStyle=f.color;
+    X.font='bold '+Math.round(f.size)+'px sans-serif';X.textAlign='center';
     X.fillText(f.text,f.x,f.y);
   }
   X.globalAlpha=1;
-  
+
   requestAnimationFrame(loop);
 }
 
 function save(){
-  localStorage.setItem('astminer',JSON.stringify({
-    ore,totalOre,prestigePoints,prestigeMulti,
-    levels:upgrades.map(u=>u.level)
-  }));
+  saveData('astminer',{
+    ore,totalOre,totalClicks,prestigePoints,prestigeMulti,
+    levels:upgrades.map(u=>u.level),
+    lastSave:Date.now(),
+    gameStartTime
+  });
   saveShipUpgrades();saveMinerals();
 }
 
 function load(){
-  let d=JSON.parse(localStorage.getItem('astminer')||'null');
+  let d=loadData('astminer');
   if(!d)return;
-  ore=d.ore||0;totalOre=d.totalOre||0;prestigePoints=d.prestigePoints||0;
+  ore=d.ore||0;totalOre=d.totalOre||0;totalClicks=d.totalClicks||0;
+  prestigePoints=d.prestigePoints||0;
   prestigeMulti=d.prestigeMulti||1;
+  gameStartTime=d.gameStartTime||Date.now();
   if(d.levels)d.levels.forEach((l,i)=>{if(upgrades[i]){upgrades[i].level=l;upgrades[i].effect()}});
-}
 
-// Achievements
-const ACHIEVEMENTS=[
-  {id:'first_tap',name:'First Strike',desc:'Mine your first ore',icon:'⛏️',check:()=>totalOre>=1},
-  {id:'hundred',name:'Getting Started',desc:'Mine 100 ore',icon:'💎',check:()=>totalOre>=100},
-  {id:'thousand',name:'Ore Hoarder',desc:'Mine 1,000 ore',icon:'📦',check:()=>totalOre>=1000},
-  {id:'auto',name:'Automation',desc:'Buy first auto-miner',icon:'🤖',check:()=>upgrades[1].level>=1},
-  {id:'lucky',name:'Feeling Lucky',desc:'Buy Lucky Strike',icon:'🍀',check:()=>upgrades[4].level>=1},
-  {id:'prestige1',name:'Rebirth',desc:'Prestige for the first time',icon:'🌟',check:()=>prestigePoints>=1},
-  {id:'million',name:'Millionaire',desc:'Mine 1M ore total',icon:'💰',check:()=>totalOre>=1e6},
-];
-let unlockedAchievements=new Set(JSON.parse(localStorage.getItem('astminer_ach')||'[]'));
-
-function checkAchievements(){
-  let newUnlock=false;
-  ACHIEVEMENTS.forEach(a=>{
-    if(!unlockedAchievements.has(a.id)&&a.check()){
-      unlockedAchievements.add(a.id);
-      newUnlock=true;
-      // Toast
-      const toast=document.createElement('div');
-      toast.className='tap-text';
-      toast.style.cssText='left:50%;top:20%;transform:translateX(-50%);font-size:14px;color:#ffd93d;white-space:nowrap';
-      toast.textContent=`🏆 ${a.name}!`;
-      document.getElementById('space').appendChild(toast);
-      setTimeout(()=>toast.remove(),1500);
-      snd(800,0.2,'sine',0.1);snd(1000,0.15,'triangle',0.08);
+  // Offline progress
+  if(d.lastSave&&autoRate>0){
+    let elapsed=(Date.now()-d.lastSave)/1000; // seconds
+    let maxOffline=3600*8; // cap at 8 hours
+    elapsed=Math.min(elapsed,maxOffline);
+    if(elapsed>30){ // only show for >30 seconds
+      let bestVal=1;
+      let maxType=Math.min(upgrades[6].level+1,ASTEROID_TYPES.length);
+      for(let i=0;i<maxType;i++){
+        if(ASTEROID_TYPES[i].value>bestVal)bestVal=ASTEROID_TYPES[i].value;
+      }
+      offlineEarnings=Math.floor(autoRate*prestigeMulti*bestVal*elapsed*0.5); // 50% offline efficiency
+      if(offlineEarnings>0){
+        document.getElementById('wb-amount').textContent=formatNum(offlineEarnings);
+        document.getElementById('welcome-back').classList.remove('hidden');
+      }
     }
-  });
-  if(newUnlock)localStorage.setItem('astminer_ach',JSON.stringify([...unlockedAchievements]));
-}
-
-function renderAchievements(){
-  const el=document.getElementById('achievements');
-  el.innerHTML='<h3>🏆 Achievements</h3>';
-  ACHIEVEMENTS.forEach(a=>{
-    const unlocked=unlockedAchievements.has(a.id);
-    const div=document.createElement('div');
-    div.className='ach'+(unlocked?'':' locked');
-    div.innerHTML=`<span class="ach-icon">${a.icon}</span><span class="ach-name">${unlocked?a.name:'???'}</span>`;
-    div.title=unlocked?a.desc:'Keep playing to unlock';
-    el.appendChild(div);
-  });
+  }
 }
 
 function renderMinerals(){
@@ -524,7 +675,19 @@ function renderMinerals(){
   }
 }
 
-setInterval(()=>{renderUpgrades();renderShipUpgrades();renderMinerals();checkAchievements();renderAchievements();save()},2000);
+function collectOffline(){
+  ore+=offlineEarnings;totalOre+=offlineEarnings;
+  offlineEarnings=0;
+  document.getElementById('welcome-back').classList.add('hidden');
+  ensureAudio();
+  snd(500,0.2);snd(700,0.15,'triangle');
+  save();
+}
+
+// Auto-save every 30 seconds
+setInterval(()=>{save()},30000);
+// Check achievements & re-render upgrades periodically
+setInterval(()=>{renderUpgrades();renderShipUpgrades();renderMinerals();checkAchievements();renderAchievements()},2000);
 
 window.addEventListener('resize',resize);
 load();resize();renderUpgrades();renderShipUpgrades();renderMinerals();renderAchievements();

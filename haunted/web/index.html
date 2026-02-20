@@ -156,6 +156,7 @@ let fogParticles = [];
 let hauntSchedule = [];
 let tapHistory = [];
 let solved = false;
+let hauntDifficulty = 'normal'; // 'mild', 'normal', 'extreme'
 
 // Scare counter & difficulty
 let scareCount = 0;        // how many scare events triggered this run
@@ -215,12 +216,13 @@ resize();
 // ============================================================
 let audioCtx = null;
 function ensureAudio() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
 }
 
 function playTone(freq, dur, type = 'sine', vol = 0.1) {
   ensureAudio();
+  if (!audioCtx) return;
   const t = audioCtx.currentTime;
   const o = audioCtx.createOscillator();
   const g = audioCtx.createGain();
@@ -233,6 +235,7 @@ function playTone(freq, dur, type = 'sine', vol = 0.1) {
 
 function playNoise(dur, vol = 0.06, fOpts = null) {
   ensureAudio();
+  if (!audioCtx) return;
   const t = audioCtx.currentTime;
   const sz = audioCtx.sampleRate * dur;
   const buf = audioCtx.createBuffer(1, sz, audioCtx.sampleRate);
@@ -256,7 +259,7 @@ function playNoise(dur, vol = 0.06, fOpts = null) {
 let droneNodes = [];
 function startDrone() {
   ensureAudio();
-  if (droneNodes.length) return;
+  if (!audioCtx || droneNodes.length) return;
   const t = audioCtx.currentTime;
   const g = audioCtx.createGain();
   g.gain.setValueAtTime(0, t);
@@ -501,7 +504,8 @@ function drawScanlines() {
 // ============================================================
 function scheduleHaunts() {
   // Difficulty scales timing: higher difficulty = faster scares
-  const spd = 1 - difficultyLevel * 0.2; // 1.0, 0.8, 0.6
+  // Combines progressive difficulty (difficultyLevel) and user-chosen difficulty (hauntDifficulty)
+  const spd = (1 - difficultyLevel * 0.2) * (hauntDifficulty === 'mild' ? 1.5 : hauntDifficulty === 'extreme' ? 0.6 : 1);
   const intMul = 1 + difficultyLevel * 0.3; // intensity multiplier
   function t(base) { return Math.max(2, base * spd); }
   function scare(fn) { return () => { scareCount++; fn(); }; }
@@ -510,45 +514,67 @@ function scheduleHaunts() {
     // Level 0 — Subtle
     { t: t(4), fn: scare(() => sfxWhisper()) },
     { t: t(8), fn: scare(() => addCreepyText('...hello?', W*0.3, H*0.6, 11, '#400')) },
+    { t: t(10), fn: scare(() => showNotif('Tips', '', 'Tip: Tap screen corners to interact. Pay attention to symbols.', '\uD83D\uDCA1', 4000)) },
     { t: t(13), fn: scare(() => triggerGlitch('static', 0.08 * intMul, 0.3)) },
-    { t: t(18), fn: scare(() => showNotif('Messages', 'Unknown Number', 'I can see your screen right now.', '💬')) },
+    { t: t(18), fn: scare(() => showNotif('Messages', 'Unknown Number', 'I can see your screen right now.', '\uD83D\uDCAC')) },
     { t: t(24), fn: scare(() => sfxCreepy()) },
+    { t: t(26), fn: scare(() => addCreepyText('is someone else here?', W*0.7, H*0.3, 10, '#430')) },
     { t: t(28), fn: scare(() => addCreepyText('don\'t turn around', W*0.6, H*0.4, 10, '#400')) },
 
     // Level 1 — Unsettling
     { t: t(32), fn: scare(() => { hauntLevel = 1; showCamera(); }) },
-    { t: t(37), fn: scare(() => showNotif('Mom', '', 'Why did you leave me there?', '👩', 5000)) },
+    { t: t(35), fn: scare(() => showNotif('Reminders', '', 'Remember: You are not alone in this room.', '\uD83D\uDD14', 4000)) },
+    { t: t(37), fn: scare(() => showNotif('Mom', '', 'Why did you leave me there?', '\uD83D\uDC69', 5000)) },
     { t: t(42), fn: scare(() => { triggerGlitch('rgb', 0.4 * intMul, 1); sfxWhisper(); }) },
-    { t: t(48), fn: scare(() => showNotif('Battery', 'Low Battery', 'Battery at 3% — but you\'re plugged in.', '🔋')) },
+    { t: t(45), fn: scare(() => addCreepyText('the walls are listening', W*0.4, H*0.55, 10, '#530')) },
+    { t: t(48), fn: scare(() => showNotif('Battery', 'Low Battery', 'Battery at 3% \u2014 but you\'re plugged in.', '\uD83D\uDD0B')) },
     { t: t(52), fn: scare(() => { addCreepyText('IT KNOWS', W*0.5, H*0.7, 16, '#800'); sfxHeartbeat(); }) },
-    { t: t(57), fn: scare(() => showNotif('Screen Time', '', 'You\'ve been watched for 57 seconds.', '📊')) },
+    { t: t(55), fn: scare(() => { triggerGlitch('shake', 0.5 * intMul, 0.3); sfxCreepy(); }) },
+    { t: t(57), fn: scare(() => showNotif('Screen Time', '', 'You\'ve been watched for 57 seconds.', '\uD83D\uDCCA')) },
 
     // Level 2 — Nightmare
     { t: t(62), fn: scare(() => { hauntLevel = 2; triggerGlitch('invert', 1, 1.5); sfxJumpscare(); }) },
-    { t: t(67), fn: scare(() => showNotif('⚠️ SYSTEM', 'WARNING', 'An unknown entity has accessed your device.', '⚠️', 6000)) },
-    { t: t(72), fn: scare(() => addCreepyText('Y̴O̶U̷ ̶C̵A̷N̵\'̶T̵ ̸L̶E̵A̸V̸E̶', W*0.5, H*0.5, 18, '#a00')) },
+    { t: t(65), fn: scare(() => addCreepyText('do you hear that breathing?', W*0.5, H*0.25, 11, '#600')) },
+    { t: t(67), fn: scare(() => showNotif('\u26a0\ufe0f SYSTEM', 'WARNING', 'An unknown entity has accessed your device.', '\u26a0\ufe0f', 6000)) },
+    { t: t(72), fn: scare(() => addCreepyText('Y\u0334O\u0336U\u0337 \u0336C\u0335A\u0337N\u0335\'\u0336T\u0335 \u0338L\u0336E\u0335A\u0338V\u0336E\u0336', W*0.5, H*0.5, 18, '#a00')) },
+    { t: t(76), fn: scare(() => { sfxHeartbeat(); sfxWhisper(); }) },
     { t: t(78), fn: scare(() => { showCamera(); triggerGlitch('shake', 1.5 * intMul, 0.8); }) },
-    { t: t(83), fn: scare(() => showNotif('Photos', 'New Memory', 'A photo was taken just now. You didn\'t take it.', '📸')) },
+    { t: t(81), fn: scare(() => showNotif('Notes', 'New Note', 'A note was created: "HELP ME HELP ME HELP ME"', '\uD83D\uDCDD', 5000)) },
+    { t: t(83), fn: scare(() => showNotif('Photos', 'New Memory', 'A photo was taken just now. You didn\'t take it.', '\uD83D\uDCF8')) },
+    { t: t(86), fn: scare(() => addCreepyText('it\'s inside the screen', W*0.3, H*0.65, 12, '#800')) },
     { t: t(88), fn: scare(() => { addCreepyText('BEHIND YOU', W*0.5, H*0.3, 22, '#f00'); sfxJumpscare(); triggerGlitch('shake', 2 * intMul, 0.5); }) },
 
     // Level 3 — Terror (90s+)
     { t: t(92), fn: scare(() => { hauntLevel = 3; sfxJumpscare(); triggerGlitch('static', 0.6 * intMul, 2); }) },
-    { t: t(97), fn: scare(() => showNotif('Unknown', '', 'I̸ ̷A̸M̶ ̴I̷N̶S̷I̸D̸E̵ ̶Y̴O̵U̷R̷ ̷P̵H̷O̸N̶E̵', '👹', 6000)) },
+    { t: t(95), fn: scare(() => { addCreepyText('YOUR EYES ARE BLEEDING', W*0.5, H*0.45, 16, '#c00'); triggerGlitch('rgb', 0.6 * intMul, 1); }) },
+    { t: t(97), fn: scare(() => showNotif('Unknown', '', 'I\u0338 \u0337A\u0338M\u0336 \u0334I\u0337N\u0336S\u0337I\u0338D\u0335E\u0335 \u0336Y\u0334O\u0335U\u0337R\u0337 \u0337P\u0335H\u0337O\u0338N\u0335E\u0335', '\uD83D\uDC79', 6000)) },
+    { t: t(100), fn: scare(() => { sfxHeartbeat(); triggerGlitch('shake', 1 * intMul, 0.5); }) },
     { t: t(103), fn: scare(() => addCreepyText('THERE IS NO ESCAPE', W*0.5, H*0.6, 20, '#f00')) },
+    { t: t(106), fn: scare(() => showNotif('Voicemail', '1 New Message', 'Transcription: [heavy breathing for 47 seconds]', '\uD83D\uDCDE', 5000)) },
     { t: t(108), fn: scare(() => { triggerGlitch('invert', 1, 3); sfxHeartbeat(); }) },
-    { t: t(115), fn: scare(() => showNotif('System', 'CRITICAL', 'Device will self-destruct. Say goodbye.', '💣', 8000)) },
+    { t: t(112), fn: scare(() => addCreepyText('THE MIRROR KNOWS', W*0.6, H*0.35, 14, '#a00')) },
+    { t: t(115), fn: scare(() => showNotif('System', 'CRITICAL', 'Device will self-destruct. Say goodbye.', '\uD83D\uDCA3', 8000)) },
     { t: t(120), fn: scare(() => { addCreepyText('...unless you know the pattern', W*0.5, H*0.8, 10, '#060'); }) },
 
     // Extended terror (120s+)
-    { t: t(125), fn: scare(() => showNotif('Location', 'Tracking', 'Your exact location has been shared with... something.', '📍', 5000)) },
+    { t: t(125), fn: scare(() => showNotif('Location', 'Tracking', 'Your exact location has been shared with... something.', '\uD83D\uDCCD', 5000)) },
+    { t: t(130), fn: scare(() => addCreepyText('counting down', W*0.4, H*0.7, 12, '#800')) },
     { t: t(132), fn: scare(() => { triggerGlitch('static', 0.8 * intMul, 1); triggerGlitch('shake', 2 * intMul, 1); sfxJumpscare(); }) },
-    { t: t(138), fn: scare(() => addCreepyText('I̶T̵ ̷F̶E̵E̴D̸S̵ ̴O̷N̵ ̷F̴E̸A̶R̵', W*0.5, H*0.4, 24, '#f00')) },
-    { t: t(145), fn: scare(() => showNotif('Contacts', 'Alert', 'All your contacts have been replaced with "HIM".', '👤', 6000)) },
+    { t: t(136), fn: scare(() => showNotif('Calendar', 'Event', 'Funeral scheduled for today. Attendee: YOU.', '\uD83D\uDDD3\uFE0F', 6000)) },
+    { t: t(138), fn: scare(() => addCreepyText('I\u0336T\u0335 \u0337F\u0336E\u0335E\u0334D\u0338S\u0335 \u0334O\u0337N\u0335 \u0337F\u0334E\u0336A\u0335R\u0335', W*0.5, H*0.4, 24, '#f00')) },
+    { t: t(142), fn: scare(() => { sfxJumpscare(); triggerGlitch('invert', 1, 0.5); triggerGlitch('shake', 3 * intMul, 0.5); }) },
+    { t: t(145), fn: scare(() => showNotif('Contacts', 'Alert', 'All your contacts have been replaced with "HIM".', '\uD83D\uDC64', 6000)) },
+    { t: t(150), fn: scare(() => addCreepyText('3', W*0.5, H*0.5, 40, '#f00')) },
     { t: t(152), fn: scare(() => { triggerGlitch('invert', 1, 2); triggerGlitch('rgb', 0.8 * intMul, 2); sfxHeartbeat(); }) },
-    { t: t(160), fn: scare(() => showNotif('Health', '', 'Your heart rate is 180 BPM. Are you okay?', '❤️‍🩹', 5000)) },
+    { t: t(155), fn: scare(() => addCreepyText('2', W*0.5, H*0.5, 40, '#f00')) },
+    { t: t(158), fn: scare(() => addCreepyText('1', W*0.5, H*0.5, 40, '#f00')) },
+    { t: t(160), fn: scare(() => showNotif('Health', '', 'Your heart rate is 180 BPM. Are you okay?', '\u2764\ufe0f\u200d\U0001FA79', 5000)) },
+    { t: t(165), fn: scare(() => { sfxJumpscare(); triggerGlitch('static', 1 * intMul, 2); addCreepyText('TIMES UP', W*0.5, H*0.5, 28, '#f00'); }) },
     { t: t(168), fn: scare(() => { addCreepyText('THE PATTERN IS YOUR ONLY HOPE', W*0.5, H*0.8, 12, '#0a0'); sfxWhisper(); }) },
     { t: t(175), fn: scare(() => { triggerGlitch('static', 1 * intMul, 3); sfxJumpscare(); addCreepyText('TOO LATE', W*0.5, H*0.5, 30, '#f00'); }) },
-    { t: t(185), fn: scare(() => showNotif('Unknown', 'FINAL WARNING', 'You have 30 seconds. ↖ ↘ ✦ ↗', '☠️', 10000)) },
+    { t: t(180), fn: scare(() => showNotif('Find My', 'Alert', 'Someone is following your location in real-time.', '\uD83D\uDCCD', 6000)) },
+    { t: t(185), fn: scare(() => showNotif('Unknown', 'FINAL WARNING', 'You have 30 seconds. \u2196 \u2198 \u2726 \u2197', '\u2620\ufe0f', 10000)) },
+    { t: t(195), fn: scare(() => { triggerGlitch('static', 1 * intMul, 5); triggerGlitch('invert', 1, 5); sfxJumpscare(); addCreepyText('GOODBYE', W*0.5, H*0.5, 40, '#f00'); }) },
   ];
 
   // Extra scares at higher difficulty
@@ -909,7 +935,18 @@ function update() {
       const bx = W/2, by = H/2 + 50*scale;
       if (Math.abs(ev.x - bx) < 110*scale && Math.abs(ev.y - by) < 30*scale) {
         startGame();
+        continue;
       }
+      // Difficulty selector
+      const diffs = ['mild', 'normal', 'extreme'];
+      diffs.forEach((d, i) => {
+        const dx = W/2 + (i - 1) * 90*scale;
+        const dy = H/2 + 115*scale;
+        if (Math.abs(ev.x - dx) < 40*scale && Math.abs(ev.y - dy) < 20*scale) {
+          hauntDifficulty = d;
+          sfxTap();
+        }
+      });
       continue;
     }
     
@@ -920,7 +957,7 @@ function update() {
         tapHistory.push(region);
         if (tapHistory.length > 10) tapHistory.shift();
         
-        // Check code
+        // Check code: look at last N taps and check forward match against correctCode
         const recent = tapHistory.slice(-correctCode.length);
         if (recent.length === correctCode.length && recent.every((r, i) => r === correctCode[i])) {
           solved = true;
@@ -935,12 +972,17 @@ function update() {
           notifEl.classList.remove('show');
           document.getElementById('camera-indicator').classList.remove('active');
         } else {
-          // Check partial match
-          let partialMatch = true;
+          // Check how many of the last taps match the start of the code (forward)
+          let matchCount = 0;
           for (let i = 0; i < recent.length && i < correctCode.length; i++) {
-            if (recent[recent.length - 1 - i] !== correctCode[correctCode.length - 1 - i]) {
-              partialMatch = false; break;
-            }
+            if (recent[i] === correctCode[i]) matchCount++;
+            else break;
+          }
+          if (matchCount > 0 && matchCount < correctCode.length) {
+            spawnParticles(ev.x, ev.y, 4, '#0a0');
+            showToast(`Pattern: ${matchCount}/${correctCode.length}`);
+          } else if (recent.length > 0 && matchCount === 0) {
+            sfxWrongTap();
           }
         }
       }
@@ -1034,16 +1076,37 @@ function drawMenu() {
   
   drawTextBold('START HAUNTING', W/2, by, 16, '#fff');
   
-  // Difficulty & instructions
+  // Difficulty selector
+  const diffs = ['mild', 'normal', 'extreme'];
+  const diffLabels = { mild: 'Mild', normal: 'Normal', extreme: 'Extreme' };
+  const diffColors = { mild: '#4a4', normal: '#a80', extreme: '#c00' };
+  const diffDescs = { mild: 'Slower scares', normal: 'Standard terror', extreme: 'Relentless' };
+  diffs.forEach((d, i) => {
+    const dx = W/2 + (i - 1) * 90*scale;
+    const dy = H/2 + 115*scale;
+    ctx.fillStyle = hauntDifficulty === d ? diffColors[d] : '#181818';
+    roundRect(dx - 38*scale, dy - 18*scale, 76*scale, 36*scale, 8*scale);
+    ctx.fill();
+    ctx.strokeStyle = hauntDifficulty === d ? diffColors[d] : '#333';
+    ctx.lineWidth = 1;
+    roundRect(dx - 38*scale, dy - 18*scale, 76*scale, 36*scale, 8*scale);
+    ctx.stroke();
+    drawText(diffLabels[d], dx, dy - 4*scale, 11, hauntDifficulty === d ? '#fff' : '#666');
+    drawText(diffDescs[d], dx, dy + 10*scale, 7, hauntDifficulty === d ? '#ddd' : '#444');
+  });
+
+  // Progressive difficulty info
   if (difficultyLevel > 0) {
-    const dNames = ['', '⚠️ HARD MODE', '☠️ INSANE MODE'];
+    const dNames = ['', '\u26a0\ufe0f HARD MODE', '\u2620\ufe0f INSANE MODE'];
     const dCols = ['', '#fa0', '#f44'];
     drawText(dNames[difficultyLevel], W/2, H - 115*scale, 13, dCols[difficultyLevel]);
     drawText(`${totalCleanses} cleansing${totalCleanses > 1 ? 's' : ''} completed`, W/2, H - 96*scale, 10, '#555');
   }
+
+  // Instructions
   drawText('Survive as long as you can.', W/2, H - 75*scale, 11, '#555');
   drawText('There IS a way to stop it.', W/2, H - 52*scale, 11, '#555');
-  drawText('Pay attention to the hints...', W/2, H - 32*scale, 10, '#444');
+  drawText('Tap corners in the right pattern...', W/2, H - 32*scale, 10, '#444');
   
   // Vignette
   const vig = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.25, W/2, H/2, Math.max(W,H)*0.65);

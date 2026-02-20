@@ -41,7 +41,8 @@ canvas{display:block;width:100vw;height:100vh}
 <div id="combo-mult"></div>
 <div id="menu">
   <h1>⬡ Hex Match</h1>
-  <p>Match 3+ to score • Swipe to swap</p>
+  <p>Match 3+ to score &bull; Swipe to swap</p>
+  <p style="color:#666;font-size:12px;margin:0 20px 16px;line-height:1.5">Swipe adjacent gems to swap. Match 3+ same-color neighbors to clear them.<br>Match 4+ for a <span style="color:#ffd93d">&#9733; Star</span> gem (clears row) or 5+ for a <span style="color:#ff6b6b">&#128163; Bomb</span> gem (area blast)!</p>
   <button onclick="startGame('timed')">⏱ Timed Mode</button>
   <button class="zen" onclick="startGame('zen')">🧘 Zen Mode (∞)</button>
 </div>
@@ -66,14 +67,21 @@ let touchStart=null,touchHex=null;
 
 // Audio — deferred to user gesture
 let actx=null;
-function getACtx(){if(!actx)actx=new(window.AudioContext||window.webkitAudioContext)();actx.resume();return actx}
+function ensureAudio(){
+  if(!actx){try{actx=new(window.AudioContext||window.webkitAudioContext)()}catch(e){}}
+  if(actx&&actx.state==='suspended')actx.resume().catch(()=>{});
+}
+function getACtx(){ensureAudio();return actx}
 function playSound(freq,dur,type='sine',vol=0.15){
-  try{const ctx=getACtx();const o=ctx.createOscillator(),g=ctx.createGain();
-  o.type=type;o.frequency.value=freq;
-  g.gain.setValueAtTime(vol,ctx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+dur);
-  o.connect(g);g.connect(ctx.destination);
-  o.start();o.stop(ctx.currentTime+dur);}catch(e){}
+  if(!actx)return;
+  try{
+    const o=actx.createOscillator(),g=actx.createGain();
+    o.type=type;o.frequency.value=freq;
+    g.gain.setValueAtTime(vol,actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,actx.currentTime+dur);
+    o.connect(g);g.connect(actx.destination);
+    o.start();o.stop(actx.currentTime+dur);
+  }catch(e){}
 }
 function popSound(n){playSound(400+n*100,0.15,'sine',0.1);setTimeout(()=>playSound(600+n*100,0.1,'triangle',0.08),50)}
 function comboSound(n){playSound(300+n*150,0.3,'sine',0.12);playSound(450+n*150,0.2,'triangle',0.08)}
@@ -187,7 +195,8 @@ function findMatches(){
 
 function removeMatches(matched){
   if(matched.size===0)return 0;
-  // Check for bomb gems in matched set — explode neighbors too
+
+  // Check for bomb gems in matched set — explode neighbors too (HEAD logic)
   const extra=new Set();
   matched.forEach(key=>{
     let r=Math.floor(key/cols),c=key%cols;
@@ -200,19 +209,96 @@ function removeMatches(matched){
     }
   });
   extra.forEach(k=>matched.add(k));
+
   let count=matched.size;
+
+  // Find connected groups to determine power-up creation
+  let groups=[];
+  let assigned=new Set();
+  matched.forEach(key=>{
+    if(assigned.has(key))return;
+    let r=Math.floor(key/cols),c=key%cols;
+    let color=grid[r][c]?grid[r][c].color:-1;
+    let group=[{c,r,key}];
+    let queue=[{c,r}];
+    let seen=new Set([key]);
+    while(queue.length){
+      let{c:cc,r:rr}=queue.shift();
+      for(let n of getNeighbors(cc,rr)){
+        let nk=n.r*cols+n.c;
+        if(!seen.has(nk)&&matched.has(nk)&&grid[n.r]&&grid[n.r][n.c]&&grid[n.r][n.c].color===color){
+          seen.add(nk);queue.push(n);group.push({c:n.c,r:n.r,key:nk});
+        }
+      }
+    }
+    group.forEach(g=>assigned.add(g.key));
+    groups.push({cells:group,color});
+  });
+
+  // First trigger any existing power gems being cleared
+  matched.forEach(key=>{
+    let r=Math.floor(key/cols),c=key%cols;
+    if(!grid[r][c])return;
+    if(grid[r][c].power==='star'){
+      // Clear entire row
+      for(let cc=0;cc<cols;cc++){
+        if(grid[r][cc]&&!matched.has(r*cols+cc)){
+          let pos=hexPos(cc,r);
+          for(let i=0;i<6;i++){
+            let a=Math.random()*Math.PI*2,sp=3+Math.random()*4;
+            particles.push({x:pos.x,y:pos.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:1,color:'#ffd93d',size:4});
+          }
+          grid[r][cc]=null;count++;
+        }
+      }
+    }
+    if(grid[r]&&grid[r][c]&&grid[r][c].power==='bomb'){
+      // Clear all neighbors
+      let nb=getNeighbors(c,r);
+      nb.forEach(n=>{
+        if(grid[n.r][n.c]&&!matched.has(n.r*cols+n.c)){
+          let pos=hexPos(n.c,n.r);
+          for(let i=0;i<6;i++){
+            let a=Math.random()*Math.PI*2,sp=3+Math.random()*4;
+            particles.push({x:pos.x,y:pos.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:1,color:'#ff6b6b',size:4});
+          }
+          grid[n.r][n.c]=null;count++;
+        }
+      });
+      shakeMag=Math.max(shakeMag,10);
+    }
+  });
+
+  // Clear matched cells and spawn particles
   matched.forEach(key=>{
     let r=Math.floor(key/cols),c=key%cols;
     if(!grid[r][c])return;
     let pos=hexPos(c,r);
     let col=COLORS[grid[r][c].color];
-    let pCount=grid[r][c].bomb?16:8;
+    let hasPower=grid[r][c].bomb||grid[r][c].power;
+    let pCount=hasPower?16:8;
     for(let i=0;i<pCount;i++){
-      let a=Math.random()*Math.PI*2,sp=2+Math.random()*(grid[r][c].bomb?5:3);
+      let a=Math.random()*Math.PI*2,sp=2+Math.random()*(hasPower?5:3);
       particles.push({x:pos.x,y:pos.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:1,color:col,size:3+Math.random()*3});
     }
     grid[r][c]=null;
   });
+
+  // Create power-ups for large groups
+  groups.forEach(g=>{
+    if(g.cells.length>=5){
+      // Bomb power-up at center of group
+      let center=g.cells[Math.floor(g.cells.length/2)];
+      grid[center.r][center.c]={color:g.color,scale:1,falling:0,power:'bomb'};
+      playSound(800,0.2,'sine',0.12);
+    }else if(g.cells.length>=4){
+      // Star power-up at center of group
+      let center=g.cells[Math.floor(g.cells.length/2)];
+      grid[center.r][center.c]={color:g.color,scale:1,falling:0,power:'star'};
+      playSound(700,0.15,'triangle',0.1);
+    }
+  });
+
   return count;
 }
 
@@ -317,7 +403,7 @@ async function trySwap(a,b){
 C.addEventListener('touchstart',e=>{
   e.preventDefault();
   if(!gameActive||animating)return;
-  getACtx();
+  ensureAudio();
   let t=e.touches[0];
   touchStart={x:t.clientX,y:t.clientY};
   touchHex=pixelToHex(t.clientX,t.clientY);
@@ -332,7 +418,7 @@ C.addEventListener('touchend',e=>{
   let t=e.changedTouches[0];
   let dx=t.clientX-touchStart.x,dy=t.clientY-touchStart.y;
   let dist=Math.hypot(dx,dy);
-  if(dist>20){
+  if(dist>15*(window.devicePixelRatio||1)){
     // Find neighbor in swipe direction
     let angle=Math.atan2(dy,dx);
     let neighbors=getNeighbors(touchHex.c,touchHex.r);
@@ -353,7 +439,7 @@ C.addEventListener('touchend',e=>{
 let mouseDown=false;
 C.addEventListener('mousedown',e=>{
   if(!gameActive||animating)return;
-  getACtx();
+  ensureAudio();
   mouseDown=true;
   touchStart={x:e.clientX,y:e.clientY};
   touchHex=pixelToHex(e.clientX,e.clientY);
@@ -363,7 +449,7 @@ C.addEventListener('mouseup',e=>{
   if(!mouseDown||!touchHex||!touchStart)return;
   mouseDown=false;
   let dx=e.clientX-touchStart.x,dy=e.clientY-touchStart.y;
-  if(Math.hypot(dx,dy)>20){
+  if(Math.hypot(dx,dy)>15*(window.devicePixelRatio||1)){
     let angle=Math.atan2(dy,dx);
     let neighbors=getNeighbors(touchHex.c,touchHex.r);
     let bestN=null,bestDot=-Infinity;
@@ -409,14 +495,22 @@ function render(){
       let s=selected&&selected.c===c&&selected.r===r?1.15:1;
       let glowCol=GLOW[gem.color]+'0.4)';
       drawHex(p.x,p.y,hexR*0.8*s,COLORS[gem.color],glowCol);
-      // Inner highlight
-      X.save();X.globalAlpha=0.3;
-      drawHex(p.x-hexR*0.1,p.y-hexR*0.15,hexR*0.35,'rgba(255,255,255,0.5)',null);
-      X.restore();
-      // Bomb indicator
-      if(gem.bomb){
-        X.save();X.fillStyle='#fff';X.font=`bold ${Math.round(hexR*0.6)}px sans-serif`;X.textAlign='center';X.textBaseline='middle';
-        X.fillText('💥',p.x,p.y);X.restore();
+      // Power-up and bomb indicator
+      if(gem.power==='star'){
+        X.save();X.globalAlpha=0.7+Math.sin(Date.now()/200)*0.3;
+        X.fillStyle='#fff';X.font=`${hexR*0.7}px sans-serif`;X.textAlign='center';X.textBaseline='middle';
+        X.fillText('\u2605',p.x,p.y);
+        X.restore();
+      }else if(gem.power==='bomb'||gem.bomb){
+        X.save();X.globalAlpha=0.7+Math.sin(Date.now()/150)*0.3;
+        X.fillStyle='#fff';X.font=`${hexR*0.7}px sans-serif`;X.textAlign='center';X.textBaseline='middle';
+        X.fillText('\ud83d\udca3',p.x,p.y);
+        X.restore();
+      }else{
+        // Inner highlight
+        X.save();X.globalAlpha=0.3;
+        drawHex(p.x-hexR*0.1,p.y-hexR*0.15,hexR*0.35,'rgba(255,255,255,0.5)',null);
+        X.restore();
       }
     }
   }
@@ -459,7 +553,7 @@ function gameLoop(t){
 }
 
 function endGame(){
-  if(score>bestScore){bestScore=score;localStorage.setItem('hexmatch_best',bestScore)}
+  if(score>bestScore){bestScore=score;try{localStorage.setItem('hexmatch_best',bestScore)}catch(e){}}
   document.getElementById('final-score').textContent=score;
   document.getElementById('final-best').textContent=bestScore;
   document.getElementById('game-over').classList.remove('hidden');
@@ -468,7 +562,7 @@ function endGame(){
 }
 
 function startGame(m){
-  getACtx();
+  ensureAudio();
   mode=m;score=0;timeLeft=maxTime;comboCount=0;
   document.getElementById('score').textContent='0';
   document.getElementById('menu').classList.add('hidden');
@@ -489,7 +583,7 @@ function backToMenu(){
 }
 
 window.addEventListener('resize',resize);
-bestScore=parseInt(localStorage.getItem('hexmatch_best'))||0;
+try{bestScore=parseInt(localStorage.getItem('hexmatch_best'))||0}catch(e){}
 document.getElementById('best').textContent=bestScore;
 resize();
 render();

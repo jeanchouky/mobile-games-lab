@@ -55,11 +55,15 @@ canvas{display:block;position:absolute;top:0;left:0}
 <div class="overlay" id="menu">
   <h1>NEON SNAKE</h1>
   <h2>Slither through the void</h2>
+  <div class="controls-hint" style="margin-bottom:12px">Swipe or arrow keys to steer. Eat food to grow.<br>Avoid walls and yourself. Collect power-ups!</div>
+  <div id="mode-select" style="display:flex;gap:8px;margin-bottom:16px;pointer-events:auto">
+    <button class="btn" style="padding:10px 18px;font-size:0.8rem" onclick="setMode('classic')" id="mode-classic">CLASSIC</button>
+    <button class="btn" style="padding:10px 18px;font-size:0.8rem;background:rgba(255,255,255,0.15);color:#fff" onclick="setMode('wrap')" id="mode-wrap">WRAP</button>
+    <button class="btn" style="padding:10px 18px;font-size:0.8rem;background:rgba(255,255,255,0.15);color:#fff" onclick="setMode('obstacles')" id="mode-obstacles">OBSTACLES</button>
+  </div>
   <button class="btn" onclick="startGame(false)">PLAY</button>
   <button class="btn" onclick="startGame(true)" style="background:linear-gradient(135deg,#f80,#f0f)">VS AI 🤖</button>
-  <label class="toggle-wrap"><input type="checkbox" id="wrap-toggle" onchange="wrapMode=this.checked"><span class="track"></span>Wrap-around walls</label>
-  <label class="toggle-wrap"><input type="checkbox" id="obstacle-toggle" onchange="obstacleMode=this.checked"><span class="track"></span>Obstacles</label>
-  <div class="controls-hint">Arrow keys / WASD to move • Swipe on mobile<br>Collect food • Avoid walls & yourself<br>Space to pause</div>
+  <div class="controls-hint">Space to pause</div>
 </div>
 
 <div class="overlay hidden" id="paused">
@@ -89,6 +93,7 @@ let paused=false,gameActive=false;
 let foodEaten=0,powerupsCollected=0,maxLength=3;
 let wrapMode=false;
 let obstacleMode=false;
+let gameMode='classic'; // 'classic', 'wrap', 'obstacles'
 let audioCtx;
 let bgPulse=0;
 
@@ -113,7 +118,10 @@ const POWERUP_DEFS=[
   {id:'magnet',icon:'🧲',color:'#ff0',glow:'#ff0',duration:40,desc:'MAGNET'},
 ];
 
-function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)()}
+function ensureAudio(){
+  if(!audioCtx){try{audioCtx=new(window.AudioContext||window.webkitAudioContext)()}catch(e){}}
+  if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume().catch(()=>{});
+}
 function playTone(f,d=0.1,t='sine',v=0.15){
   if(!audioCtx)return;
   const o=audioCtx.createOscillator(),g=audioCtx.createGain();
@@ -141,7 +149,7 @@ function resize(){
 }
 window.addEventListener('resize',resize);resize();
 
-highScore=parseInt(localStorage.getItem('neonsnake_hs'))||0;
+try{highScore=parseInt(localStorage.getItem('neonsnake_hs'))||0}catch(e){highScore=0}
 hsEl.textContent=highScore?'BEST: '+highScore:'';
 
 const FOOD_TYPES=[
@@ -156,7 +164,7 @@ const FOOD_TYPES=[
 function spawnFood(){
   let x,y,attempts=0;
   do{x=Math.floor(Math.random()*COLS);y=Math.floor(Math.random()*ROWS);attempts++}
-  while(snake.some(s=>s.x===x&&s.y===y)&&attempts<100);
+  while((snake.some(s=>s.x===x&&s.y===y)||obstacles.some(o=>o.x===x&&o.y===y))&&attempts<100);
   let typeIdx=0;
   const r=Math.random();
   if(score>30&&r<0.08)typeIdx=5;
@@ -180,8 +188,41 @@ function addScorePopup(x,y,text,color){
 
 function shake(intensity=4){shakeT=10;shakeX=(Math.random()-0.5)*intensity;shakeY=(Math.random()-0.5)*intensity}
 
+function setMode(m){
+  gameMode=m;
+  wrapMode=(m==='wrap');
+  obstacleMode=(m==='obstacles');
+  ['classic','wrap','obstacles'].forEach(id=>{
+    const el=document.getElementById('mode-'+id);
+    if(el){
+      el.style.background=id===m?'linear-gradient(135deg,#0ff,#f0f)':'rgba(255,255,255,0.15)';
+      el.style.color=id===m?'#000':'#fff';
+    }
+  });
+}
+
+function spawnObstacles(){
+  obstacles=[];
+  if(gameMode!=='obstacles')return;
+  const count=5+Math.floor(Math.random()*5);
+  for(let i=0;i<count;i++){
+    let x,y,attempts=0;
+    do{x=Math.floor(Math.random()*COLS);y=Math.floor(Math.random()*ROWS);attempts++}
+    while((Math.abs(x-Math.floor(COLS/2))<4&&Math.abs(y-Math.floor(ROWS/2))<3)&&attempts<50);
+    obstacles.push({x,y});
+    // Add small walls (1-3 length)
+    const len=Math.floor(Math.random()*3);
+    const horizontal=Math.random()>0.5;
+    for(let j=1;j<=len;j++){
+      const ox=horizontal?x+j:x;
+      const oy=horizontal?y:y+j;
+      if(ox>=0&&ox<COLS&&oy>=0&&oy<ROWS)obstacles.push({x:ox,y:oy});
+    }
+  }
+}
+
 function startGame(withAI){
-  initAudio();
+  ensureAudio();
   aiEnabled=!!withAI;
   menuEl.classList.add('hidden');goEl.classList.add('hidden');pauseEl.classList.add('hidden');
   resize();
@@ -203,23 +244,10 @@ function startGame(withAI){
     aiSnake=[];aiAlive=false;
   }
 
-  // Obstacles
-  obstacles=[];movingObstacles=[];
+  // Obstacles (static from spawnObstacles + moving barriers)
+  movingObstacles=[];
+  spawnObstacles();
   if(obstacleMode){
-    // Static walls
-    for(let i=0;i<4+Math.floor(Math.random()*3);i++){
-      const ox=3+Math.floor(Math.random()*(COLS-6));
-      const oy=3+Math.floor(Math.random()*(ROWS-6));
-      const horizontal=Math.random()>0.5;
-      const len=2+Math.floor(Math.random()*3);
-      for(let j=0;j<len;j++){
-        const wx=horizontal?ox+j:ox;
-        const wy=horizontal?oy:oy+j;
-        if(!snake.some(s=>s.x===wx&&s.y===wy)){
-          obstacles.push({x:wx,y:wy});
-        }
-      }
-    }
     // Moving barriers
     for(let i=0;i<2;i++){
       movingObstacles.push({
@@ -265,7 +293,7 @@ function tick(){
   dir={...nextDir};
   const head={x:snake[0].x+dir.x,y:snake[0].y+dir.y};
 
-  if(activeEffects.ghost||wrapMode){
+  if(activeEffects.ghost||wrapMode||gameMode==='wrap'){
     head.x=(head.x+COLS)%COLS;head.y=(head.y+ROWS)%ROWS;
   }else if(head.x<0||head.x>=COLS||head.y<0||head.y>=ROWS){
     die();return;
@@ -275,7 +303,7 @@ function tick(){
     die();return;
   }
 
-  // Obstacle collision
+  // Obstacle collision (static + moving)
   if(!activeEffects.ghost&&isBlocked(head.x,head.y)){
     die();return;
   }
@@ -284,6 +312,7 @@ function tick(){
   if(!activeEffects.ghost&&aiAlive&&aiSnake.some(s=>s.x===head.x&&s.y===head.y)){
     die();return;
   }
+
 
   snake.unshift(head);
 
@@ -441,7 +470,7 @@ function die(){
   clearInterval(gameLoop);gameLoop=null;gameActive=false;
   playDie();shake(10);
   snake.forEach((s,i)=>setTimeout(()=>addParticles(s.x,s.y,'#f00',4),i*20));
-  if(score>highScore){highScore=score;localStorage.setItem('neonsnake_hs',highScore);hsEl.textContent='BEST: '+highScore}
+  if(score>highScore){highScore=score;try{localStorage.setItem('neonsnake_hs',highScore)}catch(e){}hsEl.textContent='BEST: '+highScore}
   setTimeout(()=>{
     document.getElementById('final-score').textContent=score;
     let breakdown=`🍎 ${foodEaten} eaten • 🐍 Length ${maxLength} • ⚡ ${powerupsCollected} powerups`;
@@ -468,7 +497,8 @@ document.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
 document.addEventListener('touchend',e=>{
   if(!touchStart||!gameLoop)return;
   const dx=e.changedTouches[0].clientX-touchStart.x,dy=e.changedTouches[0].clientY-touchStart.y;
-  if(Math.abs(dx)<10&&Math.abs(dy)<10)return;
+  const swipeThresh=15*(window.devicePixelRatio||1);
+  if(Math.abs(dx)<swipeThresh&&Math.abs(dy)<swipeThresh)return;
   if(Math.abs(dx)>Math.abs(dy)){
     if(dx>0&&dir.x!==(-1))nextDir={x:1,y:0};
     else if(dx<0&&dir.x!==1)nextDir={x:-1,y:0};
@@ -549,6 +579,7 @@ function draw(){
     ctx.fillText(pu.icon,0,1);
     ctx.restore();
   }
+
 
   // Food
   if(food){

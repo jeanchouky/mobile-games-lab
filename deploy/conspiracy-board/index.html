@@ -84,12 +84,12 @@ resize();
 // ============================================================
 let audioCtx = null;
 function ensureAudio() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
 }
 
 function playTone(freq, dur, type = 'sine', vol = 0.1) {
-  ensureAudio();
+  if (!audioCtx) return;
   const t = audioCtx.currentTime;
   const o = audioCtx.createOscillator(), g = audioCtx.createGain();
   o.type = type; o.frequency.value = freq;
@@ -99,7 +99,7 @@ function playTone(freq, dur, type = 'sine', vol = 0.1) {
   o.start(t); o.stop(t + dur);
 }
 function playNoise(dur, vol = 0.06, freq = null) {
-  ensureAudio();
+  if (!audioCtx) return;
   const t = audioCtx.currentTime;
   const sz = audioCtx.sampleRate * dur;
   const buf = audioCtx.createBuffer(1, sz, audioCtx.sampleRate);
@@ -205,6 +205,44 @@ const caseTemplates = [
     connections: [
       [0, 2, 'crime-method'], [2, 5, 'method-trail'], [5, 4, 'trail-motive'],
       [4, 3, 'motive-link'], [1, 3, 'access-witness'], [6, 7, 'side-motives']
+    ]
+  },
+  {
+    type: 'fraud', title: 'The Charity Swindle',
+    difficulty: 2,
+    suspects: ['Director', 'Accountant', 'PR Manager', 'Board Chair', 'Volunteer Lead'],
+    clueData: [
+      { type: 'document', label: '📊 AUDIT REPORT', desc: '$3M unaccounted\nFlagged by auditor', tags: ['crime', 'money'], color: '#8b0000' },
+      { type: 'evidence', label: '🏦 BANK RECORDS', desc: 'Wire transfers to\noffshore account', tags: ['money', 'trail'], color: '#4169e1' },
+      { type: 'statement', label: '💬 ACCOUNTANT', desc: '"Director told me\nto move funds"', tags: ['suspect1', 'suspect2'], color: '#4682b4' },
+      { type: 'photo', label: '📸 YACHT PHOTOS', desc: 'Director\'s social media\nNew yacht last month', tags: ['suspect1', 'motive'], color: '#daa520' },
+      { type: 'document', label: '📝 FORGED RECEIPT', desc: 'Fake vendor invoice\nPR Mgr\'s handwriting', tags: ['suspect3', 'crime'], color: '#b22222' },
+      { type: 'evidence', label: '💻 DELETED EMAILS', desc: 'Recovered from server\nBoard chair warned early', tags: ['suspect4', 'trail'], color: '#cd853f' },
+      { type: 'statement', label: '💬 VOLUNTEER', desc: '"Supplies never arrived\nbut were paid for"', tags: ['crime', 'motive'], color: '#9370db' },
+      { type: 'document', label: '📋 SHELL COMPANY', desc: 'Registered to Director\nSame offshore address', tags: ['trail', 'suspect1'], color: '#556b2f' },
+    ],
+    connections: [
+      [0, 1, 'crime-money'], [1, 7, 'money-trail'], [7, 3, 'trail-suspect'],
+      [2, 3, 'witness-suspect'], [4, 0, 'forgery-crime'], [5, 6, 'cover-up']
+    ]
+  },
+  {
+    type: 'arson', title: 'The Factory Fire',
+    difficulty: 3,
+    suspects: ['Owner', 'Night Guard', 'Rival Owner', 'Insurance Agent', 'Former Employee'],
+    clueData: [
+      { type: 'photo', label: '🔥 BURN PATTERN', desc: 'Two origin points\nAccelerant detected', tags: ['crime', 'method'], color: '#8b0000' },
+      { type: 'document', label: '📄 INSURANCE', desc: 'Policy doubled\n2 weeks before fire', tags: ['motive', 'suspect1'], color: '#daa520' },
+      { type: 'evidence', label: '🔑 SPARE KEY', desc: 'Guard\'s spare key\nmissing from lockbox', tags: ['suspect2', 'entry'], color: '#4169e1' },
+      { type: 'statement', label: '💬 GUARD ALIBI', desc: '"Left post at 11pm\nDrove home — no proof"', tags: ['suspect2', 'time'], color: '#4682b4' },
+      { type: 'document', label: '📞 PHONE RECORDS', desc: 'Owner called rival\n3 times that week', tags: ['suspect1', 'suspect3'], color: '#b22222' },
+      { type: 'evidence', label: '⛽ GAS CANISTER', desc: 'Found in dumpster\nFingerprints: ex-employee', tags: ['method', 'suspect5'], color: '#cd853f' },
+      { type: 'statement', label: '💬 EX-EMPLOYEE', desc: '"Owner offered me $10K\nto start the fire"', tags: ['suspect5', 'suspect1'], color: '#9370db' },
+      { type: 'document', label: '📧 AGENT EMAIL', desc: 'Insurance agent flagged\n"suspicious timing"', tags: ['suspect4', 'motive'], color: '#556b2f' },
+    ],
+    connections: [
+      [0, 5, 'crime-method'], [5, 6, 'method-suspect'], [6, 4, 'suspect-link'],
+      [4, 1, 'link-motive'], [2, 3, 'entry-alibi'], [7, 1, 'insurance-motive']
     ]
   }
 ];
@@ -725,11 +763,11 @@ function drawUI() {
     
     // Case cards
     const cardW = Math.min(300 * scale, W * 0.8);
-    const cardH = 70 * scale;
-    const startY = H * 0.42;
+    const cardH = 54 * scale;
+    const startY = H * 0.36;
     
     caseTemplates.forEach((tmpl, i) => {
-      const y = startY + i * (cardH + 12*scale);
+      const y = startY + i * (cardH + 8*scale);
       const hovered = false;
       
       // Card background
@@ -740,23 +778,23 @@ function drawUI() {
       
       // Difficulty stars
       const stars = '⭐'.repeat(tmpl.difficulty);
-      ctx.font = `${10*scale}px sans-serif`;
+      ctx.font = `${9*scale}px sans-serif`;
       ctx.textAlign = 'right';
-      ctx.fillText(stars, W/2 + cardW/2 - 8*scale, y - 10*scale);
-      
+      ctx.fillText(stars, W/2 + cardW/2 - 6*scale, y - 6*scale);
+
       // Title
       ctx.fillStyle = '#f5f0e6';
-      ctx.font = `bold ${13 * scale}px 'Courier New', monospace`;
+      ctx.font = `bold ${12 * scale}px 'Courier New', monospace`;
       ctx.textAlign = 'center';
-      ctx.fillText(tmpl.title, W/2, y - 5*scale);
-      
+      ctx.fillText(tmpl.title, W/2, y - 2*scale);
+
       // Type + best time
-      ctx.font = `${10 * scale}px 'Courier New', monospace`;
+      ctx.font = `${9 * scale}px 'Courier New', monospace`;
       ctx.fillStyle = '#999';
-      const typeEmoji = { murder: '🔪', heist: '💎', missing: '👤', sabotage: '🧪' }[tmpl.type] || '📋';
+      const typeEmoji = { murder: '🔪', heist: '💎', missing: '👤', sabotage: '🧪', fraud: '💰', arson: '🔥' }[tmpl.type] || '📋';
       const best = bestTimes[`case_${i}`];
       const bestStr = best ? `Best: ${Math.floor(best/60)}:${(best%60).toString().padStart(2,'0')}` : 'New!';
-      ctx.fillText(`${typeEmoji} ${tmpl.type.toUpperCase()} — ${bestStr}`, W/2, y + 15*scale);
+      ctx.fillText(`${typeEmoji} ${tmpl.type.toUpperCase()} — ${bestStr}`, W/2, y + 12*scale);
       
       // Hit test
       if (inputEvents.length > 0) {
@@ -773,8 +811,9 @@ function drawUI() {
     ctx.fillStyle = '#666';
     ctx.font = `${10*scale}px 'Courier New', monospace`;
     ctx.textAlign = 'center';
-    ctx.fillText('Double-tap a clue to start a string', W/2, H - 40*scale);
-    ctx.fillText('Drag to another clue to connect them', W/2, H - 25*scale);
+    ctx.fillText('Double-tap a clue to start a string', W/2, H - 50*scale);
+    ctx.fillText('Drag to another clue to connect them', W/2, H - 35*scale);
+    ctx.fillText('Tap a string midpoint to remove it', W/2, H - 20*scale);
     
   } else if (gameState === 'playing') {
     // Top bar
