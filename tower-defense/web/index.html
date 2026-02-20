@@ -91,6 +91,7 @@ let selectedType=null,selectedTower=null;
 let spawnTimer=0,waveEnemies=0,waveSpawned=0,betweenWaves=true,waveDelay=3;
 let shakeX=0,shakeY=0,shakeMag=0;
 let gameSpeed=1;
+let hoverCell=null;
 
 function toggleSpeed(){
   gameSpeed=gameSpeed===1?2:gameSpeed===2?3:1;
@@ -103,8 +104,9 @@ const TOWER_TYPES={
   splash:{cost:50,range:2,rate:1.5,dmg:15,color:'#e94560',name:'Splash',splash:1.5}
 };
 
-const actx=new(window.AudioContext||window.webkitAudioContext)();
-function snd(f,d,t='sine',v=0.1){const o=actx.createOscillator(),g=actx.createGain();o.type=t;o.frequency.value=f;g.gain.setValueAtTime(v,actx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,actx.currentTime+d);o.connect(g);g.connect(actx.destination);o.start();o.stop(actx.currentTime+d)}
+let actx=null;
+function getACtx(){if(!actx)actx=new(window.AudioContext||window.webkitAudioContext)();actx.resume();return actx}
+function snd(f,d,t='sine',v=0.1){try{const ctx=getACtx();const o=ctx.createOscillator(),g=ctx.createGain();o.type=t;o.frequency.value=f;g.gain.setValueAtTime(v,ctx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+d);o.connect(g);g.connect(ctx.destination);o.start();o.stop(ctx.currentTime+d)}catch(e){}}
 
 function resize(){
   dpr=window.devicePixelRatio||1;W=window.innerWidth;H=window.innerHeight;
@@ -145,7 +147,7 @@ function pixelToCell(px,py){
 }
 
 function selectTower(type){
-  actx.resume();
+  getACtx();
   if(selectedType===type){selectedType=null}else{selectedType=type}
   document.querySelectorAll('.tower-btn').forEach(b=>{
     b.classList.toggle('selected',b.dataset.type===selectedType);
@@ -155,7 +157,7 @@ function selectTower(type){
 
 C.addEventListener('click',e=>{
   if(!gameActive)return;
-  actx.resume();
+  getACtx();
   let cell=pixelToCell(e.clientX,e.clientY);
   if(!cell)return;
   
@@ -179,6 +181,9 @@ C.addEventListener('click',e=>{
   snd(600,0.1);
   updateHUD();
 });
+
+C.addEventListener('mousemove',e=>{hoverCell=pixelToCell(e.clientX,e.clientY)});
+C.addEventListener('mouseleave',()=>{hoverCell=null});
 
 function showUpgrade(t){
   let panel=document.getElementById('upgrade-panel');
@@ -247,10 +252,11 @@ function updateHUD(){
 function update(dt){
   if(!gameActive)return;
   
-  // Spawn
+  // Spawn — vary interval by wave (faster in later waves)
   if(!betweenWaves&&waveSpawned<waveEnemies){
     spawnTimer-=dt;
-    if(spawnTimer<=0){spawnEnemy();waveSpawned++;spawnTimer=0.6}
+    const spawnInterval=Math.max(0.3,0.7-wave*0.03);
+    if(spawnTimer<=0){spawnEnemy();waveSpawned++;spawnTimer=spawnInterval}
   }
   
   // Check wave complete
@@ -259,7 +265,12 @@ function update(dt){
     betweenWaves=true;waveDelay=2;
     gold+=20+wave*5;updateHUD();
   }
-  if(betweenWaves){waveDelay-=dt;if(waveDelay<=0)startWave()}
+  if(betweenWaves){
+    waveDelay-=dt;
+    document.getElementById('wave-timer').style.display='flex';
+    document.getElementById('timer-val').textContent=Math.ceil(waveDelay);
+    if(waveDelay<=0){document.getElementById('wave-timer').style.display='none';startWave()}
+  }else{document.getElementById('wave-timer').style.display='none'}
   
   // Enemies
   for(let i=enemies.length-1;i>=0;i--){
@@ -391,8 +402,9 @@ function render(){
   for(let t of towers){
     let p=cellToPixel(t.c,t.r);
     let s=cellSize*0.35;
-    // Range indicator if selected
-    if(t===selectedTower){
+    // Range indicator on selected or hovered tower
+    const isHovered=hoverCell&&hoverCell.c===t.c&&hoverCell.r===t.r;
+    if(t===selectedTower||isHovered){
       X.beginPath();X.arc(p.x,p.y,t.range*cellSize,0,Math.PI*2);
       X.fillStyle='rgba(255,255,255,0.05)';X.fill();
       X.strokeStyle='rgba(255,255,255,0.15)';X.lineWidth=1;X.stroke();
@@ -466,7 +478,7 @@ function endGame(won){
 }
 
 function startGame(){
-  actx.resume();
+  getACtx();
   document.getElementById('menu').classList.add('hidden');
   generatePath();
   gold=100;lives=20;wave=0;
