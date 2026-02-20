@@ -59,6 +59,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#1a1025;font-family:
   <div id="found-words"></div>
   <div id="board">
     <div id="word-display"></div>
+    <div id="letter-count" style="font-size:0.7rem;color:#666;text-align:center;min-height:1em"></div>
     <div id="tile-grid"></div>
   </div>
   <div id="actions">
@@ -78,6 +79,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#1a1025;font-family:
     🔵 Wild tiles = any letter
   </div>
   <button class="btn" onclick="startGame()">PLAY</button>
+  <button class="btn" style="background:linear-gradient(135deg,#ffd700,#f0932b);margin-top:4px" onclick="startDaily()">📅 DAILY CHALLENGE</button>
 </div>
 
 <div class="overlay hidden" id="results">
@@ -104,6 +106,10 @@ const LETTER_PTS={A:1,B:3,C:3,D:2,E:1,F:4,G:2,H:4,I:1,J:8,K:5,L:1,M:3,N:1,O:1,P:
 let letterBag=[];
 for(const[l,f]of Object.entries(LETTER_FREQ))for(let i=0;i<f;i++)letterBag.push(l);
 
+// Seeded RNG for daily challenge
+function seededRNG(seed){let s=seed;return()=>{s=s*16807%2147483647;return(s-1)/2147483646}}
+let dailyMode=false;
+
 let audioCtx;
 function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)()}
 function playTone(f,d=0.08,v=0.08){
@@ -125,15 +131,58 @@ function showMenu(){
   document.getElementById('results').classList.add('hidden');
 }
 
-function startGame(){
+function startDaily(){
+  dailyMode=true;
+  const today=new Date();
+  const dateSeed=today.getFullYear()*10000+(today.getMonth()+1)*100+today.getDate();
+  const rng=seededRNG(dateSeed);
+
   initAudio();
   document.getElementById('menu').classList.add('hidden');
   document.getElementById('results').classList.add('hidden');
   document.getElementById('game').classList.remove('hidden');
-  
+  document.getElementById('round-val').textContent='📅';
+
   score=0;wordCount=0;foundWords=[];longestWord='';
   roundTime=ROUND_SECONDS;
-  
+
+  tiles=[];
+  for(let i=0;i<GRID_SIZE;i++){
+    const letter=letterBag[Math.floor(rng()*letterBag.length)];
+    const r=rng();
+    let type='normal';
+    if(r<0.07)type='wild';
+    else if(r<0.18)type='double';
+    tiles.push({letter,type,id:i});
+  }
+
+  selected=[];
+  renderTiles();updateUI();renderWordDisplay();
+  document.getElementById('found-words').innerHTML='';
+
+  if(timerInterval)clearInterval(timerInterval);
+  timerInterval=setInterval(()=>{
+    roundTime--;
+    const pct=roundTime/ROUND_SECONDS*100;
+    document.getElementById('timer-fill').style.width=pct+'%';
+    if(roundTime<=10){
+      document.getElementById('timer-fill').style.background='#e94560';
+      if(roundTime<=5)playTone(800,0.05,0.04);
+    }
+    if(roundTime<=0){clearInterval(timerInterval);endGame()}
+  },1000);
+}
+
+function startGame(){
+  dailyMode=false;
+  initAudio();
+  document.getElementById('menu').classList.add('hidden');
+  document.getElementById('results').classList.add('hidden');
+  document.getElementById('game').classList.remove('hidden');
+
+  score=0;wordCount=0;foundWords=[];longestWord='';
+  roundTime=ROUND_SECONDS;
+
   // Generate tiles
   tiles=[];
   for(let i=0;i<GRID_SIZE;i++){
@@ -192,6 +241,8 @@ function renderWordDisplay(){
     el.textContent=t.type==='wild'?'★':t.letter;
     wd.appendChild(el);
   });
+  const countEl=document.getElementById('letter-count');
+  countEl.textContent=selected.length>0?`${selected.length} letter${selected.length>1?'s':''}${selected.length<3?' (need 3+)':''}`:'';
 }
 
 function getWord(){
@@ -291,12 +342,12 @@ function updateUI(){
 }
 
 function endGame(){
-  const key='wordarchitect_best';
+  const key=dailyMode?'wordarchitect_daily':'wordarchitect_best';
   const best=parseInt(localStorage.getItem(key))||0;
   if(score>best)localStorage.setItem(key,score);
-  
+
   document.getElementById('r-score').textContent=score;
-  document.getElementById('r-words').textContent=`${wordCount} words found`;
+  document.getElementById('r-words').textContent=`${wordCount} words found${dailyMode?' (Daily Challenge)':''}`;
   document.getElementById('r-best').textContent=score>best?'🎉 NEW HIGH SCORE!':`Best: ${Math.max(best,score)}`;
   document.getElementById('r-longest').textContent=longestWord?`Longest: ${longestWord}`:'';
   document.getElementById('results').classList.remove('hidden');
