@@ -318,15 +318,16 @@ function maybeChirp() {
 // ============================================================
 function wobble(amt = 1.5) { return (Math.random() - 0.5) * amt * scale; }
 
-// Soft watercolor circle
+// Soft watercolor circle — reduced layers when many entities on screen
 function watercolorCircle(cx, cy, r, color, alpha = 0.3) {
   ctx.save();
-  
-  // Multiple overlapping circles for watercolor effect
-  const layers = 3;
+
+  // Reduce layers when performance matters (many entities)
+  const entityCount = creatures.length + plants.length;
+  const layers = entityCount > 30 ? 1 : entityCount > 15 ? 2 : 3;
+  const pts = entityCount > 30 ? 12 : 16;
   for (let i = 0; i < layers; i++) {
     ctx.beginPath();
-    const pts = 16 + Math.floor(Math.random() * 8);
     for (let j = 0; j <= pts; j++) {
       const a = (j / pts) * Math.PI * 2;
       const rr = r + (Math.random() - 0.5) * r * 0.15;
@@ -335,12 +336,12 @@ function watercolorCircle(cx, cy, r, color, alpha = 0.3) {
       if (j === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
     }
     ctx.closePath();
-    
+
     ctx.fillStyle = color;
     ctx.globalAlpha = alpha / layers;
     ctx.fill();
   }
-  
+
   ctx.restore();
 }
 
@@ -473,11 +474,17 @@ function updateWeather() {
 
 function getTimeColor() {
   switch(timeOfDay) {
-    case 'dawn': return { sky: '#ffd89b', tint: 'rgba(255, 216, 155, 0.2)' };
-    case 'day': return { sky: '#87CEEB', tint: 'rgba(135, 206, 235, 0.1)' };
-    case 'dusk': return { sky: '#ff8c69', tint: 'rgba(255, 140, 105, 0.2)' };
-    case 'night': return { sky: '#2c3e50', tint: 'rgba(44, 62, 80, 0.4)' };
+    case 'dawn': return { sky: '#ffd89b', skyLow: '#ffe4c4', tint: 'rgba(255, 216, 155, 0.2)', ground: '#d6e8c0', water: '#a3c8c8' };
+    case 'day': return { sky: '#87CEEB', skyLow: '#c8e6f0', tint: 'rgba(135, 206, 235, 0.1)', ground: '#c8e6c9', water: '#b3d9d9' };
+    case 'dusk': return { sky: '#ff8c69', skyLow: '#ffb088', tint: 'rgba(255, 140, 105, 0.25)', ground: '#c4c098', water: '#9ab5b5' };
+    case 'night': return { sky: '#1a2a3a', skyLow: '#2c3e50', tint: 'rgba(20, 30, 50, 0.45)', ground: '#5a6e5a', water: '#4a6a7a' };
   }
+}
+
+// Pre-generate star positions (deterministic)
+const stars = [];
+for (let i = 0; i < 60; i++) {
+  stars.push({ x: (Math.sin(i * 127.1) * 0.5 + 0.5), y: (Math.cos(i * 311.7) * 0.3 + 0.15), size: 0.5 + (i % 3) * 0.5, twinklePhase: i * 1.7 });
 }
 
 // ============================================================
@@ -751,46 +758,106 @@ function drawBackground() {
   // Paper texture
   ctx.fillStyle = '#f5f0e6';
   ctx.fillRect(0, 0, W, H);
-  
+
   const timeColor = getTimeColor();
-  
-  // Sky layer (top 40%)
-  const skyGrad = ctx.createLinearGradient(0, 0, 0, H * 0.4);
+
+  // Sky layer (top 40%) — richer gradient
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, H * 0.45);
   skyGrad.addColorStop(0, timeColor.sky);
+  skyGrad.addColorStop(0.6, timeColor.skyLow);
   skyGrad.addColorStop(1, 'rgba(245, 240, 230, 0.3)');
   ctx.fillStyle = skyGrad;
-  ctx.fillRect(0, 0, W, H * 0.4);
-  
-  // Sky blobs
-  for (let i = 0; i < 12; i++) {
-    const x = (i / 12) * W + (Math.sin(gameTime * 0.3 + i) * 30 * scale);
+  ctx.fillRect(0, 0, W, H * 0.45);
+
+  // Stars at night / dusk
+  if (timeOfDay === 'night' || timeOfDay === 'dusk') {
+    const starAlpha = timeOfDay === 'night' ? 0.8 : 0.25;
+    ctx.save();
+    ctx.fillStyle = '#fff';
+    for (const s of stars) {
+      const twinkle = 0.5 + 0.5 * Math.sin(gameTime * 1.5 + s.twinklePhase);
+      ctx.globalAlpha = starAlpha * twinkle;
+      ctx.beginPath();
+      ctx.arc(s.x * W, s.y * H, s.size * scale, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Sun or moon
+  const celestialX = W * 0.8;
+  const celestialY = H * 0.1;
+  if (timeOfDay === 'day' || timeOfDay === 'dawn') {
+    // Sun
+    ctx.save();
+    ctx.globalAlpha = timeOfDay === 'dawn' ? 0.5 : 0.7;
+    const sunR = 18 * scale;
+    const sunGlow = ctx.createRadialGradient(celestialX, celestialY, sunR * 0.3, celestialX, celestialY, sunR * 2.5);
+    sunGlow.addColorStop(0, 'rgba(255,230,100,0.6)');
+    sunGlow.addColorStop(1, 'rgba(255,230,100,0)');
+    ctx.fillStyle = sunGlow;
+    ctx.fillRect(celestialX - sunR * 3, celestialY - sunR * 3, sunR * 6, sunR * 6);
+    ctx.fillStyle = '#ffe066';
+    ctx.beginPath();
+    ctx.arc(celestialX, celestialY, sunR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  } else if (timeOfDay === 'night') {
+    // Moon
+    ctx.save();
+    ctx.globalAlpha = 0.75;
+    const moonR = 14 * scale;
+    const moonGlow = ctx.createRadialGradient(celestialX, celestialY, moonR * 0.5, celestialX, celestialY, moonR * 2);
+    moonGlow.addColorStop(0, 'rgba(200,220,255,0.3)');
+    moonGlow.addColorStop(1, 'rgba(200,220,255,0)');
+    ctx.fillStyle = moonGlow;
+    ctx.fillRect(celestialX - moonR * 3, celestialY - moonR * 3, moonR * 6, moonR * 6);
+    ctx.fillStyle = '#e8eef5';
+    ctx.beginPath();
+    ctx.arc(celestialX, celestialY, moonR, 0, Math.PI * 2);
+    ctx.fill();
+    // Crescent shadow
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(celestialX + moonR * 0.4, celestialY - moonR * 0.2, moonR * 0.85, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.restore();
+  }
+
+  // Sky blobs (clouds) — fewer at night
+  const cloudCount = timeOfDay === 'night' ? 5 : 12;
+  const cloudAlpha = timeOfDay === 'night' ? 0.12 : 0.3;
+  for (let i = 0; i < cloudCount; i++) {
+    const x = (i / cloudCount) * W + (Math.sin(gameTime * 0.3 + i) * 30 * scale);
     const y = H * 0.15 + Math.sin(i * 2) * H * 0.1;
     const r = (30 + Math.random() * 40) * scale;
-    organicBlob(x, y, r, '#d4e9f7', 0.3);
+    organicBlob(x, y, r, timeOfDay === 'night' ? '#4a5a6a' : '#d4e9f7', cloudAlpha);
   }
-  
+
   // Water layer (middle 30%)
   for (let i = 0; i < 15; i++) {
     const x = (i / 15) * W * 1.2 - W * 0.1;
     const y = H * 0.45 + Math.sin(gameTime * 0.5 + i * 0.5) * 10 * scale;
     const r = (40 + Math.random() * 60) * scale;
-    organicBlob(x, y, r, '#b3d9d9', 0.25);
+    organicBlob(x, y, r, timeColor.water, 0.25);
   }
-  
+
   // Ground layer (bottom 30%)
   for (let i = 0; i < 20; i++) {
     const x = (i / 20) * W * 1.3 - W * 0.15;
     const y = H * 0.75 + Math.sin(i * 1.5) * 20 * scale;
     const r = (35 + Math.random() * 50) * scale;
-    organicBlob(x, y, r, '#c8e6c9', 0.28);
+    organicBlob(x, y, r, timeColor.ground, 0.28);
   }
-  
+
   // Time of day tint
   ctx.save();
   ctx.fillStyle = timeColor.tint;
   ctx.fillRect(0, 0, W, H);
   ctx.restore();
-  
+
   // Weather effects
   if (weather === 'rain' || weather === 'storm') {
     drawRain(weather === 'storm' ? 80 : 40);
@@ -989,15 +1056,16 @@ function drawUI() {
   // Title
   drawText('Pocket Ecosystem', centerX, headerH * 0.35, 20, '#3d5a3d', 'center');
   
-  // Day counter and status
+  // Day counter, time-of-day icon, and status
   const status = ecosystemHealth > 80 ? 'Thriving' : ecosystemHealth > 50 ? 'Balanced' : ecosystemHealth > 20 ? 'Struggling' : 'Critical';
   const statusColor = ecosystemHealth > 80 ? '#4caf50' : ecosystemHealth > 50 ? '#ff9800' : '#f44336';
-  drawText(`Day ${daysSurvived} • ${status}`, centerX, headerH * 0.7, 12, statusColor, 'center', 0.8);
+  const todIcon = timeOfDay === 'dawn' ? '🌅' : timeOfDay === 'day' ? '☀️' : timeOfDay === 'dusk' ? '🌇' : '🌙';
+  drawText(`${todIcon} Day ${daysSurvived} • ${status}`, centerX, headerH * 0.7, 12, statusColor, 'center', 0.8);
   
-  // Ecosystem health meter (bottom info panel)
-  const panelH = 70 * scale;
+  // Bottom info panel
+  const panelH = 80 * scale;
   const panelY = H - panelH;
-  
+
   ctx.save();
   ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
   ctx.fillRect(0, panelY, W, panelH);
@@ -1005,39 +1073,52 @@ function drawUI() {
   ctx.lineWidth = 1;
   ctx.strokeRect(0, panelY, W, panelH);
   ctx.restore();
-  
-  // Stats
+
+  // Per-species creature counts
+  const speciesCounts = {};
+  creatures.forEach(c => { speciesCounts[c.species] = (speciesCounts[c.species] || 0) + 1; });
+
   const leftX = 15 * scale;
   const rightX = W - 15 * scale;
-  const line1Y = panelY + 20 * scale;
-  const line2Y = panelY + 45 * scale;
-  
-  drawText(`🌱 ${plants.length} plants`, leftX, line1Y, 11, '#7cb342', 'left');
-  drawText(`🐟 ${creatures.filter(c => c.type === 'fish').length} fish`, leftX, line2Y, 11, '#ff8a65', 'left');
-  
-  drawText(`🦅 ${creatures.filter(c => c.type === 'bird').length} birds`, rightX, line1Y, 11, '#8d6e63', 'right');
-  drawText(`🦋 ${creatures.filter(c => c.type === 'insect').length} insects`, rightX, line2Y, 11, '#f48fb1', 'right');
-  
-  // Health bar
+  const line1Y = panelY + 14 * scale;
+  const line2Y = panelY + 28 * scale;
+
+  // Left column: plants + fish
+  drawText(`🌱 ${plants.length} plants`, leftX, line1Y, 10, '#7cb342', 'left');
+  const fishNames = ['minnow','carp','pike'].filter(s => speciesCounts[s]);
+  const fishStr = fishNames.map(s => `${s}: ${speciesCounts[s]}`).join(', ') || 'none';
+  drawText(`🐟 ${fishStr}`, leftX, line2Y, 9, '#ff8a65', 'left');
+
+  // Right column: birds + insects
+  const birdNames = ['sparrow','hawk'].filter(s => speciesCounts[s]);
+  const birdStr = birdNames.map(s => `${s}: ${speciesCounts[s]}`).join(', ') || 'none';
+  drawText(`🦅 ${birdStr}`, rightX, line1Y, 9, '#8d6e63', 'right');
+  const insectNames = ['butterfly','dragonfly'].filter(s => speciesCounts[s]);
+  const insectStr = insectNames.map(s => `${s}: ${speciesCounts[s]}`).join(', ') || 'none';
+  drawText(`🦋 ${insectStr}`, rightX, line2Y, 9, '#f48fb1', 'right');
+
+  // Health bar — below species counts
   const barW = 120 * scale;
   const barH = 8 * scale;
   const barX = centerX - barW / 2;
-  const barY = panelY + 18 * scale;
-  
+  const barY = panelY + 42 * scale;
+
   ctx.save();
   ctx.fillStyle = '#e0e0e0';
   ctx.fillRect(barX, barY, barW, barH);
-  
+
   const healthColor = ecosystemHealth > 60 ? '#4caf50' : ecosystemHealth > 30 ? '#ff9800' : '#f44336';
   ctx.fillStyle = healthColor;
   ctx.fillRect(barX, barY, barW * (ecosystemHealth / 100), barH);
-  
+
   ctx.strokeStyle = 'rgba(0,0,0,0.2)';
   ctx.lineWidth = 1;
   ctx.strokeRect(barX, barY, barW, barH);
   ctx.restore();
-  
-  drawText(`Health: ${Math.floor(ecosystemHealth)}%`, centerX, panelY + 40 * scale, 10, '#666', 'center');
+
+  // Health label + total creature count
+  drawText(`Health: ${Math.floor(ecosystemHealth)}%`, centerX, panelY + 58 * scale, 9, '#666', 'center');
+  drawText(`${creatures.length} creatures total`, centerX, panelY + 70 * scale, 8, '#999', 'center');
   
   // Mute button
   drawMuteButton();
