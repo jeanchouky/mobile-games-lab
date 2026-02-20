@@ -18,6 +18,8 @@ canvas{display:block;width:100%;height:100%}
 .upgrade{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px;margin-bottom:8px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:all .15s}
 .upgrade:active{transform:scale(0.98);background:rgba(255,255,255,0.1)}
 .upgrade.locked{opacity:0.4}
+.upgrade.affordable{border-color:#ffd93d;box-shadow:0 0 12px rgba(255,217,61,0.3);animation:affordPulse 1.5s ease-in-out infinite}
+@keyframes affordPulse{0%,100%{box-shadow:0 0 8px rgba(255,217,61,0.2)}50%{box-shadow:0 0 18px rgba(255,217,61,0.5)}}
 .upgrade .u-icon{font-size:28px;width:40px;text-align:center}
 .upgrade .u-info{flex:1}
 .upgrade .u-name{font-weight:700;font-size:14px}
@@ -27,6 +29,12 @@ canvas{display:block;width:100%;height:100%}
 #prestige-btn{display:block;margin:12px auto;padding:12px 24px;background:linear-gradient(135deg,#a55eea,#6c5ce7);border:none;color:#fff;border-radius:50px;font-size:16px;font-weight:700;cursor:pointer}
 #prestige-btn:active{transform:scale(0.95)}
 #prestige-info{text-align:center;font-size:12px;color:#888;margin-bottom:8px}
+#achievements{padding:8px 0}
+#achievements h3{text-align:center;font-size:14px;color:#888;margin-bottom:8px}
+.ach{display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:6px 10px;margin:3px;font-size:11px}
+.ach.locked{opacity:0.3;filter:grayscale(1)}
+.ach .ach-icon{font-size:16px}
+.ach .ach-name{font-weight:700;color:#ffd93d}
 .tap-text{position:absolute;pointer-events:none;font-weight:900;font-size:18px;color:#ffd93d;text-shadow:0 0 10px rgba(255,217,61,0.5);animation:tapFloat 0.8s ease-out forwards}
 @keyframes tapFloat{0%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(-40px) scale(0.5)}}
 </style>
@@ -49,8 +57,9 @@ canvas{display:block;width:100%;height:100%}
 <script>
 const C=document.getElementById('c'),X=C.getContext('2d');
 let W,H,dpr;
-const actx=new(window.AudioContext||window.webkitAudioContext)();
-function snd(f,d,t='sine',v=0.06){const o=actx.createOscillator(),g=actx.createGain();o.type=t;o.frequency.value=f;g.gain.setValueAtTime(v,actx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,actx.currentTime+d);o.connect(g);g.connect(actx.destination);o.start();o.stop(actx.currentTime+d)}
+let actx=null;
+function getAudioCtx(){if(!actx)actx=new(window.AudioContext||window.webkitAudioContext)();return actx}
+function snd(f,d,t='sine',v=0.06){try{const ctx=getAudioCtx();ctx.resume();const o=ctx.createOscillator(),g=ctx.createGain();o.type=t;o.frequency.value=f;g.gain.setValueAtTime(v,ctx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+d);o.connect(g);g.connect(ctx.destination);o.start();o.stop(ctx.currentTime+d)}catch(e){}}
 
 let ore=0,totalOre=0,prestigePoints=0,prestigeMulti=1;
 let tapPower=1,autoRate=0;
@@ -58,9 +67,9 @@ let particles=[],floatingTexts=[],asteroids=[];
 let stars=[];
 
 const UPGRADES=[
-  {id:'drill',name:'Better Drill',desc:'2x tap power',icon:'⛏️',baseCost:10,costMult:1.8,level:0,maxLevel:50,effect:()=>{tapPower=Math.pow(2,upgrades[0].level)}},
+  {id:'drill',name:'Better Drill',desc:'2x tap power',icon:'⛏️',baseCost:10,costMult:1.8,level:0,maxLevel:50,effect:()=>{tapPower=Math.pow(2,upgrades[0].level)*(1+upgrades[2].level*0.25)}},
   {id:'auto',name:'Auto-Miner',desc:'+1 ore/sec per level',icon:'🤖',baseCost:50,costMult:2,level:0,maxLevel:30,effect:()=>{autoRate=upgrades[1].level*(1+upgrades[3].level*0.5)}},
-  {id:'cargo',name:'Cargo Bay',desc:'Bigger floating numbers',icon:'📦',baseCost:100,costMult:2.2,level:0,maxLevel:20,effect:()=>{}},
+  {id:'cargo',name:'Cargo Bay',desc:'+25% tap ore per level',icon:'📦',baseCost:100,costMult:2.2,level:0,maxLevel:20,effect:()=>{tapPower=Math.pow(2,upgrades[0].level)*(1+upgrades[2].level*0.25)}},
   {id:'speed',name:'Mining Speed',desc:'Auto-miners 50% faster',icon:'⚡',baseCost:500,costMult:2.5,level:0,maxLevel:15,effect:()=>{autoRate=upgrades[1].level*(1+upgrades[3].level*0.5)}},
   {id:'luck',name:'Lucky Strike',desc:'10% chance of 10x ore',icon:'🍀',baseCost:200,costMult:2,level:0,maxLevel:10,effect:()=>{}},
   {id:'magnet',name:'Ore Magnet',desc:'Auto-collect nearby ore',icon:'🧲',baseCost:1000,costMult:3,level:0,maxLevel:5,effect:()=>{}},
@@ -123,7 +132,7 @@ function renderUpgrades(){
     let locked=u.level>=u.maxLevel;
     let canBuy=ore>=cost&&!locked;
     let div=document.createElement('div');
-    div.className='upgrade'+(locked?' locked':'');
+    div.className='upgrade'+(locked?' locked':canBuy?' affordable':'');
     div.innerHTML=`
       <div class="u-icon">${u.icon}</div>
       <div class="u-info">
@@ -139,7 +148,6 @@ function renderUpgrades(){
 }
 
 function buyUpgrade(i){
-  actx.resume();
   let u=upgrades[i];
   let cost=getCost(u);
   if(ore<cost||u.level>=u.maxLevel)return;
@@ -151,7 +159,6 @@ function buyUpgrade(i){
 }
 
 function tap(x,y){
-  actx.resume();
   let hit=asteroids.find(a=>Math.hypot(x-a.x,y-a.y)<a.r+10);
   let base=tapPower*prestigeMulti;
   let lucky=upgrades[4].level>0&&Math.random()<upgrades[4].level*0.1;
@@ -320,10 +327,23 @@ function checkAchievements(){
   if(newUnlock)localStorage.setItem('astminer_ach',JSON.stringify([...unlockedAchievements]));
 }
 
-setInterval(()=>{renderUpgrades();checkAchievements();save()},2000);
+function renderAchievements(){
+  const el=document.getElementById('achievements');
+  el.innerHTML='<h3>🏆 Achievements</h3>';
+  ACHIEVEMENTS.forEach(a=>{
+    const unlocked=unlockedAchievements.has(a.id);
+    const div=document.createElement('div');
+    div.className='ach'+(unlocked?'':' locked');
+    div.innerHTML=`<span class="ach-icon">${a.icon}</span><span class="ach-name">${unlocked?a.name:'???'}</span>`;
+    div.title=unlocked?a.desc:'Keep playing to unlock';
+    el.appendChild(div);
+  });
+}
+
+setInterval(()=>{renderUpgrades();checkAchievements();renderAchievements();save()},2000);
 
 window.addEventListener('resize',resize);
-load();resize();renderUpgrades();
+load();resize();renderUpgrades();renderAchievements();
 requestAnimationFrame(loop);
 </script>
 </body>

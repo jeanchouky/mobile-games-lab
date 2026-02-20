@@ -59,6 +59,9 @@ let glitchLines = [];
 // Ambient flicker
 let flickerAmount = 0;
 
+// Accessibility
+let reducedFlashing = false;
+
 // Game state
 let discoveries = [];
 let objectStates = {};
@@ -512,7 +515,15 @@ function loadSave() {
     if (l) loopNumber = parseInt(l);
     const dd = localStorage.getItem('dejaVuDeaths');
     if (dd) totalDeaths = parseInt(dd);
+    const ss = localStorage.getItem('dejaVuSolutionStep');
+    if (ss) solutionStep = parseInt(ss);
+    const rf = localStorage.getItem('dejaVuReducedFlashing');
+    if (rf === 'true') reducedFlashing = true;
   } catch(e) {}
+}
+
+function saveSolutionStep() {
+  localStorage.setItem('dejaVuSolutionStep', solutionStep);
 }
 
 // ============================================================
@@ -521,6 +532,14 @@ function loadSave() {
 function updateTitle() {
   for (const ev of inputEvents) {
     if (ev.type === 'tap') {
+      // Check if tap is on the accessibility toggle
+      const toggleX = centerX, toggleY = H - 110 * scale;
+      if (hitTest(ev.x, ev.y, toggleX, toggleY, 200 * scale, 28 * scale)) {
+        reducedFlashing = !reducedFlashing;
+        localStorage.setItem('dejaVuReducedFlashing', reducedFlashing);
+        sfxClick();
+        return;
+      }
       sfxClick();
       startWaking();
     }
@@ -579,11 +598,19 @@ function drawTitle() {
   drawText('TAP TO WAKE UP', centerX, H - 70*scale, 16, '#2a2a2a');
   ctx.restore();
   
+  // Reduced flashing toggle
+  const toggleY = H - 110 * scale;
+  const toggleLabel = reducedFlashing ? '☑ Reduced Flashing' : '☐ Reduced Flashing';
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  drawText(toggleLabel, centerX, toggleY, 11, '#555');
+  ctx.restore();
+
   // Stats
   if (loopNumber > 1 || totalDeaths > 0) {
     drawText(`Loop ${loopNumber} · Deaths: ${totalDeaths} · Discoveries: ${discoveries.length}`, centerX, H - 40*scale, 10, '#999');
   }
-  
+
   drawVignette(0.25);
 }
 
@@ -1144,11 +1171,19 @@ function drawPlaying() {
   }
   
   // Flicker overlay (urgency)
-  if (flickerAmount > 0.01) {
+  if (flickerAmount > 0.01 && !reducedFlashing) {
     ctx.save();
     ctx.globalAlpha = flickerAmount * (0.5 + Math.random() * 0.5);
     ctx.fillStyle = '#b33';
     ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  } else if (flickerAmount > 0.01 && reducedFlashing) {
+    // Subtle border glow instead of full-screen flash
+    ctx.save();
+    ctx.globalAlpha = flickerAmount * 0.4;
+    ctx.strokeStyle = '#b33';
+    ctx.lineWidth = 4 * scale;
+    ctx.strokeRect(0, 0, W, H);
     ctx.restore();
   }
   
@@ -1289,7 +1324,7 @@ function updateDying() {
     resetLoop();
   }
   // Random glitch sounds
-  if (deathTimer < 1.5 && Math.random() < deltaTime * 4) {
+  if (deathTimer < 1.5 && !reducedFlashing && Math.random() < deltaTime * 4) {
     sfxGlitch();
   }
 }
@@ -1303,7 +1338,7 @@ function drawDying() {
   ctx.restore();
   
   // Glitch lines
-  if (deathTimer < 1.5) {
+  if (deathTimer < 1.5 && !reducedFlashing) {
     for (const g of glitchLines) {
       if (deathTimer > g.delay) {
         ctx.save();
@@ -1313,6 +1348,15 @@ function drawDying() {
         ctx.restore();
       }
     }
+  } else if (deathTimer < 1.5 && reducedFlashing) {
+    // Gentle fade-to-dark only
+    ctx.save();
+    ctx.globalAlpha = Math.min(0.3, deathTimer * 0.2);
+    ctx.fillStyle = '#b33';
+    ctx.strokeStyle = '#b33';
+    ctx.lineWidth = 2 * scale;
+    ctx.strokeRect(0, 0, W, H);
+    ctx.restore();
   }
   
   // Dark overlay
