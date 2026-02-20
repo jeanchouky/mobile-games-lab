@@ -49,7 +49,7 @@ canvas{flex:1;display:block;background:#16213e}
   <button onclick="changeSize(4)">➕ Size</button>
   <button onclick="saveToGallery()">💾 Save</button>
   <button onclick="showGallery()">🖼️ Gallery</button>
-  <button onclick="shareArt()">📤 Share</button>
+  <button onclick="exportPNG()">📥 Export PNG</button>
 </div>
 <div id="gallery" class="hidden">
   <button class="close-btn" onclick="hideGallery()">✕</button>
@@ -211,6 +211,7 @@ function setTool(t){
 }
 
 function clearCanvas(){
+  if(!confirm('Clear the entire canvas? This can be undone with ↩️'))return;
   for(let y=0;y<gridSize;y++)for(let x=0;x<gridSize;x++)pixels[y][x]=null;
   pushHistory();
 }
