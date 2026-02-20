@@ -102,7 +102,9 @@ function initAudio() {
   if (!audioCtx) {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   }
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(() => {});
+  }
 }
 
 // Request microphone access
@@ -1081,26 +1083,84 @@ function drawRecordingScreen() {
   ctx.textAlign = 'center';
   ctx.fillText('CAPTURE SOUND', centerX, 80);
   
-  // Concentric circles animation
+  // Get current mic volume for reactive visuals
+  let currentVolume = 0;
+  if (recordingState.active && analyser && micDataArray) {
+    analyser.getByteTimeDomainData(micDataArray);
+    let sum = 0;
+    for (let i = 0; i < micDataArray.length; i++) {
+      const v = (micDataArray[i] - 128) / 128;
+      sum += v * v;
+    }
+    currentVolume = Math.sqrt(sum / micDataArray.length);
+  }
+
+  // Concentric circles animation — react to mic input
   const numCircles = 5;
   const baseRadius = 60;
-  const pulse = Math.sin(gameTime * 3) * 10;
-  
+  const volBoost = currentVolume * 80;
+  const pulse = Math.sin(gameTime * 3) * 10 + volBoost;
+
   for (let i = 0; i < numCircles; i++) {
     const radius = baseRadius + i * 30 + pulse;
     const alpha = 1 - (i / numCircles);
-    
-    ctx.strokeStyle = `rgba(255, 107, 107, ${alpha * 0.6})`;
-    ctx.lineWidth = 3;
+    const r = Math.min(255, 107 + currentVolume * 300);
+    const g = Math.max(0, 107 - currentVolume * 200);
+
+    ctx.strokeStyle = `rgba(${Math.round(r)}, ${Math.round(g)}, 107, ${alpha * 0.6})`;
+    ctx.lineWidth = 3 + currentVolume * 4;
     ctx.beginPath();
     ctx.arc(centerX, centerY - 40, radius, 0, Math.PI * 2);
     ctx.stroke();
   }
-  
-  // Microphone icon
-  ctx.fillStyle = '#ff6b6b';
-  ctx.font = `40px sans-serif`;
+
+  // Microphone icon — pulse size with volume
+  const micScale = 1 + currentVolume * 0.5;
+  ctx.fillStyle = recordingState.active ? (currentVolume > 0.1 ? '#ff3333' : '#ff6b6b') : '#ff6b6b';
+  ctx.font = `${Math.round(40 * micScale)}px sans-serif`;
   ctx.fillText('🎤', centerX, centerY - 30);
+
+  // Volume meter bar
+  if (recordingState.active) {
+    const meterX = 30;
+    const meterY = centerY - 100;
+    const meterW = 20;
+    const meterH = 120;
+    // Background
+    ctx.fillStyle = '#222';
+    ctx.fillRect(meterX, meterY, meterW, meterH);
+    // Level
+    const level = Math.min(1, currentVolume * 3);
+    const levelH = meterH * level;
+    const meterGrad = ctx.createLinearGradient(meterX, meterY + meterH, meterX, meterY);
+    meterGrad.addColorStop(0, '#4caf50');
+    meterGrad.addColorStop(0.6, '#ffd700');
+    meterGrad.addColorStop(1, '#ff6b6b');
+    ctx.fillStyle = meterGrad;
+    ctx.fillRect(meterX, meterY + meterH - levelH, meterW, levelH);
+    // Border
+    ctx.strokeStyle = '#64b5f6';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(meterX, meterY, meterW, meterH);
+    // Label
+    ctx.fillStyle = '#888';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('VOL', meterX + meterW / 2, meterY + meterH + 14);
+    ctx.textAlign = 'center';
+
+    // Also show a right-side meter mirrored
+    const rmX = W - 50;
+    ctx.fillStyle = '#222';
+    ctx.fillRect(rmX, meterY, meterW, meterH);
+    ctx.fillStyle = meterGrad;
+    ctx.fillRect(rmX, meterY + meterH - levelH, meterW, levelH);
+    ctx.strokeStyle = '#64b5f6';
+    ctx.strokeRect(rmX, meterY, meterW, meterH);
+    ctx.fillStyle = '#888';
+    ctx.font = '10px sans-serif';
+    ctx.fillText('VOL', rmX + meterW / 2, meterY + meterH + 14);
+  }
   
   // Live waveform if recording
   if (recordingState.active && analyser && micDataArray) {
