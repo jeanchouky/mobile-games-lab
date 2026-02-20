@@ -60,8 +60,9 @@ canvas{display:block;width:100vw;height:100vh}
 <script>
 const C=document.getElementById('c'),ctx=C.getContext('2d');
 let W,H,dpr;
-const actx=new(window.AudioContext||window.webkitAudioContext)();
-function snd(f,d,t='sine',v=0.08){const o=actx.createOscillator(),g=actx.createGain();o.type=t;o.frequency.value=f;g.gain.setValueAtTime(v,actx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,actx.currentTime+d);o.connect(g);g.connect(actx.destination);o.start();o.stop(actx.currentTime+d)}
+let actx=null;
+function ensureAudio(){if(!actx)actx=new(window.AudioContext||window.webkitAudioContext)();if(actx.state==='suspended')actx.resume();}
+function snd(f,d,t='sine',v=0.08){ensureAudio();const o=actx.createOscillator(),g=actx.createGain();o.type=t;o.frequency.value=f;g.gain.setValueAtTime(v,actx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,actx.currentTime+d);o.connect(g);g.connect(actx.destination);o.start();o.stop(actx.currentTime+d)}
 
 const SYMBOLS=['🌟','🎈','🔥','💎','🌈','🎵','🍀','⚡','🌸','🎯','🦋','🌙','❄️','🎪','🍄','🎭','🌺','💫','🎲','🐱'];
 const CARD_COLORS=['#e94560','#4d96ff','#6bcb77','#ffd93d','#a55eea','#fd79a8','#00cec9','#e17055','#74b9ff','#badc58'];
@@ -128,8 +129,9 @@ function initCards(){
   cards.forEach((c,i)=>flipAnims[i]={progress:1,direction:-1,timer:1.5+i*0.05});
 }
 
+let baseRotSpeed=0.003;
 function startGame(diff){
-  actx.resume();
+  ensureAudio();
   difficulty=diff;level=1;
   if(diff==='easy'){cols=3;rows=2}
   else if(diff==='medium'){cols=4;rows=3}
@@ -137,8 +139,19 @@ function startGame(diff){
   document.getElementById('menu').classList.add('hidden');
   document.getElementById('game-over').classList.add('hidden');
   layoutCards();initCards();
-  rotSpeed=0.003*(diff==='hard'?2:diff==='medium'?1.5:1);
+  baseRotSpeed=0.003*(diff==='hard'?2:diff==='medium'?1.5:1);
+  rotSpeed=baseRotSpeed;
+  updateSpeedDisplay();
   gameActive=true;
+}
+function updateSpeedDisplay(){
+  let speedMult=rotSpeed/0.003;
+  document.getElementById('speed').textContent=speedMult.toFixed(1)+'x';
+  // Color code the speed indicator
+  let el=document.getElementById('speed');
+  if(speedMult>=3)el.style.color='#e94560';
+  else if(speedMult>=2)el.style.color='#ffd93d';
+  else el.style.color='#6bcb77';
 }
 
 function clickCard(idx){
@@ -184,6 +197,7 @@ function clickCard(idx){
               document.getElementById('game-over').classList.remove('hidden');
             }else{
               rotSpeed+=0.002;
+              updateSpeedDisplay();
               initCards();layoutCards();
             }
           },600);
@@ -203,7 +217,7 @@ function clickCard(idx){
 
 C.addEventListener('click',e=>{
   if(!gameActive)return;
-  actx.resume();
+  ensureAudio();
   let mx=e.clientX,my=e.clientY;
   // Find closest card
   let bestIdx=-1,bestD=Infinity;
@@ -220,7 +234,7 @@ C.addEventListener('click',e=>{
 C.addEventListener('touchstart',e=>{
   e.preventDefault();
   if(!gameActive)return;
-  actx.resume();
+  ensureAudio();
   let t=e.touches[0];
   let mx=t.clientX,my=t.clientY;
   let bestIdx=-1,bestD=Infinity;
@@ -278,12 +292,19 @@ function loop(t){
     
     let flipProg=flipAnims[idx]?flipAnims[idx].progress:0;
     let isFlipped=flipProg>0.5;
-    let flipScale=Math.abs(Math.cos(flipProg*Math.PI));
+    // Smoother flip with easing (ease-in-out cubic)
+    let eased=flipProg<0.5?4*flipProg*flipProg*flipProg:1-Math.pow(-2*flipProg+2,3)/2;
+    let flipScale=Math.abs(Math.cos(eased*Math.PI));
+    // Add subtle scale bounce at end of flip
+    let bounceScale=1;
+    if(flipProg>0.8&&flipAnims[idx]&&flipAnims[idx].direction>0){
+      bounceScale=1+Math.sin((flipProg-0.8)*Math.PI/0.2)*0.06;
+    }
     
     ctx.save();
     ctx.translate(pp.x,pp.y);
-    ctx.scale(flipScale,1);
-    
+    ctx.scale(flipScale*bounceScale,bounceScale);
+
     // Card shadow
     ctx.fillStyle='rgba(0,0,0,0.3)';
     roundRect(ctx,-(w/2)+3,-(h/2)+3,w,h,8*s);ctx.fill();
