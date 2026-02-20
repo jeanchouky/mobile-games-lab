@@ -35,6 +35,7 @@ canvas{display:block}
   <h1>ORBIT</h1>
   <div class="sub">Tap to launch satellites into orbit around planets. Find stable orbits to complete each level.</div>
   <button class="btn" onclick="startLevel(1)">LAUNCH</button>
+  <button class="btn" style="background:linear-gradient(135deg,#2a3a2a,#3a5a3a);border-color:rgba(107,203,119,0.3);color:#6bcb77" onclick="startSandbox()">🪐 SANDBOX</button>
 </div>
 
 <div class="overlay hidden" id="level-complete">
@@ -70,9 +71,12 @@ function playTone(f,d=0.2,t='sine',v=0.06){
 const G=0.5;
 let planets,satellites,blackHoles,asteroids;
 let level,satsToLaunch,satsInOrbit,totalSats,gameActive,launchMode;
+let sandboxMode=false;
 let stars=[];
 let particles=[];
-let checkTimer=0; // timer for fail check (wait a bit before checking)
+let checkTimer=0;
+let predictTrail=[];
+let hoverPos=null;
 
 for(let i=0;i<200;i++)stars.push({x:Math.random(),y:Math.random(),s:Math.random()*1.5+0.5,b:Math.random()});
 
@@ -95,6 +99,23 @@ function showMenu(){
   document.getElementById('hud').classList.add('hidden');
   document.getElementById('hint').textContent='';
   gameActive=false;
+}
+
+function startSandbox(){
+  initAudio();sandboxMode=true;
+  document.getElementById('menu').classList.add('hidden');
+  document.getElementById('level-complete').classList.add('hidden');
+  document.getElementById('fail-screen').classList.add('hidden');
+  document.getElementById('hud').classList.remove('hidden');
+  level=0;
+  planets=[{x:W*0.5,y:H*0.5,r:30,m:1000,color:'#ffd700',pulse:0},{x:W*0.25,y:H*0.35,r:18,m:400,color:'#4a9eff',pulse:0},{x:W*0.75,y:H*0.65,r:20,m:500,color:'#ff6b6b',pulse:0}];
+  blackHoles=[];asteroids=[];
+  satellites=[];particles=[];predictTrail=[];hoverPos=null;
+  totalSats=99;satsToLaunch=99;satsInOrbit=0;
+  gameActive=true;launchMode=true;checkTimer=0;
+  document.getElementById('level-text').textContent='Sandbox';
+  document.getElementById('hint').textContent='Tap anywhere to launch — no failure, just orbits';
+  updateHud();
 }
 
 function startLevel(n){
