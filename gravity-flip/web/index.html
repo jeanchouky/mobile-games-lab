@@ -1407,6 +1407,7 @@ const LEVELS = [
       [0, 0.35, 0.15, 0.03],
       [0.2, 0.55, 0.12, 0.03, 'bouncy'],
       [0.38, 0.3, 0.1, 0.03, 'crumble'],
+      [0.48, 0.5, 0.08, 0.03, 'moving', 0, 0.06, 1.3],
       [0.55, 0.65, 0.12, 0.03],
       [0.7, 0.4, 0.1, 0.03, 'crumble'],
       [0.85, 0.8, 0.15, 0.03],
@@ -1419,7 +1420,8 @@ const LEVELS = [
       [0.8, 0.9, 0.05, 0.06],
     ],
     orbs: [[0.1, 0.18], [0.5, 0.2], [0.9, 0.68]],
-    wells: [[0.45, 0.5, 0.3, 90]]
+    wells: [[0.45, 0.5, 0.3, 90]],
+    lasers: [[0.32, 0.35, 0.03, 0.28, 1.4, 2.0, 0.3], [0.65, 0.35, 0.03, 0.28, 1.4, 2.0, 1.3]]
   },
 ];
 
@@ -1435,16 +1437,22 @@ function startLevel(index) {
   
   const platforms = L.platforms.map(d => {
     const pl = new Platform(W * d[0], H * d[1], W * d[2], H * d[3], d[4] || 'solid');
+    if (d[4] === 'moving') {
+      pl.moveRangeX = (d[5] || 0) * W;
+      pl.moveRangeY = (d[6] || 0) * H;
+      pl.moveSpeed = d[7] || 1;
+    }
     return pl;
   });
-  
+
   const spikes = L.spikes.map(d => new Spike(W * d[0], H * d[1], W * d[2], H * d[3]));
   const orbs = L.orbs.map(d => new Orb(W * d[0], H * d[1]));
   const wells = L.wells.map(d => new GravityWell(W * d[0], H * d[1], d[2], d[3]));
+  const lasers = (L.lasers || []).map(d => new LaserBeam(W * d[0], H * d[1], W * d[2], H * d[3], d[4], d[5], d[6]));
   const portal = new Portal(W * L.goal[0], H * L.goal[1]);
   
   gs = {
-    player: p, platforms, spikes, orbs, portal, wells,
+    player: p, platforms, spikes, orbs, portal, wells, lasers,
     time: 0, orbsCollected: 0, totalOrbs: orbs.length,
     dead: false, won: false,
     deathCount: 0,
@@ -1503,6 +1511,7 @@ function updateGame() {
   gs.orbs.forEach(o => o.update());
   gs.portal.update();
   gs.wells.forEach(w => w.update());
+  gs.lasers.forEach(l => l.update());
   
   // Gravity wells
   gs.wells.forEach(w => w.applyForce(p));
@@ -1562,6 +1571,11 @@ function updateGame() {
       emitSpark(p.x, p.y, '#ff4488', 5);
       screenShake = Math.max(screenShake, 3);
     }
+  }
+
+  // Laser check
+  for (const l of gs.lasers) {
+    if (l.check(p)) { sfxLaser(); killPlayer(); return; }
   }
   
   // Out of bounds
@@ -1664,6 +1678,7 @@ function drawGame() {
   }
   
   gs.wells.forEach(w => w.draw());
+  gs.lasers.forEach(l => l.draw());
   gs.platforms.forEach(pl => pl.draw());
   gs.spikes.forEach(s => s.draw());
   gs.orbs.forEach(o => o.draw());
@@ -1734,11 +1749,29 @@ function drawHUD() {
   X.fillStyle = 'rgba(0,0,0,0.3)';
   X.fillRect(0, 0, W, 55 * S);
   
-  // Level name
+  // Level name with progress
   X.fillStyle = 'rgba(255,255,255,0.7)';
   X.font = `${13 * S}px sans-serif`;
   X.textAlign = 'left';
-  X.fillText(`${lvl + 1}. ${LEVELS[lvl].name}`, 12 * S, 20 * S);
+  X.fillText(`${lvl + 1}/${LEVELS.length}  ${LEVELS[lvl].name}`, 12 * S, 20 * S);
+
+  // Level progress bar
+  const progW = 80 * S;
+  const progH = 2.5 * S;
+  const progX = 12 * S;
+  const progY = 26 * S;
+  X.fillStyle = 'rgba(255,255,255,0.08)';
+  X.beginPath();
+  X.roundRect(progX, progY, progW, progH, progH / 2);
+  X.fill();
+  X.fillStyle = currentAccent;
+  X.shadowColor = currentAccent;
+  X.shadowBlur = 3 * S;
+  const progFill = (lvl + 1) / LEVELS.length;
+  X.beginPath();
+  X.roundRect(progX, progY, Math.max(progH, progW * progFill), progH, progH / 2);
+  X.fill();
+  X.shadowBlur = 0;
   
   // Orb counter with icons
   const orbFull = gs.orbsCollected >= gs.totalOrbs;
