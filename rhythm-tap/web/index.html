@@ -381,10 +381,29 @@ function draw(cfg,hitLineY,beatPhase){
     ctx.shadowBlur=0;ctx.globalAlpha=1;
   }
   
+  // Upcoming beat preview - show markers above visible notes
+  const previewY=20;
+  for(const n of notes){
+    if(n.hit||n.y>0)continue;
+    const cx=n.lane*laneW+laneW/2;
+    const alpha=Math.max(0.1,Math.min(0.5,1+n.y/200));
+    ctx.fillStyle=LANE_COLORS[n.lane];ctx.globalAlpha=alpha;
+    ctx.beginPath();ctx.arc(cx,previewY,4,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;
+  }
+
   // HUD
   ctx.fillStyle='#fff';ctx.font='bold 1.2rem sans-serif';ctx.textAlign='left';
   ctx.fillText(Math.round(score),16,32);
-  
+
+  // Streak counter
+  if(combo>0){
+    const streakAlpha=Math.min(1,combo/5);
+    ctx.fillStyle=combo>=20?'#ff006e':combo>=10?'#ffd700':'rgba(255,255,255,0.7)';
+    ctx.font='bold 0.7rem sans-serif';ctx.textAlign='right';
+    ctx.fillText(`🔥 ${combo} streak`,W-16,28);
+  }
+
   // Combo with scaling effect
   if(combo>1){
     const comboScale=combo>10?1.3:combo>5?1.15:1;
