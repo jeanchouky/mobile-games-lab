@@ -438,7 +438,7 @@ function drawCoffeeStain(x, y, r) {
 // ============================================================
 // SCREEN SHAKE
 // ============================================================
-function shake(amt = 8) { shakeAmount = Math.max(shakeAmount, amt * scale); }
+function shake(amt = 8) { shakeAmount = Math.max(shakeAmount, (reducedFlashing ? amt * 0.3 : amt) * scale); }
 function applyShake() {
   if (shakeAmount > 0.5) {
     ctx.translate((Math.random()-0.5) * shakeAmount, (Math.random()-0.5) * shakeAmount);
@@ -764,6 +764,7 @@ function updatePlaying() {
         addDiscovery('The clock stopped at 3:47. Always 3:47.', 'observation');
         objectStates.clockExamined = true;
         solutionStep = Math.max(solutionStep, 1);
+        saveSolutionStep();
       } else {
         addDiscovery('Tapping the clock changes nothing.', 'observation');
       }
@@ -776,6 +777,7 @@ function updatePlaying() {
           addDiscovery('Used 3:47 to open the drawer. Found a KEY.', 'key');
           objectStates.drawerOpened = true;
           solutionStep = Math.max(solutionStep, 2);
+          saveSolutionStep();
           shake(4);
           spawnParticles(objs.drawer.x, objs.drawer.y, 15, '#da2', { size: 0.8 });
         } else {
@@ -792,6 +794,7 @@ function updatePlaying() {
         addDiscovery('My reflection blinks when I don\'t.', 'warning');
         objectStates.mirrorExamined = true;
         solutionStep = Math.max(solutionStep, 3);
+        saveSolutionStep();
         shake(6);
       } else {
         shake(15);
@@ -807,6 +810,7 @@ function updatePlaying() {
           addDiscovery('The key fits! Door UNLOCKED.', 'key');
           objectStates.doorUnlocked = true;
           solutionStep = Math.max(solutionStep, 4);
+          saveSolutionStep();
           shake(5);
           spawnParticles(objs.door.x, objs.door.y, 20, '#4a4', { rise: true });
         } else {
@@ -831,6 +835,7 @@ function updatePlaying() {
         addDiscovery('The window is painted on. It\'s not real.', 'observation');
         objectStates.windowExamined = true;
         solutionStep = Math.max(solutionStep, 5);
+        saveSolutionStep();
       } else {
         addDiscovery('Still fake. Still a lie.', 'observation');
       }
@@ -851,6 +856,7 @@ function updatePlaying() {
         addDiscovery('"Don\'t trust the mirror. Trust the time."', 'key');
         objectStates.noteFound = true;
         solutionStep = Math.max(solutionStep, 5);
+        saveSolutionStep();
         shake(3);
         spawnParticles(objs.note.x, objs.note.y, 10, '#4a4', { size: 0.6 });
       } else {
@@ -1420,6 +1426,7 @@ function updateVictory() {
       localStorage.removeItem('dejaVuDiscoveries');
       localStorage.removeItem('dejaVuLoop');
       localStorage.removeItem('dejaVuDeaths');
+      localStorage.removeItem('dejaVuSolutionStep');
       discoveries = [];
       loopNumber = 1;
       totalDeaths = 0;

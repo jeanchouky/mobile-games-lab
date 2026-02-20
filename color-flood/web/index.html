@@ -46,7 +46,7 @@ canvas{width:100%;height:100%;border-radius:12px;image-rendering:pixelated}
 <div id="game" class="hidden">
   <div id="header">
     <div class="stat"><div class="val" id="moves">0</div><div class="lbl">Moves</div></div>
-    <div class="stat"><div class="val" id="par">25</div><div class="lbl">Par</div></div>
+    <div class="stat"><div class="val" id="remaining">25</div><div class="lbl">Left</div></div>
     <div class="stat"><div class="val" id="pct">0%</div><div class="lbl">Captured</div></div>
     <div class="stat"><div class="val" id="best">-</div><div class="lbl">Best</div></div>
   </div>
@@ -90,7 +90,8 @@ const PAR={10:18,14:25,18:32};
 let boardSize=14,board,colors,moves,totalCells,captured,canvas,ctx,cellSize;
 let audioCtx;
 let history=[];
-let animCells=new Map(); // cell key -> {from,to,progress}
+let animCells=new Map(); // cell key -> {progress}
+let animRunning=false;
 
 function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)()}
 function playTone(f,d=0.08,v=0.1){
@@ -236,7 +237,10 @@ function updateUI(){
   const movesEl=document.getElementById('moves');
   movesEl.textContent=moves;
   movesEl.classList.add('bump');setTimeout(()=>movesEl.classList.remove('bump'),150);
-  document.getElementById('par').textContent=PAR[boardSize];
+  const remaining=PAR[boardSize]-moves;
+  const remEl=document.getElementById('remaining');
+  remEl.textContent=remaining;
+  remEl.style.color=remaining<=3&&remaining>0?'#e94560':remaining<=0?'#ff0000':'#fff';
   document.getElementById('pct').textContent=Math.round(captured/totalCells*100)+'%';
   document.getElementById('message').textContent=
     captured===totalCells?'🎉 Complete!':
@@ -256,13 +260,23 @@ function drawBoard(){
       ctx.fillStyle=colors[board[y][x]];
       ctx.fillRect(x*cellSize,y*cellSize,cellSize,cellSize);
       
-      // Animate new cells with a scale effect
+      // Animate new cells with a scale/flash effect
       const key=x+','+y;
       const anim=animCells.get(key);
       if(anim&&anim.progress<1){
-        anim.progress+=0.1;
-        ctx.fillStyle='rgba(255,255,255,'+(0.3*(1-anim.progress))+')';
+        anim.progress=Math.min(1,anim.progress+0.06);
+        const p=anim.progress;
+        // White flash that fades out
+        const flash=p<0.3?p/0.3:(1-p)/0.7;
+        ctx.fillStyle='rgba(255,255,255,'+Math.max(0,flash*0.5)+')';
         ctx.fillRect(x*cellSize,y*cellSize,cellSize,cellSize);
+        // Scale-in from center
+        if(p<0.4){
+          const s=0.5+p/0.4*0.5;
+          const off=(1-s)*cellSize*0.5;
+          ctx.fillStyle=colors[board[y][x]];
+          ctx.fillRect(x*cellSize+off,y*cellSize+off,cellSize*s,cellSize*s);
+        }
         if(anim.progress>=1)animCells.delete(key);
       }
     }
@@ -286,8 +300,11 @@ function drawBoard(){
     if(!regionSet.has((x+1)+','+y)){ctx.beginPath();ctx.moveTo((x+1)*cellSize,y*cellSize);ctx.lineTo((x+1)*cellSize,(y+1)*cellSize);ctx.stroke()}
   }
   
-  // Keep animating if needed
-  if(animCells.size>0)requestAnimationFrame(()=>drawBoard());
+  // Keep animating if needed — throttled to prevent excessive redraws
+  if(animCells.size>0&&!animRunning){
+    animRunning=true;
+    requestAnimationFrame(()=>{animRunning=false;drawBoard()});
+  }
 }
 
 function winGame(){
