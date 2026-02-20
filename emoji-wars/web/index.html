@@ -700,7 +700,15 @@ function updateBattle() {
       }
     } else {
       const speed = d.spd * spdMod * deltaTime * 40;
-      u.y += u.owner === 'player' ? -speed : speed;
+      const moveDir = u.owner === 'player' ? -1 : 1;
+      // Prevent friendly unit stacking: check for allies ahead
+      let blocked = false;
+      for (const u2 of units) {
+        if (u2 === u || u2.owner !== u.owner || u2.lane !== u.lane) continue;
+        const dy = (u2.y - u.y) * moveDir;
+        if (dy > 0 && dy < 28) { blocked = true; break; }
+      }
+      if (!blocked) u.y += moveDir * speed;
     }
     
     // Reach enemy base
@@ -802,11 +810,21 @@ function drawBattle() {
   
   const battleTop = 80; const battleBot = H - 140;
   
-  // Timer + wave
+  // Timer + wave counter
   const secs = Math.max(0, Math.ceil(battleTimer));
   const timerColor = secs <= 15 ? '#ff4444' : '#fff';
   drawRR(centerX, 18, 100, 28, 10, '#111', '#333');
-  drawText(`⏱ ${secs}s • W${wave}`, centerX, 18, 13, timerColor, 'center', '700');
+  drawText(`⏱ ${secs}s`, centerX, 18, 13, timerColor, 'center', '700');
+
+  // Wave counter (left side, prominent)
+  drawRR(35, 18, 60, 26, 8, 'rgba(255,215,0,0.15)', '#ffd700', 1);
+  drawText(`W${wave}`, 35, 18, 13, '#ffd700', 'center', '800');
+
+  // Kill count (right side)
+  if (killCount > 0) {
+    drawRR(W - 35, 18, 50, 26, 8, 'rgba(255,68,68,0.1)', '#555');
+    drawText(`💀${killCount}`, W - 35, 18, 11, '#aaa', 'center', '600');
+  }
   
   // Enemy HP bar
   const ehpRatio = Math.max(0, enemyHP / 100);
@@ -882,16 +900,23 @@ function drawBattle() {
     drawEmoji(u.emoji, u.x, u.y, 26);
     ctx.restore();
     
-    // HP bar
+    // HP bar (improved: larger with border and label)
     const hpRatio = u.hp / u.maxHp;
-    const barW = 24;
-    ctx.fillStyle = '#222'; ctx.fillRect(u.x - barW/2, u.y - 18, barW, 3);
+    const barW = 30;
+    const barH = 5;
+    const barY2 = u.y - 20;
+    // Background
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(u.x - barW/2 - 1, barY2 - 1, barW + 2, barH + 2);
+    // Bar fill
     ctx.fillStyle = hpRatio > 0.6 ? '#4CAF50' : hpRatio > 0.3 ? '#FF9800' : '#f44336';
-    ctx.fillRect(u.x - barW/2, u.y - 18, barW * hpRatio, 3);
-    
-    // Owner dot
-    ctx.fillStyle = u.owner === 'player' ? 'rgba(68,255,68,0.5)' : 'rgba(255,68,68,0.5)';
-    ctx.beginPath(); ctx.arc(u.x, u.y + 15, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillRect(u.x - barW/2, barY2, barW * Math.max(0, hpRatio), barH);
+    // Border
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 0.5;
+    ctx.strokeRect(u.x - barW/2, barY2, barW, barH);
+
+    // Owner indicator
+    ctx.fillStyle = u.owner === 'player' ? 'rgba(68,255,68,0.6)' : 'rgba(255,68,68,0.6)';
+    ctx.beginPath(); ctx.arc(u.x, u.y + 16, 3, 0, Math.PI * 2); ctx.fill();
   }
   
   drawParticles();
@@ -913,9 +938,9 @@ function drawBattle() {
   ctx.fillStyle = '#222'; ctx.fillRect(60, ey - 4, W - 80, 8);
   ctx.fillStyle = '#ffd700'; ctx.fillRect(60, ey - 4, (W - 80) * (playerEnergy / 10), 8);
   
-  // Kill tracker
-  if (killCount > 0) {
-    drawText(`💀 ${killCount}`, W - 20, ey, 11, '#888', 'right');
+  // Streak display
+  if (killStreak >= 3) {
+    drawText(`🔥 ${killStreak}x`, W - 20, ey, 11, '#ff8800', 'right');
   }
   
   // Player hand
