@@ -70,13 +70,38 @@ let hintLevel = 0; // increases with deaths in room
 let audioMuted = false; // global mute state
 let highestRoom = 0;
 
+// Speedrun timer
+let speedrunMode = false;
+let speedrunTime = 0; // total seconds
+let speedrunRunning = false;
+let bestSpeedrunTime = 0;
+
+// Hint system
+let hintsRemaining = 3;
+let currentHintText = '';
+let hintShowTimer = 0;
+let hintButtonBounds = null;
+
+const ROOM_HINTS = {
+  0: 'Maybe the flashy button isn\'t the way...',
+  1: 'That title bar looks draggable.',
+  2: 'Patience. Just wait it out.',
+  3: 'The obvious X is fake. Look for a subtle one nearby.',
+  4: 'Not all buttons tell the truth about their color.',
+  5: 'Read the fine print. Dismiss everything.',
+  6: 'The arrow lies. Go the other way.',
+  7: 'Tap the paintings in the right order.',
+  8: 'Everything is mirrored. Swipe the opposite way.',
+  9: 'Don\'t trust the troll. Do nothing. Or do you?'
+};
+
 // Save/load progress
-try { 
+try {
   const s = localStorage.getItem('trustnothing');
-  if (s) { const d = JSON.parse(s); highestRoom = d.highestRoom || 0; totalDeaths = d.totalDeaths || 0; }
+  if (s) { const d = JSON.parse(s); highestRoom = d.highestRoom || 0; totalDeaths = d.totalDeaths || 0; bestSpeedrunTime = d.bestSpeedrunTime || 0; }
 } catch(e) {}
-function saveGameProgress() { 
-  try { localStorage.setItem('trustnothing', JSON.stringify({ highestRoom, totalDeaths })); } catch(e) {} 
+function saveGameProgress() {
+  try { localStorage.setItem('trustnothing', JSON.stringify({ highestRoom, totalDeaths, bestSpeedrunTime })); } catch(e) {}
 }
 
 // --- RESIZE ---
@@ -856,6 +881,11 @@ function fadeToRoom(roomIndex) {
     roomState = {};
     showingDeath = false;
     if (roomIndex > highestRoom) { highestRoom = roomIndex; }
+    // Start speedrun timer when leaving room 0
+    if (roomIndex === 1 && speedrunMode && !speedrunRunning) {
+      speedrunTime = 0;
+      speedrunRunning = true;
+    }
     saveGameProgress();
     initRoom(roomIndex);
     transitionDir = -1;
@@ -864,14 +894,15 @@ function fadeToRoom(roomIndex) {
 
 function updateTransition() {
   if (!transitioning) return;
+  const speed = 3.0; // alpha per second — smooth and consistent
   if (transitionDir === 1) {
-    transitionAlpha += 0.05;
+    transitionAlpha += speed * deltaTime;
     if (transitionAlpha >= 1) {
       transitionAlpha = 1;
       if (transitionCallback) { transitionCallback(); transitionCallback = null; }
     }
   } else {
-    transitionAlpha -= 0.05;
+    transitionAlpha -= speed * deltaTime;
     if (transitionAlpha <= 0) {
       transitionAlpha = 0;
       transitioning = false;
@@ -882,7 +913,11 @@ function updateTransition() {
 function drawTransition() {
   if (transitionAlpha > 0) {
     ctx.save();
-    ctx.globalAlpha = transitionAlpha;
+    // Ease the alpha for smoother feel
+    const eased = transitionAlpha < 0.5
+      ? 2 * transitionAlpha * transitionAlpha
+      : 1 - Math.pow(-2 * transitionAlpha + 2, 2) / 2;
+    ctx.globalAlpha = eased;
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, W, H);
     ctx.restore();
@@ -975,7 +1010,18 @@ function drawDeathCounter() {
   ctx.textAlign = 'right';
   ctx.fillStyle = totalDeaths > 20 ? '#cc4444' : '#666';
   ctx.fillText(`💀 ${totalDeaths}`, W - 12 * scale, 24 * scale);
-  
+
+  // Speedrun timer
+  if (speedrunMode && currentRoom > 0 && !chapterComplete) {
+    const m = Math.floor(speedrunTime / 60);
+    const s = Math.floor(speedrunTime % 60);
+    const ms = Math.floor((speedrunTime % 1) * 100);
+    ctx.font = `bold ${11 * scale}px 'Courier New', monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#22aa22';
+    ctx.fillText(`${m}:${String(s).padStart(2,'0')}.${String(ms).padStart(2,'0')}`, centerX, 18 * scale);
+  }
+
   // Room progress dots
   if (!chapterComplete && currentRoom > 0) {
     const dotSize = 4 * scale;
@@ -992,6 +1038,71 @@ function drawDeathCounter() {
     }
   }
   ctx.restore();
+}
+
+// Hint button (visible during gameplay rooms 1-9)
+function drawHintButton() {
+  if (chapterComplete || currentRoom === 0 || showingDeath) { hintButtonBounds = null; return; }
+  if (hintsRemaining <= 0) { hintButtonBounds = null; return; }
+
+  const btnX = 20 * scale;
+  const btnY = H - 30 * scale;
+  const btnSize = 28 * scale;
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(255,215,0,0.15)';
+  ctx.beginPath();
+  ctx.arc(btnX, btnY, btnSize / 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,215,0,0.5)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(btnX, btnY, btnSize / 2, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.font = `${14 * scale}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#cc9900';
+  ctx.fillText('💡', btnX, btnY);
+  // Count
+  ctx.font = `${8 * scale}px sans-serif`;
+  ctx.fillStyle = '#999';
+  ctx.fillText(`${hintsRemaining}`, btnX + btnSize / 2 - 2 * scale, btnY - btnSize / 2 + 4 * scale);
+  ctx.restore();
+
+  hintButtonBounds = { x: btnX, y: btnY, size: btnSize };
+}
+
+// Show hint text overlay
+function drawHintOverlay() {
+  if (hintShowTimer <= 0 || !currentHintText) return;
+  hintShowTimer -= deltaTime;
+  const alpha = Math.min(1, hintShowTimer / 0.5, (3 - (3 - hintShowTimer)) / 0.5);
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, alpha);
+  // Background
+  const boxW = Math.min(W * 0.8, 300 * scale);
+  const boxH = 50 * scale;
+  const boxX = centerX - boxW / 2;
+  const boxY = H - 80 * scale;
+  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  roundRect(boxX, boxY, boxW, boxH, 10 * scale);
+  ctx.fill();
+  // Text
+  ctx.fillStyle = '#ffd700';
+  ctx.font = `${12 * scale}px 'Comic Sans MS', cursive, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(currentHintText, centerX, boxY + boxH / 2);
+  ctx.restore();
+}
+
+function useHint() {
+  if (hintsRemaining <= 0 || currentRoom === 0 || chapterComplete) return;
+  hintsRemaining--;
+  currentHintText = ROOM_HINTS[currentRoom] || 'Trust nothing...';
+  hintShowTimer = 3;
+  sfxChime();
 }
 
 // Mute button (always visible)
@@ -1078,7 +1189,7 @@ canvas.addEventListener('touchstart', (e) => {
   const pos = getEventPos(e);
   lastMouseX = pos.x;
   lastMouseY = pos.y;
-  
+
   // Check mute button
   if (muteButtonBounds) {
     const dist = Math.hypot(pos.x - muteButtonBounds.x, pos.y - muteButtonBounds.y);
@@ -1088,7 +1199,16 @@ canvas.addEventListener('touchstart', (e) => {
       return;
     }
   }
-  
+
+  // Check hint button
+  if (hintButtonBounds) {
+    const dist = Math.hypot(pos.x - hintButtonBounds.x, pos.y - hintButtonBounds.y);
+    if (dist < hintButtonBounds.size / 2) {
+      useHint();
+      return;
+    }
+  }
+
   inputEvents.push({ type: 'tap', x: pos.x, y: pos.y });
   dragState.active = true;
   dragState.startX = pos.x;
@@ -1126,7 +1246,7 @@ canvas.addEventListener('mousedown', (e) => {
   ensureAudio();
   lastMouseX = e.clientX;
   lastMouseY = e.clientY;
-  
+
   // Check mute button
   if (muteButtonBounds) {
     const dist = Math.hypot(e.clientX - muteButtonBounds.x, e.clientY - muteButtonBounds.y);
@@ -1136,7 +1256,16 @@ canvas.addEventListener('mousedown', (e) => {
       return;
     }
   }
-  
+
+  // Check hint button
+  if (hintButtonBounds) {
+    const dist = Math.hypot(e.clientX - hintButtonBounds.x, e.clientY - hintButtonBounds.y);
+    if (dist < hintButtonBounds.size / 2) {
+      useHint();
+      return;
+    }
+  }
+
   inputEvents.push({ type: 'tap', x: e.clientX, y: e.clientY });
   dragState.active = true;
   dragState.startX = e.clientX;
@@ -1220,9 +1349,19 @@ rooms[0] = {
         const skipX = W - 45 * scale, skipY = H - 35 * scale;
         if (hitTest(ev.x, ev.y, skipX, skipY, 70 * scale, 30 * scale)) {
           sfxWin();
+          hintsRemaining = 3;
           spawnParticles(ev.x, ev.y, 8, '#44ff44');
           fadeToRoom(1);
           return;
+        }
+
+        // Speedrun toggle
+        const srX = centerX, srY = centerY + 130 * scale;
+        if (hitTest(ev.x, ev.y, srX, srY, 180 * scale, 35 * scale)) {
+          speedrunMode = !speedrunMode;
+          speedrunTime = 0;
+          speedrunRunning = false;
+          sfxClick();
         }
       }
       if (ev.type === 'release') {
@@ -1301,7 +1440,30 @@ rooms[0] = {
         1, '#ffd700', 1
       );
     }
-    
+
+    // Speedrun toggle
+    const srY = centerY + 130 * scale;
+    const srColor = speedrunMode ? '#22aa22' : '#888';
+    const srBg = speedrunMode ? 'rgba(34,170,34,0.15)' : 'rgba(0,0,0,0.05)';
+    ctx.save();
+    ctx.fillStyle = srBg;
+    roundRect(centerX - 90 * scale, srY - 16 * scale, 180 * scale, 32 * scale, 8 * scale);
+    ctx.fill();
+    ctx.strokeStyle = srColor;
+    ctx.lineWidth = 1.5;
+    roundRect(centerX - 90 * scale, srY - 16 * scale, 180 * scale, 32 * scale, 8 * scale);
+    ctx.stroke();
+    ctx.restore();
+    drawText(speedrunMode ? '⏱ Speedrun: ON' : '⏱ Speedrun: OFF', centerX, srY, 12, srColor);
+
+    // Best speedrun time
+    if (bestSpeedrunTime > 0) {
+      const bm = Math.floor(bestSpeedrunTime / 60);
+      const bs = Math.floor(bestSpeedrunTime % 60);
+      const bms = Math.floor((bestSpeedrunTime % 1) * 100);
+      drawText(`Best: ${bm}:${String(bs).padStart(2,'0')}.${String(bms).padStart(2,'0')}`, centerX, srY + 25 * scale, 9, '#999');
+    }
+
     // Skip text — becomes more visible with deaths
     const skipAlpha = 0.12 + hintLevel * 0.12 + (roomState.tapCount > 0 ? 0.15 : 0);
     ctx.save();
@@ -2620,39 +2782,69 @@ let chapterComplete = false;
 function showChapterComplete() {
   chapterComplete = true;
   stopAllAmbient();
+  // Record speedrun time
+  if (speedrunMode && speedrunRunning) {
+    speedrunRunning = false;
+    if (bestSpeedrunTime === 0 || speedrunTime < bestSpeedrunTime) {
+      bestSpeedrunTime = speedrunTime;
+      saveGameProgress();
+    }
+  }
 }
 
 function drawChapterComplete() {
   if (!chapterComplete) return;
-  
+
   drawSketchBackground();
-  
-  const t = gameTime;
-  
-  drawText('Chapter 1', centerX, centerY - 120 * scale, 28, '#222');
-  drawText('COMPLETE!', centerX, centerY - 80 * scale, 32, '#22aa22');
-  
-  drawText(`You died ${totalDeaths} times.`, centerX, centerY - 20 * scale, 18, '#666');
-  
+
+  drawText('Chapter 1', centerX, centerY - 140 * scale, 28, '#222');
+  drawText('COMPLETE!', centerX, centerY - 100 * scale, 32, '#22aa22');
+
+  drawText(`You died ${totalDeaths} times.`, centerX, centerY - 45 * scale, 18, '#666');
+
   if (totalDeaths > 30) {
-    drawText("That's... impressive, actually.", centerX, centerY + 15 * scale, 14, '#999');
+    drawText("That's... impressive, actually.", centerX, centerY - 20 * scale, 14, '#999');
   } else if (totalDeaths > 15) {
-    drawText("Not bad. Not great. But not bad.", centerX, centerY + 15 * scale, 14, '#999');
+    drawText("Not bad. Not great. But not bad.", centerX, centerY - 20 * scale, 14, '#999');
   } else {
-    drawText("Are you a wizard?", centerX, centerY + 15 * scale, 14, '#999');
+    drawText("Are you a wizard?", centerX, centerY - 20 * scale, 14, '#999');
   }
-  
+
+  // Speedrun time display
+  if (speedrunMode) {
+    const m = Math.floor(speedrunTime / 60);
+    const s = Math.floor(speedrunTime % 60);
+    const ms = Math.floor((speedrunTime % 1) * 100);
+    const timeStr = `${m}:${String(s).padStart(2,'0')}.${String(ms).padStart(2,'0')}`;
+    drawText(`⏱ Time: ${timeStr}`, centerX, centerY + 10 * scale, 16, '#555');
+
+    if (bestSpeedrunTime > 0) {
+      const bm = Math.floor(bestSpeedrunTime / 60);
+      const bs = Math.floor(bestSpeedrunTime % 60);
+      const bms = Math.floor((bestSpeedrunTime % 1) * 100);
+      const bestStr = `${bm}:${String(bs).padStart(2,'0')}.${String(bms).padStart(2,'0')}`;
+      const isBest = speedrunTime <= bestSpeedrunTime;
+      drawText(`Best: ${bestStr}${isBest ? ' ✨ NEW!' : ''}`, centerX, centerY + 32 * scale, 13, isBest ? '#ffd700' : '#999');
+    }
+  }
+
   // Stick figure celebrating
-  drawStickFigure(centerX, centerY + 80 * scale, 1.2, 'happy');
-  
+  drawStickFigure(centerX, centerY + 90 * scale, 1.2, 'happy');
+
   // Confetti particles
   if (Math.random() < 0.2) {
     const colors = ['#ff4444', '#44ff44', '#4444ff', '#ffff44', '#ff44ff'];
     spawnParticles(Math.random() * W, -10, 1, colors[Math.floor(Math.random() * colors.length)], 2);
   }
-  
-  drawText('Thanks for playing!', centerX, H - 80 * scale, 14, '#aaa');
-  drawText('Chapter 2 coming soon...', centerX, H - 55 * scale, 11, '#ccc');
+
+  // Play Again button
+  const btnW = 160 * scale;
+  const btnH = 45 * scale;
+  const btnY = H - 110 * scale;
+  drawSketchButton(centerX, btnY, btnW, btnH, '↺ Play Again', '#222', '#e8fce8', true);
+  roomState.playAgainBtn = { x: centerX, y: btnY, w: btnW, h: btnH };
+
+  drawText('Chapter 2 coming soon...', centerX, H - 50 * scale, 11, '#ccc');
 }
 
 // ============================================================
@@ -2665,9 +2857,42 @@ function initRoom(index) {
   if (rooms[index] && rooms[index].init) rooms[index].init();
 }
 
+function restartGame() {
+  chapterComplete = false;
+  totalDeaths = 0;
+  speedrunTime = 0;
+  speedrunRunning = false;
+  hintsRemaining = 3;
+  currentHintText = '';
+  hintShowTimer = 0;
+  currentRoom = 0;
+  roomDeaths = 0;
+  hintLevel = 0;
+  roomState = {};
+  showingDeath = false;
+  particles = [];
+  shakeAmount = 0;
+  transitionAlpha = 0;
+  transitioning = false;
+  stickFigure.eyeState = 'normal';
+  stickFigure.visible = true;
+  initRoom(0);
+}
+
 function updateRoom() {
   if (chapterComplete) {
     stickFigure.breathPhase += deltaTime * 2;
+    // Handle play again button
+    for (const ev of inputEvents) {
+      if (ev.type === 'tap' && roomState.playAgainBtn) {
+        const b = roomState.playAgainBtn;
+        if (hitTest(ev.x, ev.y, b.x, b.y, b.w, b.h)) {
+          sfxClick();
+          restartGame();
+          break;
+        }
+      }
+    }
     inputEvents = [];
     return;
   }
@@ -2714,17 +2939,26 @@ function gameLoop(timestamp) {
   
   // Death overlay (not shaken)
   drawDeathOverlay();
-  
-  // Death counter (always visible)
+
+  // Death counter + speedrun timer (always visible)
   drawDeathCounter();
-  
+
+  // Hint button + hint overlay
+  drawHintButton();
+  drawHintOverlay();
+
   // Mute button (always visible)
   drawMuteButton();
-  
+
   // Transition overlay
   updateTransition();
   drawTransition();
-  
+
+  // Update speedrun timer
+  if (speedrunMode && speedrunRunning && !showingDeath && !transitioning) {
+    speedrunTime += deltaTime;
+  }
+
   // Update room logic
   updateRoom();
   
