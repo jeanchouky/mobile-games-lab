@@ -4,6 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
 <title>Asteroid Miner</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a0a2a">
+<meta name="description" content="Mine asteroids for resources with ship upgrades and a shop between runs">
+<meta property="og:title" content="Asteroid Miner — Mobile Games Lab">
+<meta property="og:description" content="Mine asteroids, upgrade your ship, and collect rare minerals">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Asteroid Miner">
+<meta name="twitter:description" content="Space mining action game in your browser">
+<link rel="manifest" href="manifest.json">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-user-select:none;user-select:none;touch-action:manipulation}
 body{background:#0a0a1e;overflow-y:auto;overflow-x:hidden;font-family:-apple-system,system-ui,sans-serif;color:#fff}
@@ -22,7 +32,8 @@ canvas{display:block;width:100%;height:100%}
 .upgrade{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px;margin-bottom:8px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:all .15s}
 .upgrade:active{transform:scale(0.98);background:rgba(255,255,255,0.1)}
 .upgrade.locked{opacity:0.4}
-.upgrade.affordable{border-color:rgba(255,217,61,0.4);box-shadow:0 0 12px rgba(255,217,61,0.1)}
+.upgrade.affordable{border-color:#ffd93d;box-shadow:0 0 12px rgba(255,217,61,0.3);animation:affordPulse 1.5s ease-in-out infinite}
+@keyframes affordPulse{0%,100%{box-shadow:0 0 8px rgba(255,217,61,0.2)}50%{box-shadow:0 0 18px rgba(255,217,61,0.5)}}
 .upgrade.affordable .u-cost{animation:pulse-cost 1.5s infinite}
 @keyframes pulse-cost{0%,100%{opacity:1}50%{opacity:0.6}}
 .upgrade .u-icon{font-size:28px;width:40px;text-align:center}
@@ -34,8 +45,17 @@ canvas{display:block;width:100%;height:100%}
 #prestige-btn{display:block;margin:12px auto;padding:12px 24px;background:linear-gradient(135deg,#a55eea,#6c5ce7);border:none;color:#fff;border-radius:50px;font-size:15px;font-weight:700;cursor:pointer}
 #prestige-btn:active{transform:scale(0.95)}
 #prestige-info{text-align:center;font-size:12px;color:#888;margin-bottom:8px}
+#achievements{padding:8px 0}
+#achievements h3{text-align:center;font-size:14px;color:#888;margin-bottom:8px}
+.ach{display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:6px 10px;margin:3px;font-size:11px}
+.ach.locked{opacity:0.3;filter:grayscale(1)}
+.ach .ach-icon{font-size:16px}
+.ach .ach-name{font-weight:700;color:#ffd93d}
 .tap-text{position:absolute;pointer-events:none;font-weight:900;font-size:18px;color:#ffd93d;text-shadow:0 0 10px rgba(255,217,61,0.5);animation:tapFloat 0.8s ease-out forwards}
 @keyframes tapFloat{0%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(-40px) scale(0.5)}}
+.mineral-item{display:inline-block;background:rgba(255,255,255,0.08);padding:3px 8px;border-radius:6px;margin:2px;font-size:12px}
+.mineral-badge{font-size:11px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:3px 8px;display:inline-flex;align-items:center;gap:3px}
+.mineral-badge .cnt{color:#ffd93d;font-weight:700}
 
 /* Achievement toast */
 .achievement-toast{position:fixed;top:60px;left:50%;transform:translateX(-50%);background:rgba(20,20,40,0.95);border:1px solid #ffd93d;border-radius:12px;padding:12px 20px;z-index:30;display:flex;align-items:center;gap:10px;animation:toastIn 0.4s ease-out,toastOut 0.4s ease-in 2.6s forwards;backdrop-filter:blur(8px)}
@@ -66,20 +86,33 @@ canvas{display:block;width:100%;height:100%}
 </head>
 <body>
 <div id="space"><canvas id="c"></canvas></div>
+<div id="run-hud" style="display:none;justify-content:space-between;padding:6px 12px;background:rgba(0,0,0,0.6);font-size:12px;align-items:center">
+  <div>🛡️ <span id="hull-val" style="color:#44ff88">100</span>/<span id="hull-max">100</span></div>
+  <div>💎 <span id="run-ore" style="color:#ffd93d">0</span></div>
+  <button onclick="endRun()" style="padding:4px 12px;background:#ff6b6b;border:none;color:#fff;border-radius:6px;font-size:12px;cursor:pointer">Return to Shop</button>
+</div>
 <div id="resources">
   <div class="res"><span class="icon">&#128142;</span> <span class="val" id="ore">0</span></div>
   <div class="res"><span class="icon">&#9889;</span> <span class="val" id="ops">/s: 0</span></div>
   <div class="res"><span class="icon">&#11088;</span> <span class="val" id="prestige-pts">0</span></div>
 </div>
+<div id="run-summary" style="display:none;background:rgba(0,0,0,0.85);padding:16px;margin:8px;border-radius:12px;border:1px solid #ffd93d;text-align:center"></div>
 <div id="tabs">
   <button class="active" onclick="switchTab('shop')">Upgrades</button>
   <button onclick="switchTab('stats')">Stats</button>
   <button onclick="switchTab('achievements')">Trophies</button>
 </div>
 <div class="tab-panel active" id="shop">
+  <div style="text-align:center;margin-bottom:10px">
+    <button onclick="startRun()" style="padding:10px 28px;background:linear-gradient(135deg,#4d96ff,#0066cc);border:none;color:#fff;border-radius:50px;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 0 15px rgba(77,150,255,0.4)">🚀 Start Mining Run</button>
+  </div>
+  <h2>⛏️ Ore Upgrades</h2>
   <div id="upgrade-list"></div>
-  <div id="prestige-info">Prestige resets progress but gives a multiplier</div>
-  <button id="prestige-btn" onclick="prestige()">Prestige (need 1M ore)</button>
+  <h2>🚀 Ship Upgrades <span style="font-size:11px;color:#888">(use minerals)</span></h2>
+  <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;padding:0 4px" id="mineral-display"></div>
+  <div id="ship-upgrade-list"></div>
+  <div id="prestige-info">Prestige resets progress but gives ⭐ multiplier</div>
+  <button id="prestige-btn" onclick="prestige()">🌟 Prestige (need 1M ore)</button>
 </div>
 <div class="tab-panel" id="stats">
   <h2 style="text-align:center;font-size:14px;color:#888;margin-bottom:12px">Statistics</h2>
@@ -137,20 +170,20 @@ function formatNum(n){
 }
 
 const UPGRADES=[
-  {id:'drill',name:'Better Drill',desc:'2x tap power',icon:'&#9935;&#65039;',baseCost:10,costMult:1.8,level:0,maxLevel:50,
-    effect(){tapPower=Math.pow(2,this.level)}},
-  {id:'auto',name:'Auto-Miner',desc:'+1 ore/sec per level',icon:'&#129302;',baseCost:50,costMult:2,level:0,maxLevel:30,
+  {id:'drill',name:'Better Drill',desc:'2x tap power',icon:'⛏️',baseCost:10,costMult:1.8,level:0,maxLevel:50,
+    effect(){tapPower=Math.pow(2,upgrades[0].level)*(1+upgrades[2].level*0.25)}},
+  {id:'auto',name:'Auto-Miner',desc:'+1 ore/sec per level',icon:'🤖',baseCost:50,costMult:2,level:0,maxLevel:30,
     effect(){recalcAuto()}},
-  {id:'cargo',name:'Cargo Bay',desc:'Tap floating text bigger & lingers',icon:'&#128230;',baseCost:100,costMult:2.2,level:0,maxLevel:20,
-    effect(){}},
-  {id:'speed',name:'Mining Speed',desc:'Auto-miners 50% faster each lvl',icon:'&#9889;',baseCost:500,costMult:2.5,level:0,maxLevel:15,
+  {id:'cargo',name:'Cargo Bay',desc:'+25% tap ore per level',icon:'📦',baseCost:100,costMult:2.2,level:0,maxLevel:20,
+    effect(){tapPower=Math.pow(2,upgrades[0].level)*(1+upgrades[2].level*0.25)}},
+  {id:'speed',name:'Mining Speed',desc:'Auto-miners 50% faster each lvl',icon:'⚡',baseCost:500,costMult:2.5,level:0,maxLevel:15,
     effect(){recalcAuto()}},
-  {id:'luck',name:'Lucky Strike',desc:'10% chance per lvl of 10x ore',icon:'&#127808;',baseCost:200,costMult:2,level:0,maxLevel:10,
+  {id:'luck',name:'Lucky Strike',desc:'10% chance per lvl of 10x ore',icon:'🍀',baseCost:200,costMult:2,level:0,maxLevel:10,
     effect(){}},
-  {id:'magnet',name:'Ore Magnet',desc:'Auto-collect nearby ore',icon:'&#129522;',baseCost:1000,costMult:3,level:0,maxLevel:5,
+  {id:'magnet',name:'Ore Magnet',desc:'Auto-collect nearby ore',icon:'🧲',baseCost:1000,costMult:3,level:0,maxLevel:5,
     effect(){}},
-  {id:'asteroid',name:'New Asteroids',desc:'Unlock richer asteroid types',icon:'&#9732;&#65039;',baseCost:5000,costMult:4,level:0,maxLevel:6,
-    effect(){generateAsteroids()}}
+  {id:'asteroid',name:'New Asteroids',desc:'Unlock richer asteroid types',icon:'☄️',baseCost:5000,costMult:4,level:0,maxLevel:6,
+    effect(){generateAsteroids()}},
 ];
 let upgrades=UPGRADES;
 
@@ -159,14 +192,39 @@ function recalcAuto(){
 }
 
 const ASTEROID_TYPES=[
-  {name:'Stone',color:'#6d4c41',value:1,size:1},
-  {name:'Iron',color:'#78909c',value:3,size:1.1},
-  {name:'Gold',color:'#ffd93d',value:10,size:0.9},
-  {name:'Crystal',color:'#a55eea',value:25,size:0.85},
-  {name:'Neutronium',color:'#00f5d4',value:100,size:1.2},
+  {name:'Stone',color:'#6d4c41',value:1,size:1,mineral:'stone'},
+  {name:'Iron',color:'#78909c',value:3,size:1.1,mineral:'iron'},
+  {name:'Ice',color:'#88ccff',value:5,size:1.05,mineral:'ice'},
+  {name:'Gold',color:'#ffd93d',value:10,size:0.9,mineral:'gold'},
+  {name:'Crystal',color:'#a55eea',value:25,size:0.85,mineral:'crystal'},
+  {name:'Radioactive',color:'#44ff44',value:50,size:0.95,mineral:'radioactive',dangerous:true},
+  {name:'Neutronium',color:'#00f5d4',value:100,size:1.2,mineral:'neutronium'},
   {name:'Dark Matter',color:'#1a1a3e',value:250,size:0.75,glow:'#6c5ce7'},
   {name:'Plasma Core',color:'#ff6b6b',value:500,size:1.3,glow:'#e94560'}
 ];
+
+// Ship stats
+let shipHull=100,shipMaxHull=100,shipFuel=100,shipMaxFuel=100;
+let inRun=false,runEarnings=0,runMinerals={};
+let minerals={stone:0,iron:0,ice:0,gold:0,crystal:0,radioactive:0,neutronium:0};
+try{const m=JSON.parse(localStorage.getItem('astminer_minerals'));if(m)minerals=Object.assign(minerals,m)}catch(e){}
+function saveMinerals(){try{localStorage.setItem('astminer_minerals',JSON.stringify(minerals))}catch(e){}}
+
+// Ship upgrades (separate from ore upgrades)
+const SHIP_UPGRADES=[
+  {id:'hull',name:'Reinforced Hull',desc:'Increases max hull HP',icon:'🛡️',baseCost:50,costMult:2,level:0,maxLevel:10,costType:'iron',
+    effect(){shipMaxHull=100+this.level*25;shipHull=shipMaxHull}},
+  {id:'engine',name:'Ion Engine',desc:'Faster auto-mining',icon:'🚀',baseCost:30,costMult:1.8,level:0,maxLevel:10,costType:'ice',
+    effect(){/* applied in auto-mine calc */}},
+  {id:'cargo',name:'Cargo Hold',desc:'Earn 20% more minerals/level',icon:'📦',baseCost:100,costMult:2.2,level:0,maxLevel:8,costType:'gold',
+    effect(){/* applied in tap calc */}},
+  {id:'scanner',name:'Ore Scanner',desc:'Reveal rare asteroids sooner',icon:'📡',baseCost:40,costMult:2.5,level:0,maxLevel:5,costType:'crystal',
+    effect(){generateAsteroids()}},
+  {id:'shield',name:'Rad Shield',desc:'Reduces radioactive damage',icon:'☢️',baseCost:20,costMult:3,level:0,maxLevel:5,costType:'radioactive',
+    effect(){/* applied in damage calc */}},
+];
+try{const su=JSON.parse(localStorage.getItem('astminer_ship'));if(su)su.forEach((l,i)=>{if(SHIP_UPGRADES[i]){SHIP_UPGRADES[i].level=l;SHIP_UPGRADES[i].effect()}})}catch(e){}
+function saveShipUpgrades(){try{localStorage.setItem('astminer_ship',JSON.stringify(SHIP_UPGRADES.map(u=>u.level)))}catch(e){}}
 
 function resize(){
   dpr=window.devicePixelRatio||1;
@@ -181,9 +239,12 @@ function resize(){
 
 function generateAsteroids(){
   asteroids=[];
-  let maxType=Math.min(upgrades[6].level+1,ASTEROID_TYPES.length);
-  for(let i=0;i<Math.min(6,maxType+2);i++){
-    let type=ASTEROID_TYPES[Math.min(i,maxType-1)];
+  let scannerBonus=SHIP_UPGRADES[3].level;
+  let maxType=Math.min(upgrades[6].level+1+scannerBonus,ASTEROID_TYPES.length);
+  let count=Math.min(8,maxType+2)+Math.min(3,Math.floor(scannerBonus/2));
+  for(let i=0;i<count;i++){
+    let typeIdx=Math.min(Math.floor(Math.random()*maxType),maxType-1);
+    let type=ASTEROID_TYPES[typeIdx];
     let r=25+type.size*15;
     asteroids.push({
       x:W*0.1+Math.random()*W*0.8,
@@ -191,7 +252,7 @@ function generateAsteroids(){
       r,type,rot:Math.random()*Math.PI*2,
       rotSpeed:(Math.random()-0.5)*0.01,
       bobPhase:Math.random()*Math.PI*2,
-      shake:0
+      shake:0,hp:3+Math.floor(type.value/10)
     });
   }
 }
@@ -237,10 +298,42 @@ function tap(x,y){
   ensureAudio();
   totalClicks++;
   let hit=asteroids.find(a=>Math.hypot(x-a.x,y-a.y)<a.r+10);
-  let base=tapPower*prestigeMulti;
+  let cargoBonus=1+SHIP_UPGRADES[2].level*0.2;
+  let base=tapPower*prestigeMulti*cargoBonus;
   let lucky=upgrades[4].level>0&&Math.random()<upgrades[4].level*0.1;
   let amount=Math.floor(base*(hit?hit.type.value:1)*(lucky?10:1));
   ore+=amount;totalOre+=amount;
+  runEarnings+=amount;
+
+  // Mineral collection
+  if(hit){
+    let mType=hit.type.mineral||'stone';
+    let mAmount=1+Math.floor(Math.random()*2);
+    minerals[mType]=(minerals[mType]||0)+mAmount;
+    if(!runMinerals[mType])runMinerals[mType]=0;
+    runMinerals[mType]+=mAmount;
+
+    // Radioactive damage
+    if(hit.type.dangerous){
+      let shieldLevel=SHIP_UPGRADES[4].level;
+      let dmg=Math.max(1,10-shieldLevel*2);
+      shipHull=Math.max(0,shipHull-dmg);
+      if(shipHull<=0){endRun();return}
+      floatingTexts.push({x:x+20,y:y-10,text:`-${dmg} ☢️`,life:1,color:'#ff4444'});
+    }
+
+    // Deplete asteroid and respawn
+    hit.hp=(hit.hp||3)-1;
+    if(hit.hp<=0){
+      let idx=asteroids.indexOf(hit);
+      let scannerBonus=SHIP_UPGRADES[3].level;
+      let maxType=Math.min(upgrades[6].level+1+scannerBonus,ASTEROID_TYPES.length);
+      let typeIdx=Math.min(Math.floor(Math.random()*maxType),maxType-1);
+      let type=ASTEROID_TYPES[typeIdx];
+      let r=25+type.size*15;
+      asteroids[idx]={x:W*0.15+Math.random()*W*0.7,y:H*0.15+Math.random()*H*0.6,r,type,rot:Math.random()*Math.PI*2,rotSpeed:(Math.random()-0.5)*0.01,bobPhase:Math.random()*Math.PI*2,shake:0,hp:3+Math.floor(type.value/10)};
+    }
+  }
 
   // Visual feedback
   if(hit)hit.shake=5;
@@ -250,7 +343,7 @@ function tap(x,y){
   let cargoLvl=upgrades[2].level;
   let fontSize=16+cargoLvl*2;
   let lifespan=1+cargoLvl*0.15;
-  floatingTexts.push({x,y,text:'+'+(lucky?'*':'')+formatNum(amount),life:lifespan,maxLife:lifespan,color,size:fontSize});
+  floatingTexts.push({x,y,text:'+'+(lucky?'🍀':'')+formatNum(amount),life:lifespan,maxLife:lifespan,color,size:fontSize});
 
   // Particles
   for(let i=0;i<(lucky?12:5);i++){
@@ -258,6 +351,72 @@ function tap(x,y){
     particles.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:1,color,size:2+Math.random()*2});
   }
   snd(lucky?800:400+(hit?hit.type.value*10:0),0.1,'triangle',lucky?0.1:0.05);
+}
+
+function startRun(){
+  inRun=true;runEarnings=0;runMinerals={};
+  shipHull=shipMaxHull;
+  generateAsteroids();
+  document.getElementById('shop').style.display='none';
+  document.getElementById('run-hud').style.display='flex';
+}
+
+function endRun(){
+  inRun=false;
+  saveMinerals();save();
+  document.getElementById('shop').style.display='';
+  document.getElementById('run-hud').style.display='none';
+  showRunSummary();
+}
+
+function showRunSummary(){
+  let summary=document.getElementById('run-summary');
+  let html='<h3>Run Complete!</h3>';
+  html+=`<p>💎 Ore earned: ${formatNum(runEarnings)}</p>`;
+  html+='<p>Minerals collected:</p><div class="mineral-list">';
+  for(let m in runMinerals){
+    if(runMinerals[m]>0){
+      const icons={stone:'🪨',iron:'⚙️',ice:'🧊',gold:'🥇',crystal:'💜',radioactive:'☢️',neutronium:'✨'};
+      html+=`<span class="mineral-item">${icons[m]||'•'} ${m}: +${runMinerals[m]}</span>`;
+    }
+  }
+  html+='</div>';
+  if(shipHull<=0)html+='<p style="color:#ff4444">⚠️ Hull destroyed!</p>';
+  html+=`<button onclick="this.parentElement.style.display='none'" style="margin-top:8px;padding:8px 20px;background:#4d96ff;border:none;color:#fff;border-radius:8px;font-size:14px;cursor:pointer">OK</button>`;
+  summary.innerHTML=html;
+  summary.style.display='block';
+}
+
+function renderShipUpgrades(){
+  let el=document.getElementById('ship-upgrade-list');
+  if(!el)return;
+  el.innerHTML='';
+  SHIP_UPGRADES.forEach((u,i)=>{
+    let cost=Math.floor(u.baseCost*Math.pow(u.costMult,u.level));
+    let locked=u.level>=u.maxLevel;
+    let have=minerals[u.costType]||0;
+    let canBuy=have>=cost&&!locked;
+    let div=document.createElement('div');
+    div.className='upgrade'+(locked?' locked':canBuy?' affordable':'');
+    const typeIcons={iron:'⚙️',ice:'🧊',gold:'🥇',crystal:'💜',radioactive:'☢️'};
+    div.innerHTML=`
+      <div class="u-icon">${u.icon}</div>
+      <div class="u-info">
+        <div class="u-name">${u.name}</div>
+        <div class="u-desc">${u.desc}</div>
+        <div class="u-level">Lv ${u.level}/${u.maxLevel}</div>
+      </div>
+      <div class="u-cost">${locked?'MAX':(typeIcons[u.costType]||'•')+' '+cost+' '+u.costType}</div>
+    `;
+    if(!locked)div.onclick=()=>{
+      let c=Math.floor(u.baseCost*Math.pow(u.costMult,u.level));
+      if((minerals[u.costType]||0)>=c){
+        minerals[u.costType]-=c;u.level++;u.effect();
+        snd(700+i*80,0.15);saveShipUpgrades();saveMinerals();renderShipUpgrades();
+      }
+    };
+    el.appendChild(div);
+  });
 }
 
 C.addEventListener('touchstart',e=>{e.preventDefault();
@@ -364,19 +523,31 @@ let lastT=0;
 function loop(t){
   let dt=Math.min((t-lastT)/1000,0.05);lastT=t;
 
-  // Auto mine
+  // Auto mine with engine bonus
   if(autoRate>0){
-    let gain=autoRate*prestigeMulti*dt;
+    let engineBonus=1+SHIP_UPGRADES[1].level*0.3;
+    let gain=autoRate*prestigeMulti*engineBonus*dt;
     let best=asteroids.reduce((a,b)=>a.type.value>b.type.value?a:b,asteroids[0]);
     gain*=best?best.type.value:1;
     ore+=gain;totalOre+=gain;
+    if(inRun)runEarnings+=gain;
   }
 
   // Update HUD
   document.getElementById('ore').textContent=formatNum(ore);
+  let engineBonus=1+SHIP_UPGRADES[1].level*0.3;
   let bestVal=asteroids.length?asteroids.reduce((a,b)=>a.type.value>b.type.value?a:b).type.value:1;
-  document.getElementById('ops').textContent='/s: '+formatNum(autoRate*prestigeMulti*bestVal);
+  document.getElementById('ops').textContent='/s: '+formatNum(autoRate*prestigeMulti*engineBonus*bestVal);
   document.getElementById('prestige-pts').textContent=prestigePoints;
+
+  // Run HUD
+  if(inRun){
+    document.getElementById('hull-val').textContent=Math.ceil(shipHull);
+    document.getElementById('hull-max').textContent=shipMaxHull;
+    document.getElementById('hull-val').style.color=shipHull>shipMaxHull*0.5?'#44ff88':shipHull>shipMaxHull*0.2?'#ffd93d':'#ff4444';
+    document.getElementById('run-ore').textContent=formatNum(runEarnings);
+  }
+
 
   // Render
   X.clearRect(0,0,W,H);
@@ -390,7 +561,7 @@ function loop(t){
 
   // Asteroids
   asteroids.forEach(a=>{
-    a.rot+=a.rotSpeed*dt*60;
+    a.rot+=a.rotSpeed;
     let bob=Math.sin(Date.now()*0.001+a.bobPhase)*3;
     let sx=a.shake>0?(Math.random()-0.5)*a.shake:0;
     a.shake*=0.85;
@@ -411,6 +582,16 @@ function loop(t){
     // Highlight
     X.fillStyle='rgba(255,255,255,0.2)';
     X.beginPath();X.arc(-a.r*0.2,-a.r*0.2,a.r*0.3,0,Math.PI*2);X.fill();
+    // Radioactive pulse
+    if(a.type.dangerous){
+      X.fillStyle=`rgba(68,255,68,${0.1+Math.sin(Date.now()*0.005)*0.08})`;
+      X.beginPath();X.arc(0,0,a.r*1.3,0,Math.PI*2);X.fill();
+    }
+    // Ice shimmer
+    if(a.type.mineral==='ice'){
+      X.fillStyle=`rgba(200,230,255,${0.15+Math.sin(Date.now()*0.003)*0.1})`;
+      X.beginPath();X.arc(a.r*0.15,-a.r*0.15,a.r*0.5,0,Math.PI*2);X.fill();
+    }
     X.restore();
 
     // Label + value
@@ -421,7 +602,7 @@ function loop(t){
   // Particles
   for(let i=particles.length-1;i>=0;i--){
     let p=particles[i];
-    let d60=dt*60;p.x+=p.vx*d60;p.y+=p.vy*d60;p.vy+=0.05*d60;p.life-=dt*2;
+    p.x+=p.vx;p.y+=p.vy;p.vy+=0.05;p.life-=dt*2;
     if(p.life<=0){particles.splice(i,1);continue}
     X.globalAlpha=p.life;X.fillStyle=p.color;
     X.beginPath();X.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);X.fill();
@@ -450,6 +631,7 @@ function save(){
     lastSave:Date.now(),
     gameStartTime
   });
+  saveShipUpgrades();saveMinerals();
 }
 
 function load(){
@@ -481,6 +663,18 @@ function load(){
   }
 }
 
+function renderMinerals(){
+  const el=document.getElementById('mineral-display');
+  if(!el)return;
+  const icons={stone:'🪨',iron:'⚙️',ice:'🧊',gold:'🥇',crystal:'💜',radioactive:'☢️',neutronium:'✨'};
+  el.innerHTML='';
+  for(let m in minerals){
+    if(minerals[m]>0){
+      el.innerHTML+=`<span class="mineral-badge">${icons[m]||'•'} ${m} <span class="cnt">${minerals[m]}</span></span>`;
+    }
+  }
+}
+
 function collectOffline(){
   ore+=offlineEarnings;totalOre+=offlineEarnings;
   offlineEarnings=0;
@@ -493,10 +687,10 @@ function collectOffline(){
 // Auto-save every 30 seconds
 setInterval(()=>{save()},30000);
 // Check achievements & re-render upgrades periodically
-setInterval(()=>{renderUpgrades();checkAchievements()},2000);
+setInterval(()=>{renderUpgrades();renderShipUpgrades();renderMinerals();checkAchievements();renderAchievements()},2000);
 
 window.addEventListener('resize',resize);
-load();resize();renderUpgrades();
+load();resize();renderUpgrades();renderShipUpgrades();renderMinerals();renderAchievements();
 requestAnimationFrame(loop);
 </script>
 </body>

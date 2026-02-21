@@ -89,8 +89,10 @@ let W,H,dpr;
 // AudioContext pattern - lazy init
 let audioCtx;
 function ensureAudio(){
-  if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-  if(audioCtx.state==='suspended')audioCtx.resume();
+  try{
+    if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==='suspended')audioCtx.resume().catch(()=>{});
+  }catch(e){}
   return audioCtx;
 }
 function snd(f,d,t='sine',v=0.08){

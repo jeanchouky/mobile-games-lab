@@ -578,8 +578,8 @@ function updateTitle() {
         return;
       }
       // Check if tapping the reduced motion toggle
-      const toggleX = W - 30 * scale, toggleY = H - 30 * scale;
-      if (hitTest(ev.x, ev.y, toggleX, toggleY, 50 * scale, 30 * scale)) {
+      const motionToggleX = W - 30 * scale, motionToggleY = H - 30 * scale;
+      if (hitTest(ev.x, ev.y, motionToggleX, motionToggleY, 50 * scale, 30 * scale)) {
         toggleReducedMotion();
         sfxClick();
         return;
@@ -656,11 +656,11 @@ function drawTitle() {
   }
 
   // Accessibility toggle (reduced motion)
-  const toggleX = W - 30 * scale, toggleY = H - 30 * scale;
+  const motionToggleX = W - 30 * scale, motionToggleY = H - 30 * scale;
   ctx.save();
   ctx.globalAlpha = 0.6;
-  wobblyRect(toggleX - 22*scale, toggleY - 12*scale, 44*scale, 24*scale, '#888', reducedMotion ? '#dfd' : '#f0e4cc', 1);
-  drawText(reducedMotion ? '◉ safe' : '○ safe', toggleX, toggleY, 8, '#666');
+  wobblyRect(motionToggleX - 22*scale, motionToggleY - 12*scale, 44*scale, 24*scale, '#888', reducedMotion ? '#dfd' : '#f0e4cc', 1);
+  drawText(reducedMotion ? '◉ safe' : '○ safe', motionToggleX, motionToggleY, 8, '#666');
   ctx.restore();
 
   drawVignette(0.25);

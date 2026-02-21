@@ -7,6 +7,14 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#1a0033">
 <title>Gravity Flip</title>
+<meta name="description" content="Tap to flip gravity in this fast-paced procedural platformer">
+<meta property="og:title" content="Gravity Flip — Mobile Games Lab">
+<meta property="og:description" content="Flip gravity and soar through procedurally generated worlds">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Gravity Flip">
+<meta name="twitter:description" content="Fast-paced gravity-flipping platformer in your browser">
+<link rel="manifest" href="manifest.json">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{width:100%;height:100%;overflow:hidden;background:#0a001a;touch-action:none;user-select:none;-webkit-user-select:none;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif}
@@ -85,6 +93,38 @@ function calcTotalStars() {
   for (const k in progress) if (progress[k].stars) bestTotalStars += progress[k].stars;
 }
 calcTotalStars();
+
+// Leaderboard
+let leaderboard = {};
+try { const lb = localStorage.getItem('gflip3_lb'); if (lb) leaderboard = JSON.parse(lb); } catch(e) {}
+function saveLeaderboard() { try { localStorage.setItem('gflip3_lb', JSON.stringify(leaderboard)); } catch(e) {} }
+function addLeaderboardEntry(levelId, time, stars, deaths) {
+  if (!leaderboard[levelId]) leaderboard[levelId] = [];
+  leaderboard[levelId].push({ time: +time.toFixed(2), stars, deaths, date: Date.now() });
+  leaderboard[levelId].sort((a, b) => a.time - b.time);
+  if (leaderboard[levelId].length > 10) leaderboard[levelId].length = 10;
+  saveLeaderboard();
+}
+
+// Custom levels (editor)
+let customLevels = [];
+try { const cl = localStorage.getItem('gflip3_custom'); if (cl) customLevels = JSON.parse(cl); } catch(e) {}
+function saveCustomLevels() { try { localStorage.setItem('gflip3_custom', JSON.stringify(customLevels)); } catch(e) {} }
+
+// Infinite mode tracking
+let infiniteLvl = 0;
+let isInfiniteMode = false;
+let isCustomLevel = false;
+let customLevelIndex = -1;
+
+// Editor state
+let editor = {
+  tool: 'platform', // platform, spike, orb, portal, bouncy, crumble, eraser
+  elements: { platforms: [], spikes: [], orbs: [], portal: null },
+  dragging: false, dragStart: null, dragEnd: null,
+  scrollY: 0, selectedIndex: -1, selectedType: '',
+  testMode: false
+};
 
 // --- RESIZE ---
 function resize() {
@@ -291,22 +331,22 @@ function addFloatingText(x, y, text, color = '#ffd700', size = 20) {
 }
 
 function updateParticles() {
-  const d60 = dt * 60;
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
-    p.x += p.vx * d60; p.y += p.vy * d60;
-    p.vy += (p.grav || 0) * d60;
-    p.vx *= Math.pow(0.99, d60); p.vy *= Math.pow(0.99, d60);
-    if (p.rotation !== undefined) p.rotation += (p.rotSpeed || 0) * d60;
-    p.life -= p.decay * d60;
+    p.x += p.vx; p.y += p.vy;
+    p.vy += (p.grav || 0);
+    p.vx *= 0.99; p.vy *= 0.99;
+    if (p.rotation !== undefined) p.rotation += p.rotSpeed || 0;
+    p.life -= p.decay;
     if (p.life <= 0) particles.splice(i, 1);
   }
+  // Cap particles
   if (particles.length > 300) particles.splice(0, particles.length - 300);
-
+  
   for (let i = floatingTexts.length - 1; i >= 0; i--) {
     const f = floatingTexts[i];
-    f.y += f.vy * d60;
-    f.life -= f.decay * d60;
+    f.y += f.vy;
+    f.life -= f.decay;
     if (f.life <= 0) floatingTexts.splice(i, 1);
   }
 }
@@ -347,7 +387,7 @@ function drawParticles() {
 // DRAWING HELPERS
 // ============================================================
 function drawBg() {
-  const lc = levelColors[lvl] || levelColors[0];
+  const lc = levelColors[lvl % levelColors.length] || levelColors[0];
   const bg1 = (screen === 'game' || screen === 'victory') ? lc.bg1 : '#0a001a';
   const bg2 = (screen === 'game' || screen === 'victory') ? lc.bg2 : '#1a0033';
   const g = X.createLinearGradient(0, 0, 0, H);
@@ -358,7 +398,7 @@ function drawBg() {
   X.fillRect(0, 0, W, H);
   
   for (const s of starField) {
-    s.y += s.speed * s.layer * 0.5 * dt * 60;
+    s.y += s.speed * s.layer * 0.5;
     if (s.y > H) { s.y = -2; s.x = Math.random() * W; }
     const b = s.brightness * (0.5 + Math.sin(gt * s.twinkleSpeed) * 0.5);
     X.fillStyle = `rgba(200,200,255,${b})`;
@@ -453,6 +493,7 @@ class Player {
     this.lastGroundY = y;
     this.airTime = 0;
     this.glowPulse = 0;
+    this.flipTimer = 1; // 1 = done, for eased flip animation
     this.invuln = 0; // brief invulnerability after respawn
   }
 
@@ -461,6 +502,7 @@ class Player {
     this.gravDir *= -1;
     this.vy = this.gravDir * -3.5 * S;
     this.flipAnim = 1;
+    this.flipTimer = 0;
     this.squash = 0.55;
     this.flipCount++;
     this.airTime = 0;
@@ -476,18 +518,17 @@ class Player {
   update() {
     if (!this.alive) return;
     
-    const d60 = dt * 60;
     this.vx = this.moveSpeed;
-    this.vy += this.gravity * this.gravDir * d60;
-
+    this.vy += this.gravity * this.gravDir;
+    
     if (Math.abs(this.vy) > 9 * S) this.vy = 9 * S * Math.sign(this.vy);
-
-    this.x += this.vx * d60;
-    this.y += this.vy * d60;
-
-    const squashLerp = 1 - Math.pow(0.82, d60);
-    this.squash += (1 - this.squash) * squashLerp;
-    this.flipAnim *= Math.pow(0.88, d60);
+    
+    this.x += this.vx;
+    this.y += this.vy;
+    
+    this.squash += (1 - this.squash) * 0.18;
+    this.flipTimer = Math.min(1, this.flipTimer + dt * 5.5);
+    this.flipAnim = this.flipTimer < 1 ? Math.max(0, 1 - easeOutBack(this.flipTimer)) : 0;
     this.glowPulse += dt * 5;
     this.airTime += dt;
     if (this.invuln > 0) this.invuln -= dt;
@@ -1100,10 +1141,9 @@ class WindZone {
     }
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
-      const ld60 = dt * 60;
-      p.x += this.dirX * 3 * S * ld60;
-      p.y += this.dirY * 3 * S * ld60;
-      p.life -= 0.025 * ld60;
+      p.x += this.dirX * 3 * S;
+      p.y += this.dirY * 3 * S;
+      p.life -= 0.025;
       if (p.life <= 0 || p.x < this.x - 10 || p.x > this.x + this.w + 10 ||
           p.y < this.y - 10 || p.y > this.y + this.h + 10) {
         this.particles.splice(i, 1);
@@ -1156,1612 +1196,6 @@ class WindZone {
       player.vy += this.dirY * this.strength * 0.15;
     }
   }
-}
-
-// ============================================================
-// LASER BEAM — toggles on/off on a timer
-// ============================================================
-class LaserBeam {
-  constructor(x, y, w, h, onTime, offTime, startDelay) {
-    this.x = x; this.y = y; this.w = w; this.h = h;
-    this.onTime = onTime || 1.5;
-    this.offTime = offTime || 1.0;
-    this.startDelay = startDelay || 0;
-    this.timer = -this.startDelay;
-    this.active = false;
-    this.warmup = 0; // 0-1 warmup before activating
-    this.pulse = Math.random() * Math.PI * 2;
-    this.particles = [];
-  }
-  update() {
-    this.pulse += dt * 6;
-    this.timer += dt;
-    const cycle = this.onTime + this.offTime;
-    const phase = ((this.timer % cycle) + cycle) % cycle;
-    const wasActive = this.active;
-    if (phase < this.onTime) {
-      this.active = true;
-      this.warmup = Math.min(1, this.warmup + dt * 5);
-    } else {
-      this.active = false;
-      this.warmup = Math.max(0, this.warmup - dt * 8);
-    }
-    // Warning flash before activation
-    if (!wasActive && this.active) {
-      screenShake = Math.max(screenShake, 2);
-    }
-    // Spawn beam particles
-    if (this.active && Math.random() > 0.5) {
-      this.particles.push({
-        x: this.x + Math.random() * this.w,
-        y: this.y + Math.random() * this.h,
-        vx: (Math.random() - 0.5) * 2 * S,
-        vy: (Math.random() - 0.5) * 2 * S,
-        life: 0.5 + Math.random() * 0.3
-      });
-    }
-    for (let i = this.particles.length - 1; i >= 0; i--) {
-      const p = this.particles[i];
-      const d60 = dt * 60; p.x += p.vx * d60; p.y += p.vy * d60;
-      p.life -= dt * 2;
-      if (p.life <= 0) this.particles.splice(i, 1);
-    }
-    if (this.particles.length > 20) this.particles.splice(0, this.particles.length - 20);
-  }
-  draw() {
-    X.save();
-    const alpha = this.warmup;
-    if (alpha <= 0.01) {
-      // Draw inactive indicator line
-      X.strokeStyle = 'rgba(255,0,0,0.1)';
-      X.lineWidth = 1 * S;
-      X.setLineDash([3 * S, 3 * S]);
-      X.beginPath();
-      if (this.w > this.h) {
-        X.moveTo(this.x, this.y + this.h / 2);
-        X.lineTo(this.x + this.w, this.y + this.h / 2);
-      } else {
-        X.moveTo(this.x + this.w / 2, this.y);
-        X.lineTo(this.x + this.w / 2, this.y + this.h);
-      }
-      X.stroke();
-      X.setLineDash([]);
-      // Warning dots at emitter positions
-      const warnAlpha = 0.3 + Math.sin(this.pulse * 2) * 0.2;
-      X.fillStyle = `rgba(255,80,80,${warnAlpha})`;
-      X.beginPath();
-      X.arc(this.x, this.y + this.h / 2, 3 * S, 0, Math.PI * 2);
-      X.fill();
-      X.beginPath();
-      X.arc(this.x + this.w, this.y + this.h / 2, 3 * S, 0, Math.PI * 2);
-      X.fill();
-      X.restore();
-      return;
-    }
-    // Warning flash (warmup < 1)
-    if (alpha < 1) {
-      const flash = Math.sin(this.pulse * 8) > 0 ? alpha : alpha * 0.3;
-      X.fillStyle = `rgba(255,50,50,${flash * 0.3})`;
-      X.fillRect(this.x, this.y, this.w, this.h);
-      X.strokeStyle = `rgba(255,50,50,${flash * 0.6})`;
-      X.lineWidth = 1 * S;
-      X.strokeRect(this.x, this.y, this.w, this.h);
-    }
-    // Main beam
-    const beamGrad = X.createLinearGradient(this.x, this.y, this.x, this.y + this.h);
-    beamGrad.addColorStop(0, `rgba(255,20,20,${alpha * 0.1})`);
-    beamGrad.addColorStop(0.3, `rgba(255,60,60,${alpha * 0.6})`);
-    beamGrad.addColorStop(0.5, `rgba(255,200,200,${alpha * 0.9})`);
-    beamGrad.addColorStop(0.7, `rgba(255,60,60,${alpha * 0.6})`);
-    beamGrad.addColorStop(1, `rgba(255,20,20,${alpha * 0.1})`);
-    X.fillStyle = beamGrad;
-    X.shadowColor = '#ff0000';
-    X.shadowBlur = 15 * S * alpha;
-    X.fillRect(this.x, this.y, this.w, this.h);
-    // Core bright line
-    X.fillStyle = `rgba(255,255,255,${alpha * 0.7})`;
-    X.shadowBlur = 8 * S * alpha;
-    const coreH = Math.max(1, this.h * 0.15);
-    X.fillRect(this.x, this.y + this.h / 2 - coreH / 2, this.w, coreH);
-    // Emitter glow at endpoints
-    for (const ex of [this.x, this.x + this.w]) {
-      const eg = X.createRadialGradient(ex, this.y + this.h / 2, 0, ex, this.y + this.h / 2, 10 * S);
-      eg.addColorStop(0, `rgba(255,100,100,${alpha * 0.8})`);
-      eg.addColorStop(1, `rgba(255,0,0,0)`);
-      X.fillStyle = eg;
-      X.shadowBlur = 0;
-      X.beginPath();
-      X.arc(ex, this.y + this.h / 2, 10 * S, 0, Math.PI * 2);
-      X.fill();
-    }
-    // Beam particles
-    for (const p of this.particles) {
-      X.globalAlpha = p.life * alpha;
-      X.fillStyle = '#ff8888';
-      X.beginPath();
-      X.arc(p.x, p.y, 1.5 * S, 0, Math.PI * 2);
-      X.fill();
-    }
-    X.restore();
-  }
-  check(player) {
-    return this.active && this.warmup > 0.8 && player.invuln <= 0 &&
-           player.collideRect(this.x, this.y, this.w, this.h);
-  }
-  nearMiss(player) {
-    return this.active && this.warmup > 0.5 &&
-           player.nearMissRect(this.x, this.y, this.w, this.h, 12 * S);
-  }
-}
-
-// ============================================================
-// TELEPORT PORTAL PAIR — teleports player between two points
-// ============================================================
-class TeleportPortal {
-  constructor(x1, y1, x2, y2, color1, color2) {
-    this.x1 = x1; this.y1 = y1;
-    this.x2 = x2; this.y2 = y2;
-    this.radius = 16 * S;
-    this.color1 = color1 || '#ff66ff';
-    this.color2 = color2 || '#66ffff';
-    this.pulse = 0;
-    this.cooldown = 0;
-    this.teleportAnim = 0;
-    this.lastTeleportSide = 0; // 1 = entered portal 1, 2 = entered portal 2
-    this.particles1 = [];
-    this.particles2 = [];
-  }
-  update() {
-    this.pulse += dt * 3;
-    if (this.cooldown > 0) this.cooldown -= dt;
-    if (this.teleportAnim > 0) this.teleportAnim -= dt * 3;
-    // Ambient particles around each portal
-    if (Math.random() > 0.7) {
-      const a = Math.random() * Math.PI * 2;
-      const r = this.radius * (0.8 + Math.random() * 0.5);
-      this.particles1.push({
-        x: this.x1 + Math.cos(a) * r, y: this.y1 + Math.sin(a) * r,
-        tx: this.x1, ty: this.y1, life: 1
-      });
-      this.particles2.push({
-        x: this.x2 + Math.cos(a + Math.PI) * r, y: this.y2 + Math.sin(a + Math.PI) * r,
-        tx: this.x2, ty: this.y2, life: 1
-      });
-    }
-    const updateP = (arr) => {
-      for (let i = arr.length - 1; i >= 0; i--) {
-        const p = arr[i];
-        const oLerp = 1 - Math.pow(0.95, dt * 60);
-        p.x += (p.tx - p.x) * oLerp;
-        p.y += (p.ty - p.y) * oLerp;
-        p.life -= dt * 1.5;
-        if (p.life <= 0) arr.splice(i, 1);
-      }
-      if (arr.length > 15) arr.splice(0, arr.length - 15);
-    };
-    updateP(this.particles1);
-    updateP(this.particles2);
-  }
-  drawPortal(x, y, color, particleArr) {
-    const s = this.radius * (1 + Math.sin(this.pulse) * 0.1);
-    // Outer ring
-    X.save();
-    X.strokeStyle = color;
-    X.lineWidth = 2.5 * S;
-    X.shadowColor = color;
-    X.shadowBlur = 12 * S;
-    X.beginPath();
-    X.arc(x, y, s, 0, Math.PI * 2);
-    X.stroke();
-    // Spinning inner spiral
-    X.lineWidth = 1.5 * S;
-    X.globalAlpha = 0.6;
-    for (let i = 0; i < 3; i++) {
-      const ang = this.pulse * 2 + i * (Math.PI * 2 / 3);
-      const r = s * 0.6;
-      X.beginPath();
-      X.arc(x + Math.cos(ang) * r * 0.3, y + Math.sin(ang) * r * 0.3,
-            r * 0.4, ang, ang + Math.PI);
-      X.stroke();
-    }
-    // Inner glow
-    const grad = X.createRadialGradient(x, y, 0, x, y, s * 0.8);
-    grad.addColorStop(0, color + '44');
-    grad.addColorStop(0.6, color + '11');
-    grad.addColorStop(1, color + '00');
-    X.fillStyle = grad;
-    X.globalAlpha = 0.8;
-    X.shadowBlur = 0;
-    X.beginPath();
-    X.arc(x, y, s * 0.8, 0, Math.PI * 2);
-    X.fill();
-    // Center dot
-    X.fillStyle = '#fff';
-    X.globalAlpha = 0.6 + Math.sin(this.pulse * 2) * 0.3;
-    X.beginPath();
-    X.arc(x, y, 3 * S, 0, Math.PI * 2);
-    X.fill();
-    // Particles
-    for (const p of particleArr) {
-      X.globalAlpha = p.life * 0.5;
-      X.fillStyle = color;
-      X.beginPath();
-      X.arc(p.x, p.y, 2 * S, 0, Math.PI * 2);
-      X.fill();
-    }
-    // Connection line hint
-    X.restore();
-  }
-  draw() {
-    // Connection line between portals (subtle)
-    X.save();
-    X.strokeStyle = 'rgba(200,100,255,0.06)';
-    X.lineWidth = 1 * S;
-    X.setLineDash([4 * S, 8 * S]);
-    X.beginPath();
-    X.moveTo(this.x1, this.y1);
-    X.lineTo(this.x2, this.y2);
-    X.stroke();
-    X.setLineDash([]);
-    X.restore();
-    // Draw both portals
-    this.drawPortal(this.x1, this.y1, this.color1, this.particles1);
-    this.drawPortal(this.x2, this.y2, this.color2, this.particles2);
-    // Teleport flash effect
-    if (this.teleportAnim > 0) {
-      const fa = this.teleportAnim;
-      X.save();
-      X.globalAlpha = fa * 0.3;
-      X.fillStyle = '#fff';
-      X.beginPath();
-      const tx = this.lastTeleportSide === 1 ? this.x2 : this.x1;
-      const ty = this.lastTeleportSide === 1 ? this.y2 : this.y1;
-      X.arc(tx, ty, this.radius * 2 * (1 - fa), 0, Math.PI * 2);
-      X.fill();
-      X.restore();
-    }
-  }
-  check(player) {
-    if (this.cooldown > 0) return;
-    const d1 = Math.sqrt((player.x - this.x1) ** 2 + (player.y - this.y1) ** 2);
-    const d2 = Math.sqrt((player.x - this.x2) ** 2 + (player.y - this.y2) ** 2);
-    if (d1 < this.radius * 0.9) {
-      // Teleport to portal 2
-      player.x = this.x2;
-      player.y = this.y2;
-      this.cooldown = 0.8;
-      this.teleportAnim = 1;
-      this.lastTeleportSide = 1;
-      this._doTeleportFX(this.x1, this.y1, this.color1, this.x2, this.y2, this.color2);
-    } else if (d2 < this.radius * 0.9) {
-      // Teleport to portal 1
-      player.x = this.x1;
-      player.y = this.y1;
-      this.cooldown = 0.8;
-      this.teleportAnim = 1;
-      this.lastTeleportSide = 2;
-      this._doTeleportFX(this.x2, this.y2, this.color2, this.x1, this.y1, this.color1);
-    }
-  }
-  _doTeleportFX(fromX, fromY, fromColor, toX, toY, toColor) {
-    // Entry burst
-    emit(fromX, fromY, 12, fromColor, 3, 0, { shape: 'circle', size: 2 });
-    // Exit burst
-    emit(toX, toY, 15, toColor, 4, 0, { shape: 'circle', size: 3 });
-    emit(toX, toY, 8, '#ffffff', 2, 0, { shape: 'circle', size: 1.5 });
-    screenShake = Math.max(screenShake, 6);
-    screenFlash = 0.15;
-    screenFlashColor = toColor;
-    // Sound
-    tone(600, 0.08, 'sine', 0.12);
-    tone(900, 0.06, 'sine', 0.1, 0.03);
-    tone(1200, 0.1, 'sine', 0.08, 0.06);
-  }
-}
-
-// ============================================================
-// MOVING PLATFORM (enhanced) — smooth horizontal/vertical paths
-// ============================================================
-class MovingPlatformHV {
-  constructor(x, y, w, h, dir, range, speed) {
-    this.x = x; this.y = y; this.w = w; this.h = h;
-    this.ox = x; this.oy = y;
-    this.dir = dir; // 'h' or 'v'
-    this.range = range;
-    this.speed = speed || 1;
-    this.timer = 0;
-    this.prevX = x; this.prevY = y;
-  }
-  update() {
-    this.prevX = this.x;
-    this.prevY = this.y;
-    this.timer += dt * this.speed;
-    if (this.dir === 'h') {
-      this.x = this.ox + Math.sin(this.timer) * this.range;
-    } else {
-      this.y = this.oy + Math.sin(this.timer) * this.range;
-    }
-  }
-  draw() {
-    X.save();
-    // Track line
-    X.strokeStyle = 'rgba(100,200,255,0.1)';
-    X.lineWidth = 1 * S;
-    X.setLineDash([3 * S, 5 * S]);
-    X.beginPath();
-    if (this.dir === 'h') {
-      X.moveTo(this.ox - this.range, this.y + this.h / 2);
-      X.lineTo(this.ox + this.range + this.w, this.y + this.h / 2);
-    } else {
-      X.moveTo(this.x + this.w / 2, this.oy - this.range);
-      X.lineTo(this.x + this.w / 2, this.oy + this.range + this.h);
-    }
-    X.stroke();
-    X.setLineDash([]);
-    // Platform body
-    const grad = X.createLinearGradient(this.x, this.y, this.x, this.y + this.h);
-    grad.addColorStop(0, 'rgba(80,160,255,0.5)');
-    grad.addColorStop(1, 'rgba(40,100,200,0.3)');
-    X.fillStyle = grad;
-    X.fillRect(this.x, this.y, this.w, this.h);
-    X.strokeStyle = '#44aaff';
-    X.lineWidth = 1.5 * S;
-    X.shadowColor = '#44aaff';
-    X.shadowBlur = 6 * S;
-    X.strokeRect(this.x, this.y, this.w, this.h);
-    // Movement arrows
-    X.shadowBlur = 0;
-    X.fillStyle = 'rgba(100,180,255,0.3)';
-    const cx = this.x + this.w / 2;
-    const cy = this.y + this.h / 2;
-    if (this.dir === 'h') {
-      // Left/right arrows
-      for (const sign of [-1, 1]) {
-        const ax = cx + sign * (this.w / 2 + 6 * S);
-        X.beginPath();
-        X.moveTo(ax + sign * 4 * S, cy);
-        X.lineTo(ax, cy - 3 * S);
-        X.lineTo(ax, cy + 3 * S);
-        X.closePath();
-        X.fill();
-      }
-    } else {
-      for (const sign of [-1, 1]) {
-        const ay = cy + sign * (this.h / 2 + 6 * S);
-        X.beginPath();
-        X.moveTo(cx, ay + sign * 4 * S);
-        X.lineTo(cx - 3 * S, ay);
-        X.lineTo(cx + 3 * S, ay);
-        X.closePath();
-        X.fill();
-      }
-    }
-    X.restore();
-  }
-  handleCollision(player) {
-    if (!player.collideRect(this.x, this.y, this.w, this.h)) return false;
-    const overlapLeft = (player.x + player.radius) - this.x;
-    const overlapRight = (this.x + this.w) - (player.x - player.radius);
-    const overlapTop = (player.y + player.radius) - this.y;
-    const overlapBottom = (this.y + this.h) - (player.y - player.radius);
-    const minOverlapX = Math.min(overlapLeft, overlapRight);
-    const minOverlapY = Math.min(overlapTop, overlapBottom);
-    if (minOverlapX < minOverlapY) {
-      if (overlapLeft < overlapRight) player.x = this.x - player.radius;
-      else player.x = this.x + this.w + player.radius;
-      player.vx = 0;
-    } else {
-      if (overlapTop < overlapBottom) {
-        player.y = this.y - player.radius;
-        if (player.gravDir === 1) { player.grounded = true; player.lastGroundY = player.y; }
-      } else {
-        player.y = this.y + this.h + player.radius;
-        if (player.gravDir === -1) { player.grounded = true; player.lastGroundY = player.y; }
-      }
-      player.vy = 0;
-      // Carry player with platform
-      player.x += (this.x - this.prevX);
-      player.y += (this.y - this.prevY);
-      player.squash = 0.85;
-      if (Math.abs(this.x - this.prevX) + Math.abs(this.y - this.prevY) > 0.1) {
-        if (Math.random() > 0.85) emitTrail(player.x, player.y + player.radius * player.gravDir, '#44aaff');
-      }
-    }
-    return true;
-  }
-}
-
-// ============================================================
-// LEVEL EDITOR MODE
-// ============================================================
-let editorMode = false;
-let editorGrid = { cols: 20, rows: 14 };
-let editorCellW = 0, editorCellH = 0;
-let editorTool = 'platform'; // platform, spike, orb, laser, portal_a, portal_b, spawn, goal, erase, moving_h, moving_v
-let editorLevel = { platforms: [], spikes: [], orbs: [], lasers: [], teleports: [], movingPlatforms: [], spawn: null, goal: null };
-let editorSavedLevels = [];
-let editorPortalA = null; // temporary first portal point
-let editorSelectedSave = -1;
-let editorMessage = '';
-let editorMessageTimer = 0;
-let editorTestMode = false;
-let editorMenuOpen = false;
-let editorToolbar = [];
-let editorScrollY = 0;
-
-try { const el = localStorage.getItem('gflip3_editor'); if (el) editorSavedLevels = JSON.parse(el); } catch(e) {}
-function saveEditorLevels() { try { localStorage.setItem('gflip3_editor', JSON.stringify(editorSavedLevels)); } catch(e) {} }
-
-function editorShowMsg(msg) { editorMessage = msg; editorMessageTimer = 2.5; }
-
-function editorInit() {
-  editorMode = true;
-  screen = 'editor';
-  editorCellW = W / editorGrid.cols;
-  editorCellH = (H - 80 * S) / editorGrid.rows; // leave room for toolbar
-  editorLevel = { platforms: [], spikes: [], orbs: [], lasers: [], teleports: [], movingPlatforms: [], spawn: null, goal: null };
-  editorTool = 'platform';
-  editorPortalA = null;
-  editorSelectedSave = -1;
-  editorTestMode = false;
-  editorMenuOpen = false;
-  gs.btns = {};
-}
-
-function editorGridToWorld(col, row) {
-  return { x: col * editorCellW, y: 80 * S + row * editorCellH };
-}
-
-function editorWorldToGrid(wx, wy) {
-  const col = Math.floor(wx / editorCellW);
-  const row = Math.floor((wy - 80 * S) / editorCellH);
-  return { col: Math.max(0, Math.min(editorGrid.cols - 1, col)), row: Math.max(0, Math.min(editorGrid.rows - 1, row)) };
-}
-
-function editorPlaceTile(col, row) {
-  const key = `${col},${row}`;
-  // Remove existing item at this position first for non-additive tools
-  if (editorTool === 'erase') {
-    editorLevel.platforms = editorLevel.platforms.filter(p => p.key !== key);
-    editorLevel.spikes = editorLevel.spikes.filter(p => p.key !== key);
-    editorLevel.orbs = editorLevel.orbs.filter(p => p.key !== key);
-    editorLevel.lasers = editorLevel.lasers.filter(p => p.col === col && p.row === row ? false : true);
-    editorLevel.movingPlatforms = editorLevel.movingPlatforms.filter(p => p.key !== key);
-    if (editorLevel.spawn && editorLevel.spawn.key === key) editorLevel.spawn = null;
-    if (editorLevel.goal && editorLevel.goal.key === key) editorLevel.goal = null;
-    // Remove teleports at this position
-    editorLevel.teleports = editorLevel.teleports.filter(t => {
-      return !(t.col1 === col && t.row1 === row) && !(t.col2 === col && t.row2 === row);
-    });
-    return;
-  }
-  if (editorTool === 'platform') {
-    if (!editorLevel.platforms.find(p => p.key === key)) {
-      editorLevel.platforms.push({ col, row, key });
-    }
-  } else if (editorTool === 'spike') {
-    if (!editorLevel.spikes.find(p => p.key === key)) {
-      editorLevel.spikes.push({ col, row, key });
-    }
-  } else if (editorTool === 'orb') {
-    if (!editorLevel.orbs.find(p => p.key === key)) {
-      editorLevel.orbs.push({ col, row, key });
-    }
-  } else if (editorTool === 'laser') {
-    // Place a horizontal laser spanning the row
-    if (!editorLevel.lasers.find(p => p.col === col && p.row === row)) {
-      editorLevel.lasers.push({ col, row, w: 3, onTime: 1.5, offTime: 1.0 });
-    }
-  } else if (editorTool === 'moving_h' || editorTool === 'moving_v') {
-    if (!editorLevel.movingPlatforms.find(p => p.key === key)) {
-      editorLevel.movingPlatforms.push({ col, row, key, dir: editorTool === 'moving_h' ? 'h' : 'v' });
-    }
-  } else if (editorTool === 'portal_a') {
-    editorPortalA = { col, row };
-    editorTool = 'portal_b';
-    editorShowMsg('Now tap to place Portal B');
-  } else if (editorTool === 'portal_b') {
-    if (editorPortalA) {
-      editorLevel.teleports.push({
-        col1: editorPortalA.col, row1: editorPortalA.row,
-        col2: col, row2: row
-      });
-      editorPortalA = null;
-      editorTool = 'portal_a';
-      editorShowMsg('Portal pair placed!');
-    }
-  } else if (editorTool === 'spawn') {
-    editorLevel.spawn = { col, row, key };
-  } else if (editorTool === 'goal') {
-    editorLevel.goal = { col, row, key };
-  }
-}
-
-function editorBuildLevel() {
-  // Convert editor grid data to a level data object
-  const cellWFrac = 1 / editorGrid.cols;
-  const cellHFrac = 1 / editorGrid.rows;
-  const topOffset = 80 * S / H;
-  const platforms = [];
-  const spikes = [];
-  const orbs = [];
-  const lasers = [];
-  const teleports = [];
-  const movingPlatforms = [];
-
-  // Add boundary walls (floor/ceiling)
-  platforms.push([0, 0.0, 1.0, 0.015]);
-  platforms.push([0, 0.985, 1.0, 0.015]);
-
-  for (const p of editorLevel.platforms) {
-    platforms.push([p.col * cellWFrac, topOffset + p.row * cellHFrac * (1 - topOffset * 2), cellWFrac * 1.0, cellHFrac * (1 - topOffset * 2) * 0.8]);
-  }
-  for (const s of editorLevel.spikes) {
-    spikes.push([s.col * cellWFrac, topOffset + s.row * cellHFrac * (1 - topOffset * 2), cellWFrac, cellHFrac * (1 - topOffset * 2) * 0.6]);
-  }
-  for (const o of editorLevel.orbs) {
-    orbs.push([o.col * cellWFrac + cellWFrac / 2, topOffset + o.row * cellHFrac * (1 - topOffset * 2) + cellHFrac * (1 - topOffset * 2) / 2]);
-  }
-
-  const spawn = editorLevel.spawn
-    ? [editorLevel.spawn.col * cellWFrac + cellWFrac / 2, topOffset + editorLevel.spawn.row * cellHFrac * (1 - topOffset * 2)]
-    : [0.05, 0.3];
-  const goal = editorLevel.goal
-    ? [editorLevel.goal.col * cellWFrac + cellWFrac / 2, topOffset + editorLevel.goal.row * cellHFrac * (1 - topOffset * 2)]
-    : [0.9, 0.7];
-
-  const levelData = {
-    name: 'Custom Level', stars: [30, 20, 12],
-    spawn, goal, width: 1.0,
-    platforms, spikes, orbs,
-    wells: [], winds: [],
-    customLasers: editorLevel.lasers.map(l => ({
-      col: l.col, row: l.row, w: l.w || 3,
-      onTime: l.onTime || 1.5, offTime: l.offTime || 1.0
-    })),
-    customTeleports: editorLevel.teleports.map(t => ({
-      col1: t.col1, row1: t.row1, col2: t.col2, row2: t.row2
-    })),
-    customMoving: editorLevel.movingPlatforms.map(m => ({
-      col: m.col, row: m.row, dir: m.dir
-    }))
-  };
-  return levelData;
-}
-
-function editorSave() {
-  if (!editorLevel.spawn || !editorLevel.goal) {
-    editorShowMsg('Place spawn & goal first!');
-    return;
-  }
-  if (editorLevel.orbs.length === 0) {
-    editorShowMsg('Place at least 1 orb!');
-    return;
-  }
-  const data = {
-    grid: JSON.parse(JSON.stringify(editorLevel)),
-    date: Date.now(),
-    name: 'Custom ' + (editorSavedLevels.length + 1)
-  };
-  editorSavedLevels.push(data);
-  saveEditorLevels();
-  editorShowMsg('Level saved! (' + editorSavedLevels.length + ')');
-}
-
-function editorLoad(index) {
-  if (index < 0 || index >= editorSavedLevels.length) return;
-  const data = editorSavedLevels[index];
-  editorLevel = JSON.parse(JSON.stringify(data.grid));
-  editorSelectedSave = index;
-  editorShowMsg('Level loaded!');
-  editorMenuOpen = false;
-}
-
-function editorDelete(index) {
-  if (index < 0 || index >= editorSavedLevels.length) return;
-  editorSavedLevels.splice(index, 1);
-  saveEditorLevels();
-  editorShowMsg('Level deleted');
-}
-
-function editorPlay() {
-  if (!editorLevel.spawn || !editorLevel.goal) {
-    editorShowMsg('Place spawn & goal first!');
-    return;
-  }
-  if (editorLevel.orbs.length === 0) {
-    editorShowMsg('Place at least 1 orb!');
-    return;
-  }
-  editorTestMode = true;
-  const levelData = editorBuildLevel();
-  startEditorLevel(levelData);
-}
-
-function startEditorLevel(levelData) {
-  lvl = 0;
-  const L = levelData;
-  const p = new Player(W * L.spawn[0], H * L.spawn[1]);
-  p.invuln = 0.5;
-  const platforms = L.platforms.map(d => {
-    const pl = new Platform(W * d[0], H * d[1], W * d[2], H * d[3], d[4] || 'solid');
-    if (d[4] === 'moving') {
-      pl.type = 'moving';
-      pl.moveRangeX = (d[5] || 0) * W;
-      pl.moveRangeY = (d[6] || 0) * H;
-      pl.moveSpeed = d[7] || 1;
-    }
-    return pl;
-  });
-  const spikes = L.spikes.map(d => new Spike(W * d[0], H * d[1], W * d[2], H * d[3]));
-  const orbs = L.orbs.map(d => new Orb(W * d[0], H * d[1]));
-  const wells = [];
-  const winds = [];
-  const portal = new Portal(W * L.goal[0], H * L.goal[1]);
-
-  // Custom lasers
-  const customLasers = [];
-  if (L.customLasers) {
-    const cellWFrac = 1 / editorGrid.cols;
-    const cellHFrac = 1 / editorGrid.rows;
-    const topOffset = 80 * S / H;
-    for (const cl of L.customLasers) {
-      const lx = W * cl.col * cellWFrac;
-      const ly = H * (topOffset + cl.row * cellHFrac * (1 - topOffset * 2));
-      const lw = W * cl.w * cellWFrac;
-      const lh = H * cellHFrac * (1 - topOffset * 2) * 0.3;
-      customLasers.push(new LaserBeam(lx, ly, lw, lh, cl.onTime, cl.offTime, Math.random() * cl.onTime));
-    }
-  }
-
-  // Custom teleports
-  const customTeleports = [];
-  if (L.customTeleports) {
-    const cellWFrac = 1 / editorGrid.cols;
-    const cellHFrac = 1 / editorGrid.rows;
-    const topOffset = 80 * S / H;
-    for (const ct of L.customTeleports) {
-      const x1 = W * (ct.col1 * cellWFrac + cellWFrac / 2);
-      const y1 = H * (topOffset + ct.row1 * cellHFrac * (1 - topOffset * 2));
-      const x2 = W * (ct.col2 * cellWFrac + cellWFrac / 2);
-      const y2 = H * (topOffset + ct.row2 * cellHFrac * (1 - topOffset * 2));
-      customTeleports.push(new TeleportPortal(x1, y1, x2, y2));
-    }
-  }
-
-  // Custom moving platforms
-  const customMovingPlatforms = [];
-  if (L.customMoving) {
-    const cellWFrac = 1 / editorGrid.cols;
-    const cellHFrac = 1 / editorGrid.rows;
-    const topOffset = 80 * S / H;
-    for (const cm of L.customMoving) {
-      const mx = W * cm.col * cellWFrac;
-      const my = H * (topOffset + cm.row * cellHFrac * (1 - topOffset * 2));
-      const mw = W * cellWFrac;
-      const mh = H * cellHFrac * (1 - topOffset * 2) * 0.6;
-      const range = (cm.dir === 'h' ? W : H) * 0.08;
-      customMovingPlatforms.push(new MovingPlatformHV(mx, my, mw, mh, cm.dir, range, 1.5));
-    }
-  }
-
-  sessionNearMisses = 0;
-  gs = {
-    player: p, platforms, spikes, orbs, portal, wells, winds,
-    customLasers, customTeleports, customMovingPlatforms,
-    time: 0, orbsCollected: 0, totalOrbs: orbs.length,
-    dead: false, won: false, deathCount: 0, btns: {},
-    levelStartTime: performance.now(),
-    isDaily: false, isEditor: true
-  };
-  combo = 0; comboTimer = 0;
-  particles = []; floatingTexts = []; speedLines = [];
-  screen = 'game';
-  screenShake = 0; screenFlash = 0;
-  deathTimer = 0; nearMissTimer = 0; slowMo = 0;
-  cameraZoom = 1; cameraZoomTarget = 1;
-  currentAccent = '#00ffff';
-  ensureAudio(); startMusic();
-}
-
-function drawEditor() {
-  // Grid background
-  X.save();
-  X.fillStyle = 'rgba(0,0,0,0.3)';
-  X.fillRect(0, 80 * S, W, H - 80 * S);
-
-  // Grid lines
-  X.strokeStyle = 'rgba(0,255,255,0.08)';
-  X.lineWidth = 0.5 * S;
-  for (let c = 0; c <= editorGrid.cols; c++) {
-    X.beginPath();
-    X.moveTo(c * editorCellW, 80 * S);
-    X.lineTo(c * editorCellW, H);
-    X.stroke();
-  }
-  for (let r = 0; r <= editorGrid.rows; r++) {
-    X.beginPath();
-    X.moveTo(0, 80 * S + r * editorCellH);
-    X.lineTo(W, 80 * S + r * editorCellH);
-    X.stroke();
-  }
-
-  // Draw placed items
-  for (const p of editorLevel.platforms) {
-    const wx = p.col * editorCellW;
-    const wy = 80 * S + p.row * editorCellH;
-    X.fillStyle = 'rgba(60,60,100,0.6)';
-    X.fillRect(wx + 1, wy + 1, editorCellW - 2, editorCellH - 2);
-    X.strokeStyle = '#00ccff';
-    X.lineWidth = 1 * S;
-    X.strokeRect(wx + 1, wy + 1, editorCellW - 2, editorCellH - 2);
-  }
-  for (const s of editorLevel.spikes) {
-    const wx = s.col * editorCellW;
-    const wy = 80 * S + s.row * editorCellH;
-    X.fillStyle = 'rgba(255,0,80,0.4)';
-    X.fillRect(wx + 1, wy + 1, editorCellW - 2, editorCellH - 2);
-    X.strokeStyle = '#ff0064';
-    X.lineWidth = 1 * S;
-    X.strokeRect(wx + 1, wy + 1, editorCellW - 2, editorCellH - 2);
-    // Spike triangles
-    X.fillStyle = '#ff0064';
-    const cx = wx + editorCellW / 2;
-    X.beginPath();
-    X.moveTo(cx - 4 * S, wy + editorCellH - 2);
-    X.lineTo(cx + 4 * S, wy + editorCellH - 2);
-    X.lineTo(cx, wy + 2);
-    X.closePath();
-    X.fill();
-  }
-  for (const o of editorLevel.orbs) {
-    const wx = o.col * editorCellW + editorCellW / 2;
-    const wy = 80 * S + o.row * editorCellH + editorCellH / 2;
-    X.fillStyle = '#4488ff';
-    X.shadowColor = '#4488ff';
-    X.shadowBlur = 8 * S;
-    X.beginPath();
-    X.arc(wx, wy, Math.min(editorCellW, editorCellH) * 0.3, 0, Math.PI * 2);
-    X.fill();
-    X.shadowBlur = 0;
-  }
-  for (const l of editorLevel.lasers) {
-    const wx = l.col * editorCellW;
-    const wy = 80 * S + l.row * editorCellH;
-    const lw = (l.w || 3) * editorCellW;
-    X.fillStyle = 'rgba(255,50,50,0.3)';
-    X.fillRect(wx, wy + editorCellH * 0.3, lw, editorCellH * 0.4);
-    X.strokeStyle = '#ff3333';
-    X.lineWidth = 1 * S;
-    X.strokeRect(wx, wy + editorCellH * 0.3, lw, editorCellH * 0.4);
-    // Emitter dots
-    X.fillStyle = '#ff6666';
-    X.beginPath();
-    X.arc(wx, wy + editorCellH / 2, 3 * S, 0, Math.PI * 2);
-    X.fill();
-    X.beginPath();
-    X.arc(wx + lw, wy + editorCellH / 2, 3 * S, 0, Math.PI * 2);
-    X.fill();
-  }
-  for (const t of editorLevel.teleports) {
-    const wx1 = t.col1 * editorCellW + editorCellW / 2;
-    const wy1 = 80 * S + t.row1 * editorCellH + editorCellH / 2;
-    const wx2 = t.col2 * editorCellW + editorCellW / 2;
-    const wy2 = 80 * S + t.row2 * editorCellH + editorCellH / 2;
-    // Connection line
-    X.strokeStyle = 'rgba(255,100,255,0.3)';
-    X.lineWidth = 1 * S;
-    X.setLineDash([3 * S, 3 * S]);
-    X.beginPath();
-    X.moveTo(wx1, wy1); X.lineTo(wx2, wy2);
-    X.stroke();
-    X.setLineDash([]);
-    // Portal A
-    X.strokeStyle = '#ff66ff';
-    X.lineWidth = 2 * S;
-    X.beginPath();
-    X.arc(wx1, wy1, Math.min(editorCellW, editorCellH) * 0.35, 0, Math.PI * 2);
-    X.stroke();
-    X.fillStyle = '#ff66ff';
-    X.font = `${8 * S}px sans-serif`;
-    X.textAlign = 'center';
-    X.fillText('A', wx1, wy1 + 3 * S);
-    // Portal B
-    X.strokeStyle = '#66ffff';
-    X.lineWidth = 2 * S;
-    X.beginPath();
-    X.arc(wx2, wy2, Math.min(editorCellW, editorCellH) * 0.35, 0, Math.PI * 2);
-    X.stroke();
-    X.fillStyle = '#66ffff';
-    X.font = `${8 * S}px sans-serif`;
-    X.fillText('B', wx2, wy2 + 3 * S);
-  }
-  for (const m of editorLevel.movingPlatforms) {
-    const wx = m.col * editorCellW;
-    const wy = 80 * S + m.row * editorCellH;
-    X.fillStyle = 'rgba(68,170,255,0.4)';
-    X.fillRect(wx + 1, wy + 1, editorCellW - 2, editorCellH - 2);
-    X.strokeStyle = '#44aaff';
-    X.lineWidth = 1.5 * S;
-    X.strokeRect(wx + 1, wy + 1, editorCellW - 2, editorCellH - 2);
-    // Direction indicator
-    X.fillStyle = '#44aaff';
-    X.font = `bold ${10 * S}px sans-serif`;
-    X.textAlign = 'center';
-    X.fillText(m.dir === 'h' ? '↔' : '↕', wx + editorCellW / 2, wy + editorCellH / 2 + 4 * S);
-  }
-
-  // Spawn point
-  if (editorLevel.spawn) {
-    const wx = editorLevel.spawn.col * editorCellW + editorCellW / 2;
-    const wy = 80 * S + editorLevel.spawn.row * editorCellH + editorCellH / 2;
-    X.fillStyle = '#00ffff';
-    X.shadowColor = '#00ffff';
-    X.shadowBlur = 10 * S;
-    X.beginPath();
-    X.arc(wx, wy, Math.min(editorCellW, editorCellH) * 0.3, 0, Math.PI * 2);
-    X.fill();
-    X.shadowBlur = 0;
-    X.fillStyle = '#000';
-    X.font = `bold ${8 * S}px sans-serif`;
-    X.textAlign = 'center';
-    X.fillText('S', wx, wy + 3 * S);
-  }
-
-  // Goal point
-  if (editorLevel.goal) {
-    const wx = editorLevel.goal.col * editorCellW + editorCellW / 2;
-    const wy = 80 * S + editorLevel.goal.row * editorCellH + editorCellH / 2;
-    X.fillStyle = '#ffd700';
-    X.shadowColor = '#ffd700';
-    X.shadowBlur = 10 * S;
-    X.beginPath();
-    X.arc(wx, wy, Math.min(editorCellW, editorCellH) * 0.3, 0, Math.PI * 2);
-    X.fill();
-    X.shadowBlur = 0;
-    X.fillStyle = '#000';
-    X.font = `bold ${8 * S}px sans-serif`;
-    X.textAlign = 'center';
-    X.fillText('G', wx, wy + 3 * S);
-  }
-
-  // Portal A placement indicator
-  if (editorPortalA) {
-    const wx = editorPortalA.col * editorCellW + editorCellW / 2;
-    const wy = 80 * S + editorPortalA.row * editorCellH + editorCellH / 2;
-    X.strokeStyle = '#ff66ff';
-    X.lineWidth = 2 * S;
-    X.setLineDash([4 * S, 4 * S]);
-    X.beginPath();
-    X.arc(wx, wy, Math.min(editorCellW, editorCellH) * 0.4, 0, Math.PI * 2);
-    X.stroke();
-    X.setLineDash([]);
-  }
-
-  X.restore();
-
-  // Toolbar at top
-  drawEditorToolbar();
-
-  // Message
-  if (editorMessageTimer > 0) {
-    editorMessageTimer -= dt;
-    X.save();
-    X.globalAlpha = Math.min(1, editorMessageTimer);
-    X.fillStyle = 'rgba(0,0,0,0.7)';
-    X.beginPath();
-    X.roundRect(W / 2 - 120 * S, H / 2 - 20 * S, 240 * S, 40 * S, 8 * S);
-    X.fill();
-    X.fillStyle = '#fff';
-    X.font = `bold ${14 * S}px sans-serif`;
-    X.textAlign = 'center';
-    X.fillText(editorMessage, W / 2, H / 2 + 5 * S);
-    X.restore();
-  }
-
-  // Load/Save menu overlay
-  if (editorMenuOpen) {
-    drawEditorMenu();
-  }
-}
-
-function drawEditorToolbar() {
-  // Background
-  X.save();
-  X.fillStyle = 'rgba(10,0,26,0.95)';
-  X.fillRect(0, 0, W, 78 * S);
-  X.strokeStyle = 'rgba(0,255,255,0.2)';
-  X.lineWidth = 1 * S;
-  X.beginPath();
-  X.moveTo(0, 78 * S); X.lineTo(W, 78 * S);
-  X.stroke();
-
-  // Title
-  X.fillStyle = '#00ffff';
-  X.font = `bold ${12 * S}px sans-serif`;
-  X.textAlign = 'left';
-  X.fillText('LEVEL EDITOR', 8 * S, 14 * S);
-
-  // Tool buttons (2 rows)
-  const tools = [
-    { id: 'platform', label: '■', color: '#00ccff', tip: 'Wall' },
-    { id: 'spike', label: '▲', color: '#ff0064', tip: 'Spike' },
-    { id: 'orb', label: '●', color: '#4488ff', tip: 'Orb' },
-    { id: 'laser', label: '═', color: '#ff3333', tip: 'Laser' },
-    { id: 'portal_a', label: '◎', color: '#ff66ff', tip: 'Portal' },
-    { id: 'moving_h', label: '↔', color: '#44aaff', tip: 'MovH' },
-    { id: 'moving_v', label: '↕', color: '#44aaff', tip: 'MovV' },
-    { id: 'spawn', label: 'S', color: '#00ffff', tip: 'Start' },
-    { id: 'goal', label: 'G', color: '#ffd700', tip: 'Goal' },
-    { id: 'erase', label: '✕', color: '#ff4444', tip: 'Erase' },
-  ];
-  const btnSize = 28 * S;
-  const btnGap = 4 * S;
-  const toolStartX = 8 * S;
-  const row1Y = 22 * S;
-  const row2Y = row1Y + btnSize + btnGap;
-  const toolsPerRow = 5;
-
-  editorToolbar = [];
-  tools.forEach((tool, i) => {
-    const row = Math.floor(i / toolsPerRow);
-    const col = i % toolsPerRow;
-    const bx = toolStartX + col * (btnSize + btnGap);
-    const by = (row === 0 ? row1Y : row2Y);
-    const selected = editorTool === tool.id || (editorTool === 'portal_b' && tool.id === 'portal_a');
-
-    X.fillStyle = selected ? 'rgba(0,255,255,0.25)' : 'rgba(255,255,255,0.05)';
-    X.beginPath();
-    X.roundRect(bx, by, btnSize, btnSize, 4 * S);
-    X.fill();
-    if (selected) {
-      X.strokeStyle = '#00ffff';
-      X.lineWidth = 2 * S;
-      X.stroke();
-    }
-    X.fillStyle = tool.color;
-    X.font = `bold ${14 * S}px sans-serif`;
-    X.textAlign = 'center';
-    X.fillText(tool.label, bx + btnSize / 2, by + btnSize / 2 + 5 * S);
-
-    // Tiny label below
-    X.fillStyle = 'rgba(255,255,255,0.4)';
-    X.font = `${6 * S}px sans-serif`;
-    X.fillText(tool.tip, bx + btnSize / 2, by + btnSize + 7 * S);
-
-    editorToolbar.push({ x: bx, y: by, w: btnSize, h: btnSize, id: tool.id });
-  });
-
-  // Action buttons on the right
-  const actionBtns = [
-    { id: 'play', label: '▶', color: '#00ff88' },
-    { id: 'save', label: '💾', color: '#ffd700' },
-    { id: 'load', label: '📂', color: '#ff9944' },
-    { id: 'clear', label: '🗑', color: '#ff4444' },
-    { id: 'back', label: '←', color: '#ffffff' },
-  ];
-  const aBtnW = 32 * S;
-  const aBtnH = 26 * S;
-  const aStartX = W - (aBtnW + 4 * S) * actionBtns.length - 4 * S;
-
-  actionBtns.forEach((btn, i) => {
-    const bx = aStartX + i * (aBtnW + 4 * S);
-    const by = row1Y;
-
-    X.fillStyle = 'rgba(255,255,255,0.05)';
-    X.beginPath();
-    X.roundRect(bx, by, aBtnW, aBtnH, 4 * S);
-    X.fill();
-    X.strokeStyle = btn.color + '44';
-    X.lineWidth = 1 * S;
-    X.stroke();
-
-    X.fillStyle = btn.color;
-    X.font = `${12 * S}px sans-serif`;
-    X.textAlign = 'center';
-    X.fillText(btn.label, bx + aBtnW / 2, by + aBtnH / 2 + 4 * S);
-
-    editorToolbar.push({ x: bx, y: by, w: aBtnW, h: aBtnH, id: 'action_' + btn.id });
-  });
-
-  // Item count display
-  X.fillStyle = 'rgba(255,255,255,0.35)';
-  X.font = `${9 * S}px sans-serif`;
-  X.textAlign = 'right';
-  const counts = `P:${editorLevel.platforms.length} S:${editorLevel.spikes.length} O:${editorLevel.orbs.length} L:${editorLevel.lasers.length} T:${editorLevel.teleports.length}`;
-  X.fillText(counts, W - 8 * S, row2Y + aBtnH + 2 * S);
-
-  X.restore();
-}
-
-function drawEditorMenu() {
-  X.save();
-  X.fillStyle = 'rgba(0,0,0,0.9)';
-  X.fillRect(0, 0, W, H);
-
-  drawNeonText('SAVED LEVELS', W / 2, 50 * S, 22, '#ffd700');
-
-  if (editorSavedLevels.length === 0) {
-    X.fillStyle = 'rgba(255,255,255,0.4)';
-    X.font = `${14 * S}px sans-serif`;
-    X.textAlign = 'center';
-    X.fillText('No saved levels yet.', W / 2, H * 0.4);
-  } else {
-    const startY = 90 * S;
-    gs.btns.editorLoadBtns = [];
-    gs.btns.editorDeleteBtns = [];
-    for (let i = 0; i < editorSavedLevels.length && i < 8; i++) {
-      const entry = editorSavedLevels[i];
-      const y = startY + i * 50 * S;
-      // Background
-      X.fillStyle = i === editorSelectedSave ? 'rgba(0,255,255,0.1)' : 'rgba(255,255,255,0.03)';
-      X.beginPath();
-      X.roundRect(W * 0.08, y, W * 0.84, 42 * S, 6 * S);
-      X.fill();
-      X.strokeStyle = 'rgba(0,255,255,0.15)';
-      X.lineWidth = 1 * S;
-      X.stroke();
-      // Name
-      X.fillStyle = '#fff';
-      X.font = `bold ${13 * S}px sans-serif`;
-      X.textAlign = 'left';
-      X.fillText(entry.name || 'Custom', W * 0.12, y + 18 * S);
-      // Date
-      X.fillStyle = 'rgba(255,255,255,0.3)';
-      X.font = `${10 * S}px sans-serif`;
-      const d = new Date(entry.date);
-      X.fillText(`${d.getMonth()+1}/${d.getDate()}`, W * 0.12, y + 34 * S);
-      // Info
-      const info = entry.grid;
-      X.fillStyle = 'rgba(0,255,255,0.5)';
-      X.fillText(`${info.platforms.length}P ${info.spikes.length}S ${info.orbs.length}O`, W * 0.4, y + 34 * S);
-      // Load button
-      const loadBx = W * 0.65;
-      const loadBw = W * 0.12;
-      X.fillStyle = 'rgba(0,255,100,0.15)';
-      X.beginPath();
-      X.roundRect(loadBx, y + 6 * S, loadBw, 30 * S, 4 * S);
-      X.fill();
-      X.strokeStyle = '#00ff88';
-      X.lineWidth = 1 * S;
-      X.stroke();
-      X.fillStyle = '#00ff88';
-      X.font = `bold ${11 * S}px sans-serif`;
-      X.textAlign = 'center';
-      X.fillText('LOAD', loadBx + loadBw / 2, y + 26 * S);
-      gs.btns.editorLoadBtns.push({ x: loadBx, y: y + 6 * S, w: loadBw, h: 30 * S, index: i });
-      // Delete button
-      const delBx = W * 0.8;
-      const delBw = W * 0.1;
-      X.fillStyle = 'rgba(255,0,0,0.1)';
-      X.beginPath();
-      X.roundRect(delBx, y + 6 * S, delBw, 30 * S, 4 * S);
-      X.fill();
-      X.strokeStyle = '#ff4444';
-      X.lineWidth = 1 * S;
-      X.stroke();
-      X.fillStyle = '#ff4444';
-      X.font = `bold ${11 * S}px sans-serif`;
-      X.textAlign = 'center';
-      X.fillText('DEL', delBx + delBw / 2, y + 26 * S);
-      gs.btns.editorDeleteBtns.push({ x: delBx, y: y + 6 * S, w: delBw, h: 30 * S, index: i });
-    }
-  }
-
-  gs.btns.editorMenuClose = drawBtn(W / 2 - 60 * S, H - 60 * S, 120 * S, 42 * S, '← BACK', false);
-  X.restore();
-}
-
-function handleEditorTap(x, y) {
-  // If menu is open, handle menu taps
-  if (editorMenuOpen) {
-    if (gs.btns.editorLoadBtns) {
-      for (const btn of gs.btns.editorLoadBtns) {
-        if (hit(x, y, btn)) { sfxClick(); editorLoad(btn.index); return; }
-      }
-    }
-    if (gs.btns.editorDeleteBtns) {
-      for (const btn of gs.btns.editorDeleteBtns) {
-        if (hit(x, y, btn)) { sfxClick(); editorDelete(btn.index); return; }
-      }
-    }
-    if (hit(x, y, gs.btns.editorMenuClose)) { sfxClick(); editorMenuOpen = false; return; }
-    return;
-  }
-
-  // Check toolbar buttons
-  for (const btn of editorToolbar) {
-    if (hit(x, y, btn)) {
-      sfxClick();
-      if (btn.id.startsWith('action_')) {
-        const action = btn.id.replace('action_', '');
-        if (action === 'play') editorPlay();
-        else if (action === 'save') editorSave();
-        else if (action === 'load') { editorMenuOpen = true; gs.btns = {}; }
-        else if (action === 'clear') {
-          editorLevel = { platforms: [], spikes: [], orbs: [], lasers: [], teleports: [], movingPlatforms: [], spawn: null, goal: null };
-          editorPortalA = null;
-          editorShowMsg('Cleared!');
-        }
-        else if (action === 'back') { screen = 'menu'; gs.btns = {}; editorMode = false; }
-      } else {
-        editorTool = btn.id;
-        if (btn.id !== 'portal_a' && btn.id !== 'portal_b') editorPortalA = null;
-      }
-      return;
-    }
-  }
-
-  // Grid placement
-  if (y > 80 * S) {
-    const grid = editorWorldToGrid(x, y);
-    editorPlaceTile(grid.col, grid.row);
-    sfxClick();
-  }
-}
-
-// ============================================================
-// ENHANCED DAILY CHALLENGE — more variety with seeded generation
-// ============================================================
-function generateDailyChallenge_v2() {
-  dailyChallengeSeed = getDailySeed();
-  const rng = seededRandom(dailyChallengeSeed);
-  // Check completion
-  try {
-    const dc = localStorage.getItem('gflip3_daily');
-    if (dc) {
-      const data = JSON.parse(dc);
-      if (data.seed === dailyChallengeSeed) dailyChallengeCompleted = true;
-      else dailyChallengeCompleted = false;
-    }
-  } catch(e) {}
-
-  // More sophisticated procedural generation
-  const difficulty = (dailyChallengeSeed % 7) / 6; // 0-1, varies by day of week
-  const numPlats = 3 + Math.floor(rng() * 4 + difficulty * 3);
-  const numSpikes = 2 + Math.floor(rng() * 3 + difficulty * 2);
-  const numOrbs = 2 + Math.floor(rng() * 2);
-  const platforms = [];
-  const spikes = [];
-  const orbs = [];
-  const lasers = [];
-  const teleports = [];
-  const movingPlatforms = [];
-
-  // Floor and ceiling
-  platforms.push([0, 0.0, 1.0, 0.02]);
-  platforms.push([0, 0.98, 1.0, 0.02]);
-
-  // Generate platforms with spacing
-  const usedSlots = new Set();
-  for (let i = 0; i < numPlats; i++) {
-    let px, py, pw;
-    let attempts = 0;
-    do {
-      px = 0.05 + rng() * 0.75;
-      py = 0.12 + rng() * 0.72;
-      pw = 0.06 + rng() * 0.14;
-      attempts++;
-    } while (attempts < 20 && [...usedSlots].some(s => Math.abs(s.x - px) < 0.12 && Math.abs(s.y - py) < 0.12));
-    usedSlots.add({ x: px, y: py });
-    const types = ['solid', 'solid', 'bouncy', 'crumble'];
-    if (difficulty > 0.5 && rng() > 0.7) types.push('crumble');
-    const ptype = types[Math.floor(rng() * types.length)];
-    platforms.push([px, py, pw, 0.025, ptype]);
-  }
-
-  // Spikes
-  for (let i = 0; i < numSpikes; i++) {
-    const sx = 0.1 + rng() * 0.75;
-    const onCeiling = rng() < 0.5;
-    spikes.push([sx, onCeiling ? 0.02 : 0.88 + rng() * 0.06, 0.03 + rng() * 0.06, 0.04 + rng() * 0.04]);
-  }
-
-  // Orbs
-  for (let i = 0; i < numOrbs; i++) {
-    orbs.push([0.1 + rng() * 0.75, 0.12 + rng() * 0.7]);
-  }
-
-  // Maybe add lasers for hard days
-  if (difficulty > 0.4) {
-    const numLasers = Math.floor(rng() * 2 + difficulty);
-    for (let i = 0; i < numLasers; i++) {
-      lasers.push({
-        x: 0.1 + rng() * 0.5,
-        y: 0.15 + rng() * 0.65,
-        w: 0.1 + rng() * 0.2,
-        h: 0.025,
-        onTime: 1.0 + rng() * 1.5,
-        offTime: 0.8 + rng() * 1.0,
-        delay: rng() * 2
-      });
-    }
-  }
-
-  // Maybe add teleport pair
-  if (difficulty > 0.3 && rng() > 0.5) {
-    teleports.push({
-      x1: 0.15 + rng() * 0.3, y1: 0.2 + rng() * 0.5,
-      x2: 0.55 + rng() * 0.3, y2: 0.2 + rng() * 0.5
-    });
-  }
-
-  // Maybe add moving platforms
-  if (rng() > 0.4) {
-    const numMoving = 1 + Math.floor(rng() * 2);
-    for (let i = 0; i < numMoving; i++) {
-      movingPlatforms.push({
-        x: 0.15 + rng() * 0.6,
-        y: 0.2 + rng() * 0.6,
-        w: 0.08 + rng() * 0.08,
-        h: 0.025,
-        dir: rng() > 0.5 ? 'h' : 'v',
-        range: 0.05 + rng() * 0.1,
-        speed: 0.8 + rng() * 1.2
-      });
-    }
-  }
-
-  // Difficulty-based star thresholds
-  const baseTime = 12 + difficulty * 15;
-
-  return {
-    name: 'Daily Challenge', stars: [Math.floor(baseTime), Math.floor(baseTime * 1.3), Math.floor(baseTime * 1.8)],
-    spawn: [0.05, 0.2 + rng() * 0.4], goal: [0.9, 0.2 + rng() * 0.4],
-    width: 1.0, platforms, spikes, orbs, wells: [],
-    winds: rng() > 0.5 ? [[0.3, 0.2, 0.3, 0.5, rng() > 0.5 ? 1 : -1, 0, 0.3 + rng() * 0.3]] : [],
-    dailyLasers: lasers,
-    dailyTeleports: teleports,
-    dailyMoving: movingPlatforms
-  };
-}
-
-// ============================================================
-// PERSISTENT HIGH SCORES with dates — top 10 per level + global
-// ============================================================
-let highScores = {};
-try { const hs = localStorage.getItem('gflip3_hiscores'); if (hs) highScores = JSON.parse(hs); } catch(e) {}
-function saveHighScores() { try { localStorage.setItem('gflip3_hiscores', JSON.stringify(highScores)); } catch(e) {} }
-
-function addHighScore(levelIndex, score, time, stars, deaths) {
-  const key = levelIndex === -1 ? 'daily' : `lvl_${levelIndex}`;
-  if (!highScores[key]) highScores[key] = [];
-  const now = new Date();
-  const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-  const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-  highScores[key].push({ score, time: parseFloat(time.toFixed(1)), stars, deaths, date: dateStr, clock: timeStr });
-  highScores[key].sort((a, b) => b.score - a.score);
-  if (highScores[key].length > 10) highScores[key].length = 10;
-  // Also update global top 10
-  if (!highScores.global) highScores.global = [];
-  highScores.global.push({ score, level: levelIndex, date: dateStr, clock: timeStr, stars });
-  highScores.global.sort((a, b) => b.score - a.score);
-  if (highScores.global.length > 10) highScores.global.length = 10;
-  saveHighScores();
-}
-
-function getGlobalTop10() {
-  return (highScores.global || []).slice(0, 10);
-}
-
-function getLevelTop10(levelIndex) {
-  const key = levelIndex === -1 ? 'daily' : `lvl_${levelIndex}`;
-  return (highScores[key] || []).slice(0, 10);
-}
-
-// High scores screen state
-let highScoreScreen = 'global'; // 'global' or 'level'
-let highScoreLevel = 0;
-
-function drawHighScoresScreen() {
-  const isGlobal = highScoreScreen === 'global';
-  drawNeonText(isGlobal ? 'GLOBAL TOP 10' : `LEVEL ${highScoreLevel + 1} TOP 10`, W / 2, 50 * S, 22, '#ffd700');
-
-  const scores = isGlobal ? getGlobalTop10() : getLevelTop10(highScoreLevel);
-
-  if (scores.length === 0) {
-    X.save();
-    X.fillStyle = 'rgba(255,255,255,0.4)';
-    X.font = `${14 * S}px sans-serif`;
-    X.textAlign = 'center';
-    X.fillText('No scores yet!', W / 2, H * 0.35);
-    X.restore();
-  } else {
-    const startY = 80 * S;
-    // Header
-    X.save();
-    X.fillStyle = 'rgba(255,255,255,0.3)';
-    X.font = `${10 * S}px sans-serif`;
-    X.textAlign = 'left';
-    X.fillText('#', W * 0.06, startY);
-    X.fillText('SCORE', W * 0.15, startY);
-    X.fillText('TIME', W * 0.4, startY);
-    X.fillText('STARS', W * 0.58, startY);
-    X.fillText('DATE', W * 0.75, startY);
-    X.restore();
-
-    scores.forEach((entry, i) => {
-      const y = startY + 15 * S + i * 32 * S;
-      const isTop3 = i < 3;
-      X.save();
-      // Highlight row
-      if (isTop3) {
-        X.fillStyle = ['rgba(255,215,0,0.06)', 'rgba(192,192,192,0.04)', 'rgba(205,127,50,0.03)'][i];
-        X.fillRect(W * 0.04, y - 6 * S, W * 0.92, 28 * S);
-      }
-      // Rank
-      X.fillStyle = isTop3 ? ['#ffd700', '#c0c0c0', '#cd7f32'][i] : 'rgba(255,255,255,0.5)';
-      X.font = `bold ${13 * S}px sans-serif`;
-      X.textAlign = 'left';
-      X.fillText(`${i + 1}`, W * 0.06, y + 10 * S);
-      // Score
-      X.fillStyle = '#00ffff';
-      X.font = `bold ${14 * S}px sans-serif`;
-      X.fillText(`${entry.score}`, W * 0.15, y + 10 * S);
-      // Time
-      X.fillStyle = 'rgba(255,255,255,0.6)';
-      X.font = `${12 * S}px monospace`;
-      X.fillText(`${entry.time}s`, W * 0.4, y + 10 * S);
-      // Stars
-      X.font = `${11 * S}px sans-serif`;
-      const starStr = '★'.repeat(entry.stars || 0) + '☆'.repeat(3 - (entry.stars || 0));
-      X.fillStyle = '#ffd700';
-      X.fillText(starStr, W * 0.58, y + 10 * S);
-      // Date
-      X.fillStyle = 'rgba(255,255,255,0.3)';
-      X.font = `${10 * S}px sans-serif`;
-      X.fillText(entry.date || '', W * 0.75, y + 6 * S);
-      X.fillText(entry.clock || '', W * 0.75, y + 18 * S);
-      // Level indicator (global view)
-      if (isGlobal && entry.level !== undefined) {
-        X.fillStyle = 'rgba(0,255,255,0.3)';
-        X.font = `${9 * S}px sans-serif`;
-        X.textAlign = 'right';
-        X.fillText(entry.level === -1 ? 'Daily' : `Lv.${entry.level + 1}`, W * 0.96, y + 10 * S);
-      }
-      X.restore();
-    });
-  }
-
-  // Navigation buttons
-  gs.btns = gs.btns || {};
-  const navY = H - 110 * S;
-  if (isGlobal) {
-    gs.btns.hsLevel = drawBtn(W / 2 - 75 * S, navY, 150 * S, 36 * S, 'BY LEVEL', false);
-  } else {
-    gs.btns.hsGlobal = drawBtn(W / 2 - 75 * S, navY, 150 * S, 36 * S, 'GLOBAL', false);
-    // Level nav arrows
-    if (highScoreLevel > 0) {
-      gs.btns.hsPrev = drawBtn(W * 0.05, navY, 40 * S, 36 * S, '◀', false);
-    }
-    if (highScoreLevel < LEVELS.length - 1) {
-      gs.btns.hsNext = drawBtn(W * 0.95 - 40 * S, navY, 40 * S, 36 * S, '▶', false);
-    }
-  }
-  gs.btns.back = drawBtn(W / 2 - 50 * S, H - 60 * S, 100 * S, 42 * S, '← BACK', false);
-}
-
-// ============================================================
-// SCREEN SHAKE & JUICE SYSTEM — enhanced
-// ============================================================
-let screenShakeX = 0, screenShakeY = 0;
-let chromaAberration = 0; // chromatic aberration intensity on big impacts
-let vignetteIntensity = 0; // darkened edges on near-death
-
-function updateJuice() {
-  // Screen shake with directional component
-  if (screenShake > 0.5) {
-    const intensity = screenShake * S;
-    screenShakeX = (Math.random() - 0.5) * intensity * 2;
-    screenShakeY = (Math.random() - 0.5) * intensity * 2;
-  } else {
-    screenShakeX = 0;
-    screenShakeY = 0;
-  }
-  // Chromatic aberration decay
-  if (chromaAberration > 0) chromaAberration *= 0.9;
-  if (chromaAberration < 0.01) chromaAberration = 0;
-  // Vignette decay
-  if (vignetteIntensity > 0) vignetteIntensity *= 0.95;
-  if (vignetteIntensity < 0.01) vignetteIntensity = 0;
-}
-
-function drawVignette() {
-  if (vignetteIntensity < 0.01) return;
-  X.save();
-  const grad = X.createRadialGradient(W / 2, H / 2, W * 0.2, W / 2, H / 2, W * 0.8);
-  grad.addColorStop(0, 'rgba(0,0,0,0)');
-  grad.addColorStop(0.7, `rgba(100,0,0,${vignetteIntensity * 0.2})`);
-  grad.addColorStop(1, `rgba(50,0,0,${vignetteIntensity * 0.5})`);
-  X.fillStyle = grad;
-  X.fillRect(0, 0, W, H);
-  X.restore();
-}
-
-function drawChromaticAberration() {
-  // Simulated chromatic aberration by drawing tinted overlays
-  if (chromaAberration < 0.5) return;
-  const offset = chromaAberration * S * 0.5;
-  X.save();
-  X.globalCompositeOperation = 'screen';
-  X.globalAlpha = chromaAberration * 0.03;
-  X.fillStyle = '#ff0000';
-  X.fillRect(-offset, 0, W, H);
-  X.fillStyle = '#0000ff';
-  X.fillRect(offset, 0, W, H);
-  X.restore();
-}
-
-// Enhanced coin collect effects
-function coinCollectBurst(x, y, color) {
-  // Ring burst
-  for (let i = 0; i < 12; i++) {
-    const a = (i / 12) * Math.PI * 2;
-    const speed = 3 + Math.random() * 2;
-    particles.push({
-      x, y,
-      vx: Math.cos(a) * speed * S,
-      vy: Math.sin(a) * speed * S,
-      life: 1, decay: 0.025,
-      size: (2 + Math.random() * 3) * S,
-      color, grav: 0, shape: 'circle',
-      rotation: 0, rotSpeed: 0
-    });
-  }
-  // Center flash
-  particles.push({
-    x, y, vx: 0, vy: 0,
-    life: 1, decay: 0.06,
-    size: 20 * S, color: '#ffffff',
-    grav: 0, shape: 'circle'
-  });
-  // Sparkle trail upward
-  for (let i = 0; i < 6; i++) {
-    particles.push({
-      x: x + (Math.random() - 0.5) * 20 * S,
-      y: y,
-      vx: (Math.random() - 0.5) * 1 * S,
-      vy: -(2 + Math.random() * 3) * S,
-      life: 1, decay: 0.02,
-      size: (1 + Math.random() * 2) * S,
-      color: '#ffd700', grav: 0.02 * S, shape: 'circle'
-    });
-  }
-}
-
-// Death juice
-function deathJuice() {
-  screenShake = 25;
-  chromaAberration = 8;
-  vignetteIntensity = 1;
-  // Radial shockwave
-  for (let i = 0; i < 24; i++) {
-    const a = (i / 24) * Math.PI * 2;
-    const speed = 5 + Math.random() * 4;
-    particles.push({
-      x: gs.player.x, y: gs.player.y,
-      vx: Math.cos(a) * speed * S,
-      vy: Math.sin(a) * speed * S,
-      life: 1, decay: 0.02,
-      size: (3 + Math.random() * 4) * S,
-      color: '#ff0044', grav: 0.05 * S,
-      shape: Math.random() > 0.5 ? 'circle' : 'rect',
-      rotation: Math.random() * Math.PI * 2,
-      rotSpeed: (Math.random() - 0.5) * 0.5
-    });
-  }
-  // Secondary smaller particles
-  for (let i = 0; i < 16; i++) {
-    const a = Math.random() * Math.PI * 2;
-    const speed = 2 + Math.random() * 6;
-    particles.push({
-      x: gs.player.x + (Math.random() - 0.5) * 10 * S,
-      y: gs.player.y + (Math.random() - 0.5) * 10 * S,
-      vx: Math.cos(a) * speed * S,
-      vy: Math.sin(a) * speed * S,
-      life: 1, decay: 0.03,
-      size: (1 + Math.random() * 2) * S,
-      color: '#ffffff', grav: 0.1 * S, shape: 'circle'
-    });
-  }
-  // Gravity-colored burst
-  for (let i = 0; i < 10; i++) {
-    const a = Math.random() * Math.PI * 2;
-    particles.push({
-      x: gs.player.x, y: gs.player.y,
-      vx: Math.cos(a) * (3 + Math.random() * 3) * S,
-      vy: Math.sin(a) * (3 + Math.random() * 3) * S,
-      life: 1, decay: 0.015,
-      size: (4 + Math.random() * 5) * S,
-      color: currentAccent, grav: 0.03 * S,
-      shape: 'rect',
-      rotation: Math.random() * Math.PI,
-      rotSpeed: (Math.random() - 0.5) * 0.4
-    });
-  }
-}
-
-// Win juice
-function winJuice() {
-  screenShake = 15;
-  chromaAberration = 4;
-  // Firework bursts
-  for (let burst = 0; burst < 3; burst++) {
-    setTimeout(() => {
-      const bx = gs.portal.x + (Math.random() - 0.5) * 80 * S;
-      const by = gs.portal.y + (Math.random() - 0.5) * 80 * S;
-      const colors = ['#ffd700', '#ff6b9d', '#00ffff', '#44ff44', '#ff4444', '#b464ff'];
-      const c = colors[Math.floor(Math.random() * colors.length)];
-      for (let i = 0; i < 16; i++) {
-        const a = (i / 16) * Math.PI * 2;
-        const speed = 3 + Math.random() * 4;
-        particles.push({
-          x: bx, y: by,
-          vx: Math.cos(a) * speed * S,
-          vy: Math.sin(a) * speed * S,
-          life: 1, decay: 0.015 + Math.random() * 0.01,
-          size: (2 + Math.random() * 3) * S,
-          color: c, grav: 0.06 * S, shape: 'circle'
-        });
-      }
-    }, burst * 200);
-  }
-  // Confetti
-  for (let i = 0; i < 30; i++) {
-    const confColors = ['#ffd700', '#ff6b9d', '#00ffff', '#ff4444', '#44ff44', '#ff9944'];
-    particles.push({
-      x: gs.portal.x + (Math.random() - 0.5) * 60 * S,
-      y: gs.portal.y + (Math.random() - 0.5) * 60 * S,
-      vx: (Math.random() - 0.5) * 6 * S,
-      vy: -(2 + Math.random() * 5) * S,
-      life: 1, decay: 0.008 + Math.random() * 0.008,
-      size: (3 + Math.random() * 4) * S,
-      color: confColors[Math.floor(Math.random() * confColors.length)],
-      grav: 0.1 * S, shape: 'rect',
-      rotation: Math.random() * Math.PI * 2,
-      rotSpeed: (Math.random() - 0.5) * 0.3
-    });
-  }
-}
-
-// Near-miss juice
-function nearMissJuice(px, py) {
-  slowMo = 0.2;
-  vignetteIntensity = Math.max(vignetteIntensity, 0.5);
-  chromaAberration = Math.max(chromaAberration, 3);
-  // Time-warp radial lines
-  for (let i = 0; i < 8; i++) {
-    const a = Math.random() * Math.PI * 2;
-    speedLines.push({
-      x: px + Math.cos(a) * 40 * S,
-      y: py + Math.sin(a) * 40 * S,
-      len: (15 + Math.random() * 25) * S,
-      speed: (4 + Math.random() * 4) * S,
-      life: 1, decay: 0.06,
-      width: (1 + Math.random()) * S
-    });
-  }
-}
-
-// ============================================================
-// SOUND EFFECTS for new features
-// ============================================================
-function sfxLaser() {
-  tone(150, 0.15, 'sawtooth', 0.08);
-  tone(300, 0.1, 'square', 0.05, 0.05);
-  noise(0.1, 0.04);
-}
-
-function sfxTeleport() {
-  tone(600, 0.08, 'sine', 0.12);
-  tone(900, 0.06, 'sine', 0.1, 0.03);
-  tone(1200, 0.1, 'sine', 0.08, 0.06);
-  tone(1600, 0.08, 'triangle', 0.05, 0.09);
-}
-
-function sfxEditorPlace() {
-  tone(800, 0.03, 'sine', 0.08);
-  tone(1000, 0.02, 'sine', 0.05, 0.01);
 }
 
 // Near-miss tracking
@@ -2862,6 +1296,115 @@ let initialsText = '';
 let initialsCursor = 0;
 let initialsScore = 0;
 let initialsLevel = 0;
+
+// ============================================================
+// LASER BEAMS — toggling hazard for later levels
+// ============================================================
+class LaserBeam {
+  constructor(x, y, w, h, onTime, offTime, startDelay) {
+    this.x = x; this.y = y; this.w = w; this.h = h;
+    this.onTime = onTime || 1.5;
+    this.offTime = offTime || 2;
+    this.timer = -(startDelay || 0);
+    this.active = false;
+    this.warning = false;
+    this.intensity = 0;
+    this.horizontal = w > h;
+  }
+  update() {
+    this.timer += dt;
+    if (this.timer < 0) { this.active = false; this.warning = false; this.intensity = 0; return; }
+    const cycle = this.onTime + this.offTime;
+    const phase = this.timer % cycle;
+    this.active = phase < this.onTime;
+    const warmup = 0.6;
+    this.warning = !this.active && (cycle - phase) < warmup;
+    if (this.active) {
+      this.intensity = Math.min(1, this.intensity + dt * 8);
+    } else {
+      this.intensity = Math.max(0, this.intensity - dt * 6);
+    }
+  }
+  draw() {
+    X.save();
+    if (this.active || this.intensity > 0) {
+      const a = this.intensity;
+      // Outer glow
+      const expand = 10 * S * a;
+      X.fillStyle = `rgba(255,50,50,${0.12 * a})`;
+      X.fillRect(this.x - expand, this.y - expand, this.w + expand * 2, this.h + expand * 2);
+      // Beam body
+      X.fillStyle = `rgba(255,80,80,${0.7 * a})`;
+      X.shadowColor = '#ff3333';
+      X.shadowBlur = 18 * S * a;
+      X.fillRect(this.x, this.y, this.w, this.h);
+      // Hot core
+      X.fillStyle = `rgba(255,220,220,${0.8 * a})`;
+      X.shadowBlur = 8 * S * a;
+      const coreOff = Math.max(1 * S, Math.min(this.w, this.h) * 0.3);
+      X.fillRect(this.x + coreOff, this.y + coreOff,
+        Math.max(1, this.w - coreOff * 2), Math.max(1, this.h - coreOff * 2));
+      // Sparks at edges
+      if (a > 0.5 && Math.random() > 0.7) {
+        const sx = this.horizontal
+          ? this.x + Math.random() * this.w
+          : this.x + this.w / 2;
+        const sy = this.horizontal
+          ? this.y + this.h / 2
+          : this.y + Math.random() * this.h;
+        emitSpark(sx, sy, '#ff6666', 1);
+      }
+    } else if (this.warning) {
+      const warnA = 0.15 + Math.sin(gt * 20) * 0.15;
+      X.fillStyle = `rgba(255,80,80,${warnA})`;
+      X.fillRect(this.x, this.y, this.w, this.h);
+      X.strokeStyle = `rgba(255,80,80,${warnA + 0.15})`;
+      X.lineWidth = 1.5 * S;
+      X.setLineDash([3 * S, 3 * S]);
+      X.strokeRect(this.x, this.y, this.w, this.h);
+    } else {
+      // Emitter dots at endpoints
+      X.globalAlpha = 0.3 + Math.sin(gt * 2) * 0.1;
+      X.fillStyle = '#ff4444';
+      if (this.horizontal) {
+        X.beginPath();
+        X.arc(this.x, this.y + this.h / 2, 3 * S, 0, Math.PI * 2);
+        X.arc(this.x + this.w, this.y + this.h / 2, 3 * S, 0, Math.PI * 2);
+        X.fill();
+      } else {
+        X.beginPath();
+        X.arc(this.x + this.w / 2, this.y, 3 * S, 0, Math.PI * 2);
+        X.arc(this.x + this.w / 2, this.y + this.h, 3 * S, 0, Math.PI * 2);
+        X.fill();
+      }
+      // Faint dashed line
+      X.globalAlpha = 0.08;
+      X.strokeStyle = '#ff4444';
+      X.lineWidth = 1 * S;
+      X.setLineDash([4 * S, 6 * S]);
+      if (this.horizontal) {
+        X.beginPath();
+        X.moveTo(this.x, this.y + this.h / 2);
+        X.lineTo(this.x + this.w, this.y + this.h / 2);
+        X.stroke();
+      } else {
+        X.beginPath();
+        X.moveTo(this.x + this.w / 2, this.y);
+        X.lineTo(this.x + this.w / 2, this.y + this.h);
+        X.stroke();
+      }
+    }
+    X.restore();
+  }
+  check(player) {
+    return this.active && player.invuln <= 0 && player.collideRect(this.x, this.y, this.w, this.h);
+  }
+}
+
+function sfxLaser() {
+  tone(180, 0.15, 'sawtooth', 0.08);
+  tone(90, 0.2, 'square', 0.05, 0.05);
+}
 
 // ============================================================
 // LEVELS
@@ -2980,7 +1523,8 @@ const LEVELS = [
       [0.75, 0.03, 0.06, 0.1],
     ],
     orbs: [[0.22, 0.25], [0.52, 0.25], [0.82, 0.25]],
-    wells: []
+    wells: [],
+    lasers: [[0.87, 0.03, 0.03, 0.32, 1.4, 2.2, 1.5]]
   },
   // 9
   { name: 'Whirlpool', stars: [28,20,14],
@@ -2992,6 +1536,7 @@ const LEVELS = [
     spikes: [[0.35, 0.0, 0.06, 0.15], [0.6, 0.85, 0.06, 0.15]],
     orbs: [[0.2, 0.3], [0.5, 0.5], [0.8, 0.7]],
     wells: [[0.3, 0.35, 0.3, 90], [0.7, 0.65, 0.3, 90]],
+    lasers: [[0.48, 0.15, 0.04, 0.3, 1.6, 2.0, 0.5]],
     winds: [[0.4, 0.4, 0.2, 0.2, 1, 0, 0.5]]
   },
   // 10
@@ -3000,6 +1545,7 @@ const LEVELS = [
     platforms: [
       [0, 0.4, 0.2, 0.03],
       [0.25, 0.6, 0.15, 0.03, 'bouncy'],
+      [0.35, 0.5, 0.1, 0.03, 'moving', 0, 0.08, 1.5],
       [0.45, 0.35, 0.1, 0.03, 'crumble'],
       [0.6, 0.55, 0.15, 0.03],
       [0.8, 0.4, 0.1, 0.03, 'crumble'],
@@ -3013,7 +1559,8 @@ const LEVELS = [
       [0.75, 0.9, 0.05, 0.06],
     ],
     orbs: [[0.1, 0.25], [0.5, 0.2], [0.85, 0.62]],
-    wells: [[0.5, 0.65, 0.25, 80]]
+    wells: [[0.5, 0.65, 0.25, 80]],
+    lasers: [[0.7, 0.02, 0.03, 0.35, 1.3, 2.0, 1.0]]
   },
   // 11-15
   { name: 'Tunnel Vision', stars: [20,14,9],
@@ -3029,12 +1576,14 @@ const LEVELS = [
       [0.8, 0.44, 0.05, 0.04],
     ],
     orbs: [[0.28, 0.48], [0.58, 0.48], [0.88, 0.48]],
-    wells: []
+    wells: [],
+    lasers: [[0.27, 0.44, 0.03, 0.12, 1.2, 1.8, 0], [0.57, 0.44, 0.03, 0.12, 1.2, 1.8, 0.9]]
   },
   { name: 'Double Well', stars: [30,22,15],
     spawn: [0.05, 0.2], goal: [0.9, 0.8], width: 1.0,
     platforms: [
       [0, 0.3, 0.2, 0.03], [0.8, 0.7, 0.2, 0.03],
+      [0.4, 0.5, 0.12, 0.03, 'moving', 0, 0.1, 1.2],
       [0, 0.0, 1.0, 0.02], [0, 0.98, 1.0, 0.02],
     ],
     spikes: [[0.45, 0.45, 0.1, 0.1]],
@@ -3047,12 +1596,13 @@ const LEVELS = [
       [0, 0.4, 0.2, 0.03, 'bouncy'],
       [0.3, 0.6, 0.15, 0.03, 'bouncy'],
       [0.5, 0.3, 0.15, 0.03, 'bouncy'],
-      [0.7, 0.5, 0.15, 0.03, 'bouncy'],
+      [0.7, 0.5, 0.15, 0.03, 'moving', 0.08, 0, 1.0],
       [0, 0.0, 1.0, 0.02], [0, 0.98, 1.0, 0.02],
     ],
     spikes: [[0.25, 0.02, 0.05, 0.1], [0.5, 0.88, 0.1, 0.1], [0.75, 0.02, 0.05, 0.1]],
     orbs: [[0.15, 0.15], [0.45, 0.15], [0.85, 0.6]],
-    wells: []
+    wells: [],
+    lasers: [[0.44, 0.4, 0.03, 0.25, 1.5, 2.5, 0.8]]
   },
   { name: 'Crumble Run', stars: [22,16,11],
     spawn: [0.05, 0.35], goal: [0.9, 0.35], width: 1.0,
@@ -3069,7 +1619,8 @@ const LEVELS = [
     ],
     spikes: [[0, 0.96, 1.0, 0.04]],
     orbs: [[0.2, 0.3], [0.5, 0.3], [0.8, 0.3]],
-    wells: []
+    wells: [],
+    lasers: [[0.76, 0.1, 0.03, 0.35, 1.5, 2.2, 1.0]]
   },
   { name: 'Everything', stars: [40,30,20],
     spawn: [0.05, 0.25], goal: [0.9, 0.75], width: 1.0,
@@ -3077,6 +1628,7 @@ const LEVELS = [
       [0, 0.35, 0.15, 0.03],
       [0.2, 0.55, 0.12, 0.03, 'bouncy'],
       [0.38, 0.3, 0.1, 0.03, 'crumble'],
+      [0.48, 0.5, 0.08, 0.03, 'moving', 0, 0.06, 1.3],
       [0.55, 0.65, 0.12, 0.03, 'moving', 0, 0.1, 0.8],
       [0.7, 0.4, 0.1, 0.03, 'crumble'],
       [0.85, 0.8, 0.15, 0.03],
@@ -3090,16 +1642,104 @@ const LEVELS = [
     ],
     orbs: [[0.1, 0.18], [0.5, 0.2], [0.9, 0.68]],
     wells: [[0.45, 0.5, 0.3, 90]],
+    lasers: [[0.32, 0.35, 0.03, 0.28, 1.4, 2.0, 0.3], [0.65, 0.35, 0.03, 0.28, 1.4, 2.0, 1.3]],
     winds: [[0.15, 0.0, 0.25, 0.3, 0, 1, 0.35], [0.6, 0.7, 0.25, 0.28, -1, 0, 0.4]]
   },
 ];
+
+// ============================================================
+// PROCEDURAL LEVEL GENERATION
+// ============================================================
+function seededRandom(seed) {
+  let s = seed;
+  return function() {
+    s = (s * 1664525 + 1013904223) & 0xFFFFFFFF;
+    return (s >>> 0) / 0xFFFFFFFF;
+  };
+}
+
+function generateProceduralLevel(index) {
+  const difficulty = index - LEVELS.length + 1; // 1, 2, 3, ...
+  const rng = seededRandom(index * 7919 + 42);
+  const names = ['Void Walk','Nebula Run','Star Drift','Dark Matter','Quantum Leap',
+    'Warp Zone','Singularity','Nova Burst','Cosmic Drift','Antimatter',
+    'Photon Path','Ion Storm','Pulsar Way','Quasar Run','Event Horizon'];
+  const name = names[index % names.length] + (index >= names.length ? ` ${Math.floor(index / names.length) + 1}` : '');
+
+  const numPlatforms = 4 + Math.min(8, Math.floor(difficulty * 0.8));
+  const numSpikes = 2 + Math.min(6, Math.floor(difficulty * 0.6));
+  const numOrbs = 3;
+  const hasWell = difficulty >= 3 && rng() > 0.4;
+  const hasLaser = difficulty >= 5 && rng() > 0.3;
+
+  const platforms = [];
+  // Top and bottom boundaries
+  platforms.push([0, 0.0, 1.0, 0.02]);
+  platforms.push([0, 0.98, 1.0, 0.02]);
+  // Starting platform
+  platforms.push([0, 0.5, 0.12, 0.03]);
+
+  for (let i = 0; i < numPlatforms; i++) {
+    const px = 0.12 + (i / numPlatforms) * 0.75;
+    const py = 0.15 + rng() * 0.65;
+    const pw = 0.06 + rng() * 0.12;
+    const types = ['solid', 'solid', 'solid'];
+    if (difficulty >= 2) types.push('bouncy');
+    if (difficulty >= 3) types.push('crumble');
+    if (difficulty >= 4) types.push('moving');
+    const type = types[Math.floor(rng() * types.length)];
+    const p = [px, py, pw, 0.03, type];
+    if (type === 'moving') {
+      p.push(rng() > 0.5 ? 0.05 + rng() * 0.08 : 0);
+      p.push(rng() > 0.5 ? 0.04 + rng() * 0.06 : 0);
+      p.push(0.8 + rng() * 1.0);
+    }
+    platforms.push(p);
+  }
+  // End platform
+  platforms.push([0.88, 0.3 + rng() * 0.4, 0.12, 0.03]);
+
+  const spikes = [];
+  for (let i = 0; i < numSpikes; i++) {
+    const sx = 0.1 + rng() * 0.75;
+    const sy = rng() > 0.5 ? 0.02 + rng() * 0.05 : 0.88 + rng() * 0.08;
+    spikes.push([sx, sy, 0.04 + rng() * 0.06, 0.04 + rng() * 0.04]);
+  }
+
+  const orbs = [];
+  for (let i = 0; i < numOrbs; i++) {
+    orbs.push([0.15 + (i / numOrbs) * 0.7 + rng() * 0.1, 0.15 + rng() * 0.6]);
+  }
+
+  const wells = hasWell ? [[0.3 + rng() * 0.4, 0.3 + rng() * 0.4, 0.2 + rng() * 0.15, 70 + difficulty * 10]] : [];
+  const lasers = hasLaser ? [[0.2 + rng() * 0.6, 0.1 + rng() * 0.3, 0.03, 0.2 + rng() * 0.2, 1.2 + rng() * 0.5, 1.8 + rng() * 0.8, rng() * 2]] : [];
+
+  const baseTime = 12 + difficulty * 2;
+  return {
+    name,
+    stars: [baseTime, baseTime + 5, baseTime + 10],
+    spawn: [0.05, 0.4],
+    goal: [0.92, platforms[platforms.length - 1][1]],
+    width: 1.0,
+    platforms, spikes, orbs, wells, lasers,
+    procedural: true
+  };
+}
+
+function getLevelData(index) {
+  if (isCustomLevel && customLevelIndex >= 0) {
+    return customLevels[customLevelIndex];
+  }
+  if (index < LEVELS.length) return LEVELS[index];
+  return generateProceduralLevel(index);
+}
 
 // ============================================================
 // LEVEL INITIALIZATION
 // ============================================================
 function startLevel(index, levelData) {
   lvl = index;
-  const L = levelData || LEVELS[index];
+  const L = levelData || getLevelData(index);
 
   const p = new Player(W * L.spawn[0], H * L.spawn[1]);
   p.invuln = 0.5; // brief invulnerability on spawn
@@ -3120,61 +1760,22 @@ function startLevel(index, levelData) {
   const spikes = L.spikes.map(d => new Spike(W * d[0], H * d[1], W * d[2], H * d[3]));
   const orbs = L.orbs.map(d => new Orb(W * d[0], H * d[1]));
   const wells = (L.wells || []).map(d => new GravityWell(W * d[0], H * d[1], d[2], d[3]));
+  const lasers = (L.lasers || []).map(d => new LaserBeam(W * d[0], H * d[1], W * d[2], H * d[3], d[4], d[5], d[6]));
   const winds = (L.winds || []).map(d => new WindZone(W * d[0], H * d[1], W * d[2], H * d[3], d[4], d[5], d[6]));
   const portal = new Portal(W * L.goal[0], H * L.goal[1]);
-
-  // New obstacle types: lasers
-  const customLasers = [];
-  if (L.lasers) {
-    for (const ld of L.lasers) {
-      customLasers.push(new LaserBeam(W * ld[0], H * ld[1], W * ld[2], H * ld[3], ld[4] || 1.5, ld[5] || 1.0, ld[6] || 0));
-    }
-  }
-  if (L.dailyLasers) {
-    for (const dl of L.dailyLasers) {
-      customLasers.push(new LaserBeam(W * dl.x, H * dl.y, W * dl.w, H * dl.h, dl.onTime, dl.offTime, dl.delay || 0));
-    }
-  }
-
-  // New obstacle types: teleport portals
-  const customTeleports = [];
-  if (L.teleports) {
-    for (const td of L.teleports) {
-      customTeleports.push(new TeleportPortal(W * td[0], H * td[1], W * td[2], H * td[3], td[4], td[5]));
-    }
-  }
-  if (L.dailyTeleports) {
-    for (const dt2 of L.dailyTeleports) {
-      customTeleports.push(new TeleportPortal(W * dt2.x1, H * dt2.y1, W * dt2.x2, H * dt2.y2));
-    }
-  }
-
-  // New obstacle types: smooth moving platforms
-  const customMovingPlatforms = [];
-  if (L.movingPlatforms) {
-    for (const mp of L.movingPlatforms) {
-      customMovingPlatforms.push(new MovingPlatformHV(W * mp[0], H * mp[1], W * mp[2], H * mp[3], mp[4], (mp[4] === 'h' ? W : H) * mp[5], mp[6] || 1));
-    }
-  }
-  if (L.dailyMoving) {
-    for (const dm of L.dailyMoving) {
-      customMovingPlatforms.push(new MovingPlatformHV(W * dm.x, H * dm.y, W * dm.w, H * dm.h, dm.dir, (dm.dir === 'h' ? W : H) * dm.range, dm.speed));
-    }
-  }
 
   sessionNearMisses = 0;
 
   gs = {
-    player: p, platforms, spikes, orbs, portal, wells, winds,
-    customLasers, customTeleports, customMovingPlatforms,
+    player: p, platforms, spikes, orbs, portal, wells, lasers, winds,
     time: 0, orbsCollected: 0, totalOrbs: orbs.length,
     dead: false, won: false,
     deathCount: 0,
     btns: {},
     levelStartTime: performance.now(),
-    isDaily: !!levelData, isEditor: false
+    isDaily: !!levelData
   };
-
+  
   combo = 0; comboTimer = 0;
   particles = [];
   floatingTexts = [];
@@ -3187,9 +1788,7 @@ function startLevel(index, levelData) {
   slowMo = 0;
   cameraZoom = 1;
   cameraZoomTarget = 1;
-  currentAccent = (levelColors[index] || levelColors[0]).accent;
-  chromaAberration = 0;
-  vignetteIntensity = 0;
+  currentAccent = (levelColors[index % levelColors.length] || levelColors[0]).accent;
 
   ensureAudio();
   startMusic();
@@ -3228,23 +1827,16 @@ function updateGame() {
   gs.orbs.forEach(o => o.update());
   gs.portal.update();
   gs.wells.forEach(w => w.update());
+  gs.lasers.forEach(l => l.update());
   if (gs.winds) gs.winds.forEach(w => w.update());
-  // Update new obstacle types
-  if (gs.customLasers) gs.customLasers.forEach(l => l.update());
-  if (gs.customTeleports) gs.customTeleports.forEach(t => t.update());
-  if (gs.customMovingPlatforms) gs.customMovingPlatforms.forEach(m => m.update());
 
   // Gravity wells
   gs.wells.forEach(w => w.applyForce(p));
   // Wind zones
   if (gs.winds) gs.winds.forEach(w => w.applyForce(p));
-
+  
   // Platform collisions
   gs.platforms.forEach(pl => pl.handleCollision(p));
-  // Moving platform collisions (new)
-  if (gs.customMovingPlatforms) gs.customMovingPlatforms.forEach(m => m.handleCollision(p));
-  // Teleport portal checks
-  if (gs.customTeleports) gs.customTeleports.forEach(t => t.check(p));
   
   // Orb collection
   gs.orbs.forEach(o => {
@@ -3265,9 +1857,6 @@ function updateGame() {
       addFloatingText(o.x, o.y, `+${points}`, currentAccent, 16);
       screenShake = Math.max(screenShake, 3 + combo * 1.5);
       slowMo = 0.08; // tiny freeze frame on collect
-      // Enhanced coin collect FX
-      coinCollectBurst(o.x, o.y, o.color);
-      chromaAberration = Math.max(chromaAberration, combo * 0.8);
     }
   });
   
@@ -3296,30 +1885,19 @@ function updateGame() {
     if (nearMissTimer <= 0 && s.nearMiss(p)) {
       nearMissTimer = 0.5;
       sfxNearMiss();
-      nearMissJuice(p.x, p.y);
+      slowMo = 0.15; // brief time slowdown
       sessionNearMisses++;
       totalNearMisses++;
       saveNearMisses();
       addFloatingText(p.x, p.y - 25 * S, 'CLOSE!', '#ff4488', 16);
       emitSpark(p.x, p.y, '#ff4488', 5);
-      screenShake = Math.max(screenShake, 4);
+      screenShake = Math.max(screenShake, 3);
     }
   }
 
-  // Laser beam check
-  if (gs.customLasers) {
-    for (const l of gs.customLasers) {
-      if (l.check(p)) { killPlayer(); return; }
-      if (nearMissTimer <= 0 && l.nearMiss(p)) {
-        nearMissTimer = 0.5;
-        sfxNearMiss();
-        nearMissJuice(p.x, p.y);
-        sessionNearMisses++;
-        totalNearMisses++;
-        saveNearMisses();
-        addFloatingText(p.x, p.y - 25 * S, 'CLOSE!', '#ff4488', 16);
-      }
-    }
+  // Laser check
+  for (const l of gs.lasers) {
+    if (l.check(p)) { sfxLaser(); killPlayer(); return; }
   }
   
   // Out of bounds
@@ -3343,16 +1921,14 @@ function killPlayer() {
   gs.dead = true;
   gs.deathCount++;
   sfxDeath();
-  screenFlash = 0.5;
+  screenShake = 22;
+  screenFlash = 0.4;
   screenFlashColor = '#ff0044';
-  slowMo = 0.5; // dramatic slow-mo
-  cameraZoomTarget = 1.2; // zoom in on death
-  setTimeout(() => { cameraZoomTarget = 1; }, 700);
-
-  // Enhanced death juice system
-  deathJuice();
-
-  // Original death particles too
+  slowMo = 0.4; // dramatic slow-mo
+  cameraZoomTarget = 1.15; // zoom in on death
+  setTimeout(() => { cameraZoomTarget = 1; }, 600);
+  
+  // Death explosion - bigger and more dramatic
   emit(gs.player.x, gs.player.y, 45, '#ff0064', 7, 0.1, { shape: 'rect' });
   emit(gs.player.x, gs.player.y, 25, currentAccent, 5, 0.08, { shape: 'circle' });
   emit(gs.player.x, gs.player.y, 15, '#ffffff', 4, 0.05, { size: 2, shape: 'circle' });
@@ -3364,7 +1940,7 @@ function killPlayer() {
 
 function winLevel() {
   const time = gs.time;
-  const L = gs.isDaily ? { stars: [20, 14, 9], name: 'Daily Challenge' } : LEVELS[lvl];
+  const L = gs.isDaily ? { stars: [20, 14, 9], name: 'Daily Challenge' } : getLevelData(lvl);
   let stars = 1;
   if (time <= L.stars[1]) stars = 2;
   if (time <= L.stars[0]) stars = 3;
@@ -3373,13 +1949,18 @@ function winLevel() {
   gs.victoryTime = time;
   victoryAnimTime = 0;
 
-  if (!gs.isDaily && (!progress[lvl] || progress[lvl].stars < stars)) {
-    progress[lvl] = { completed: true, stars, time };
-    saveProgress();
-    calcTotalStars();
-  } else if (!gs.isDaily && progress[lvl] && time < progress[lvl].time) {
-    progress[lvl].time = time;
-    saveProgress();
+  const levelId = isCustomLevel ? 'custom_' + customLevelIndex : (isInfiniteMode ? 'inf_' + lvl : '' + lvl);
+  addLeaderboardEntry(levelId, time, stars, gs.deathCount);
+
+  if (!isCustomLevel && !gs.isDaily) {
+    if (!progress[lvl] || progress[lvl].stars < stars) {
+      progress[lvl] = { completed: true, stars, time };
+      saveProgress();
+      calcTotalStars();
+    } else if (progress[lvl] && time < progress[lvl].time) {
+      progress[lvl].time = time;
+      saveProgress();
+    }
   }
   
   // Score calculation
@@ -3388,8 +1969,10 @@ function winLevel() {
   const deathPenalty = gs.deathCount * 20;
   const levelScore = Math.max(10, baseScore + timeBonus - deathPenalty + stars * 50);
   gs.levelScore = levelScore;
-  totalScore += levelScore;
-  saveTotalScore();
+  if (!isCustomLevel) {
+    totalScore += levelScore;
+    saveTotalScore();
+  }
   
   // Save daily challenge completion
   if (gs.isDaily) {
@@ -3398,28 +1981,22 @@ function winLevel() {
   }
 
   sfxWin();
-  screenFlash = 0.4;
+  screenShake = 12;
+  screenFlash = 0.35;
   screenFlashColor = '#ffd700';
-  slowMo = 0.6;
-  cameraZoomTarget = 1.12;
-  setTimeout(() => { cameraZoomTarget = 1; }, 900);
-
-  // Enhanced win juice
-  winJuice();
-
-  // Record high score with date
-  const levelIdx = gs.isDaily ? -1 : lvl;
-  addHighScore(levelIdx, levelScore, time, stars, gs.deathCount);
-
-  // Big win burst (original)
+  slowMo = 0.5;
+  cameraZoomTarget = 1.1;
+  setTimeout(() => { cameraZoomTarget = 1; }, 800);
+  
+  // Big win burst
   for (let i = 0; i < 5; i++) {
     setTimeout(() => {
-      emit(gs.portal.x + (Math.random()-0.5) * 60 * S,
-           gs.portal.y + (Math.random()-0.5) * 60 * S,
+      emit(gs.portal.x + (Math.random()-0.5) * 60 * S, 
+           gs.portal.y + (Math.random()-0.5) * 60 * S, 
            12, '#ffd700', 4, 0.1, { shape: 'circle' });
     }, i * 100);
   }
-
+  
   setTimeout(() => { screen = 'victory'; }, 700);
 }
 
@@ -3436,12 +2013,9 @@ function drawGame() {
   }
   
   gs.wells.forEach(w => w.draw());
+  gs.lasers.forEach(l => l.draw());
   if (gs.winds) gs.winds.forEach(w => w.draw());
   gs.platforms.forEach(pl => pl.draw());
-  // Draw new obstacle types
-  if (gs.customMovingPlatforms) gs.customMovingPlatforms.forEach(m => m.draw());
-  if (gs.customLasers) gs.customLasers.forEach(l => l.draw());
-  if (gs.customTeleports) gs.customTeleports.forEach(t => t.draw());
   gs.spikes.forEach(s => s.draw());
   gs.orbs.forEach(o => o.draw());
   gs.portal.draw();
@@ -3458,11 +2032,7 @@ function drawGame() {
     X.fillRect(0, 0, W, H);
     X.restore();
   }
-
-  // Enhanced juice effects
-  drawVignette();
-  drawChromaticAberration();
-
+  
   // HUD
   drawHUD();
   
@@ -3515,12 +2085,31 @@ function drawHUD() {
   X.fillStyle = 'rgba(0,0,0,0.3)';
   X.fillRect(0, 0, W, 55 * S);
   
-  // Level name
+  // Level name with progress
   X.fillStyle = 'rgba(255,255,255,0.7)';
   X.font = `${13 * S}px sans-serif`;
   X.textAlign = 'left';
-  const levelLabel = gs.isDaily ? '☀ Daily Challenge' : `${lvl + 1}. ${LEVELS[lvl].name}`;
-  X.fillText(levelLabel, 12 * S, 20 * S);
+  const curLevelData = getLevelData(lvl);
+  const levelLabel = gs.isDaily ? '☀ Daily Challenge' : isInfiniteMode ? `∞ ${lvl - LEVELS.length + 1}` : isCustomLevel ? 'Custom' : `${lvl + 1}/${LEVELS.length}`;
+  X.fillText(`${levelLabel}  ${curLevelData.name}`, 12 * S, 20 * S);
+
+  // Level progress bar
+  const progW = 80 * S;
+  const progH = 2.5 * S;
+  const progX = 12 * S;
+  const progY = 26 * S;
+  X.fillStyle = 'rgba(255,255,255,0.08)';
+  X.beginPath();
+  X.roundRect(progX, progY, progW, progH, progH / 2);
+  X.fill();
+  X.fillStyle = currentAccent;
+  X.shadowColor = currentAccent;
+  X.shadowBlur = 3 * S;
+  const progFill = gs.isDaily ? 1 : isInfiniteMode ? 1 : (lvl + 1) / LEVELS.length;
+  X.beginPath();
+  X.roundRect(progX, progY, Math.max(progH, progW * progFill), progH, progH / 2);
+  X.fill();
+  X.shadowBlur = 0;
   
   // Orb counter with icons
   const orbFull = gs.orbsCollected >= gs.totalOrbs;
@@ -3564,7 +2153,7 @@ function drawHUD() {
   X.fillText(`${gs.time.toFixed(1)}s`, W - 12 * S, 20 * S);
   
   // Star time targets
-  const L = gs.isDaily ? { stars: [20, 14, 9] } : LEVELS[lvl];
+  const L = gs.isDaily ? { stars: [20, 14, 9] } : getLevelData(lvl);
   X.font = `${10 * S}px sans-serif`;
   X.fillStyle = gs.time <= L.stars[0] ? '#ffd700' : 'rgba(255,215,0,0.3)';
   X.fillText(`⭐⭐⭐ < ${L.stars[0]}s`, W - 12 * S, 36 * S);
@@ -3669,19 +2258,21 @@ function drawMenu() {
   X.fillText('Tap to flip gravity • Collect orbs • Reach the portal', W/2, titleY + 85 * S);
   X.restore();
   
-  const bw = 200 * S, bh = 48 * S;
-  const btnY = H * 0.55;
+  const bw = 200 * S, bh = 46 * S;
+  const btnY = H * 0.50;
   const btnGap = 10 * S;
   gs.btns = gs.btns || {};
   gs.btns.start = drawBtn(W/2 - bw/2, btnY, bw, bh, '▶  PLAY');
   gs.btns.select = drawBtn(W/2 - bw/2, btnY + bh + btnGap, bw, bh, '📋  LEVELS', false);
-  gs.btns.daily = drawBtn(W/2 - bw/2, btnY + (bh + btnGap) * 2, bw, bh, '☀  DAILY', false);
-  gs.btns.editor = drawBtn(W/2 - bw/2, btnY + (bh + btnGap) * 3, bw, bh, '🔧  EDITOR', false);
+  gs.btns.infinite = drawBtn(W/2 - bw/2, btnY + (bh + btnGap) * 2, bw, bh, '∞  INFINITE', false);
+  gs.btns.daily = drawBtn(W/2 - bw/2, btnY + (bh + btnGap) * 3, bw, bh, '☀  DAILY', false);
+  gs.btns.editor = drawBtn(W/2 - bw/2, btnY + (bh + btnGap) * 4, bw, bh, '🔧  EDITOR', false);
 
   // Small buttons row
   const smallW = 95 * S, smallH = 36 * S;
-  gs.btns.stats = drawBtn(W/2 - smallW - 5 * S, btnY + (bh + btnGap) * 4, smallW, smallH, 'STATS', false);
-  gs.btns.leaders = drawBtn(W/2 + 5 * S, btnY + (bh + btnGap) * 4, smallW, smallH, 'TOP 10', false);
+  gs.btns.stats = drawBtn(W/2 - smallW - 5 * S, btnY + (bh + btnGap) * 5, smallW, smallH, 'STATS', false);
+  gs.btns.leaders = drawBtn(W/2 + 5 * S, btnY + (bh + btnGap) * 5, smallW, smallH, 'TOP 20', false);
+  gs.btns.leaderboard = drawBtn(W/2 - bw/2, btnY + (bh + btnGap) * 5 + smallH + btnGap, bw, smallH, '🏆  TIMES', false);
 
   // Stars and score display
   if (bestTotalStars > 0 || totalScore > 0) {
@@ -3979,6 +2570,9 @@ function drawSelect() {
     gs.btns.levelBoxes[i] = { x, y, w: boxSz, h: boxSz, unlocked };
   }
   
+  if (customLevels.length > 0) {
+    gs.btns.customBtn = drawBtn(W/2 - 80 * S, H - 105 * S, 160 * S, 38 * S, '🔧 CUSTOM (' + customLevels.length + ')', false);
+  }
   gs.btns.back = drawBtn(W/2 - 50 * S, H - 60 * S, 100 * S, 42 * S, '← BACK', false);
 }
 
@@ -4014,7 +2608,7 @@ function drawVictory() {
   drawNeonText('LEVEL COMPLETE!', 0, 0, 28, '#ffd700');
   X.restore();
   
-  const victoryLevelName = gs.isDaily ? 'Daily Challenge' : LEVELS[lvl].name;
+  const victoryLevelName = gs.isDaily ? 'Daily Challenge' : getLevelData(lvl).name;
   drawNeonText(victoryLevelName, W/2, H * 0.13 + 35 * S, 14, 'rgba(255,255,255,0.5)');
   
   // Stars with staggered pop-in
@@ -4098,11 +2692,14 @@ function drawVictory() {
     
     if (gs.isDaily) {
       gs.btns.next = drawBtn(W/2 + 10 * S, btnY, bw, bh, '🏠 MENU');
-    } else if (lvl < LEVELS.length - 1) {
+    } else if (isInfiniteMode || lvl < LEVELS.length - 1) {
       gs.btns.next = drawBtn(W/2 + 10 * S, btnY, bw, bh, 'NEXT →');
     } else {
       gs.btns.next = drawBtn(W/2 + 10 * S, btnY, bw, bh, '🏠 MENU');
     }
+
+    // Leaderboard button
+    gs.btns.lbBtn = drawBtn(W/2 - 65 * S, btnY + bh + 60 * S, 130 * S, 38 * S, '🏆 TIMES', false);
     
     gs.btns.share = drawBtn(W/2 - bw - 10 * S, btnY + bh + 12 * S, bw, 38 * S, '📤 SHARE', false);
     gs.btns.addScore = drawBtn(W/2 + 10 * S, btnY + bh + 12 * S, bw, 38 * S, '🏆 SAVE', false);
@@ -4122,7 +2719,7 @@ function drawVictory() {
 
 function shareResult() {
   const stars = gs.victoryStars || 1;
-  const levelName = gs.isDaily ? 'Daily Challenge' : `Level ${lvl + 1}: ${LEVELS[lvl].name}`;
+  const levelName = gs.isDaily ? 'Daily Challenge' : `Level ${lvl + 1}: ${getLevelData(lvl).name}`;
   const text = `🔮 Gravity Flip - ${levelName}\n${'⭐'.repeat(stars)}${'☆'.repeat(3 - stars)} in ${(gs.victoryTime || 0).toFixed(1)}s\nCan you beat my time?`;
   if (navigator.share) {
     navigator.share({ title: 'Gravity Flip', text }).catch(() => {});
@@ -4132,6 +2729,458 @@ function shareResult() {
       addFloatingText(W/2, H * 0.85, 'Copied!', '#00ffff', 14);
     });
   }
+}
+
+// ============================================================
+// LEADERBOARD SCREEN
+// ============================================================
+let lbPage = 0;
+let lbLevelId = null;
+
+function drawLeaderboard() {
+  drawNeonText('BEST TIMES', W/2, 45 * S, 26, '#ffd700');
+
+  // Level tabs
+  const tabW = 50 * S;
+  const tabH = 30 * S;
+  const tabsPerRow = Math.floor((W - 20 * S) / (tabW + 5 * S));
+  gs.btns = gs.btns || {};
+  gs.btns.lbTabs = [];
+
+  const allIds = [];
+  for (let i = 0; i < LEVELS.length; i++) allIds.push({ id: '' + i, label: '' + (i + 1) });
+  // Add infinite levels found in leaderboard
+  Object.keys(leaderboard).filter(k => k.startsWith('inf_')).sort((a, b) => {
+    return parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]);
+  }).forEach(k => allIds.push({ id: k, label: '∞' + (parseInt(k.split('_')[1]) - LEVELS.length + 1) }));
+  // Add custom levels
+  Object.keys(leaderboard).filter(k => k.startsWith('custom_')).forEach(k =>
+    allIds.push({ id: k, label: 'C' + (parseInt(k.split('_')[1]) + 1) })
+  );
+
+  if (!lbLevelId && allIds.length > 0) lbLevelId = allIds[0].id;
+
+  const startY = 70 * S;
+  for (let i = 0; i < Math.min(allIds.length, tabsPerRow * 2); i++) {
+    const col = i % tabsPerRow;
+    const row = Math.floor(i / tabsPerRow);
+    const tx = 10 * S + col * (tabW + 5 * S);
+    const ty = startY + row * (tabH + 5 * S);
+    const active = allIds[i].id === lbLevelId;
+
+    X.save();
+    X.beginPath();
+    X.roundRect(tx, ty, tabW, tabH, 4 * S);
+    X.fillStyle = active ? 'rgba(0,255,255,0.2)' : 'rgba(255,255,255,0.05)';
+    X.fill();
+    if (active) {
+      X.strokeStyle = '#00ffff';
+      X.lineWidth = 2 * S;
+      X.shadowColor = '#00ffff'; X.shadowBlur = 6 * S;
+      X.stroke();
+    }
+    X.fillStyle = active ? '#00ffff' : '#888';
+    X.font = `bold ${11 * S}px sans-serif`;
+    X.textAlign = 'center';
+    X.shadowBlur = 0;
+    X.fillText(allIds[i].label, tx + tabW / 2, ty + tabH / 2 + 4 * S);
+    X.restore();
+
+    gs.btns.lbTabs.push({ x: tx, y: ty, w: tabW, h: tabH, id: allIds[i].id });
+  }
+
+  // Show entries for selected level
+  const entries = lbLevelId ? (leaderboard[lbLevelId] || []) : [];
+  const listY = startY + (Math.ceil(Math.min(allIds.length, tabsPerRow * 2) / tabsPerRow)) * (tabH + 5 * S) + 15 * S;
+
+  if (entries.length === 0) {
+    X.save();
+    X.fillStyle = 'rgba(255,255,255,0.3)';
+    X.font = `${14 * S}px sans-serif`;
+    X.textAlign = 'center';
+    X.fillText('No times recorded yet', W / 2, listY + 40 * S);
+    X.restore();
+  } else {
+    for (let i = 0; i < Math.min(entries.length, 8); i++) {
+      const e = entries[i];
+      const ey = listY + i * 32 * S;
+      const isTop = i === 0;
+
+      X.save();
+      X.beginPath();
+      X.roundRect(15 * S, ey, W - 30 * S, 28 * S, 4 * S);
+      X.fillStyle = isTop ? 'rgba(255,215,0,0.08)' : 'rgba(255,255,255,0.03)';
+      X.fill();
+
+      X.fillStyle = isTop ? '#ffd700' : '#888';
+      X.font = `bold ${14 * S}px sans-serif`;
+      X.textAlign = 'left';
+      X.fillText(`#${i + 1}`, 22 * S, ey + 19 * S);
+
+      X.fillStyle = '#fff';
+      X.font = `${14 * S}px monospace`;
+      X.fillText(`${e.time.toFixed(2)}s`, 55 * S, ey + 19 * S);
+
+      X.fillStyle = '#ffd700';
+      X.font = `${12 * S}px sans-serif`;
+      X.textAlign = 'center';
+      X.fillText('⭐'.repeat(e.stars), W / 2 + 20 * S, ey + 19 * S);
+
+      X.fillStyle = '#ff4466';
+      X.font = `${11 * S}px sans-serif`;
+      X.textAlign = 'right';
+      X.fillText(`💀${e.deaths}`, W - 22 * S, ey + 19 * S);
+      X.restore();
+    }
+  }
+
+  gs.btns.back = drawBtn(W / 2 - 50 * S, H - 55 * S, 100 * S, 40 * S, '← BACK', false);
+}
+
+// ============================================================
+// LEVEL EDITOR
+// ============================================================
+const editorTools = [
+  { id: 'platform', label: 'Plat', color: '#00ccff' },
+  { id: 'bouncy', label: 'Bncy', color: '#00ff80' },
+  { id: 'crumble', label: 'Crmb', color: '#c8a050' },
+  { id: 'spike', label: 'Spke', color: '#ff0064' },
+  { id: 'orb', label: 'Orb', color: '#4488ff' },
+  { id: 'portal', label: 'Goal', color: '#ffd700' },
+  { id: 'eraser', label: 'Eras', color: '#ff4444' },
+];
+
+function editorReset() {
+  editor = {
+    tool: 'platform',
+    elements: { platforms: [], spikes: [], orbs: [], portal: null },
+    dragging: false, dragStart: null, dragEnd: null,
+    scrollY: 0, selectedIndex: -1, selectedType: '',
+    testMode: false, saved: false
+  };
+}
+
+function drawEditor() {
+  gs.btns = gs.btns || {};
+
+  // Grid
+  X.save();
+  X.strokeStyle = 'rgba(255,255,255,0.04)';
+  X.lineWidth = 1;
+  const gridSize = 20 * S;
+  for (let x = 0; x < W; x += gridSize) {
+    X.beginPath(); X.moveTo(x, 60 * S); X.lineTo(x, H - 60 * S); X.stroke();
+  }
+  for (let y = 60 * S; y < H - 60 * S; y += gridSize) {
+    X.beginPath(); X.moveTo(0, y); X.lineTo(W, y); X.stroke();
+  }
+  X.restore();
+
+  // Draw placed elements
+  const el = editor.elements;
+  for (let i = 0; i < el.platforms.length; i++) {
+    const p = el.platforms[i];
+    X.save();
+    X.fillStyle = p.type === 'bouncy' ? 'rgba(0,255,128,0.4)' : p.type === 'crumble' ? 'rgba(160,130,80,0.4)' : 'rgba(0,200,255,0.3)';
+    X.strokeStyle = p.type === 'bouncy' ? '#00ff80' : p.type === 'crumble' ? '#c8a050' : '#00ccff';
+    X.lineWidth = 2 * S;
+    X.fillRect(p.x, p.y, p.w, p.h);
+    X.strokeRect(p.x, p.y, p.w, p.h);
+    X.restore();
+  }
+  for (let i = 0; i < el.spikes.length; i++) {
+    const s = el.spikes[i];
+    X.save();
+    X.fillStyle = 'rgba(255,0,100,0.4)';
+    X.strokeStyle = '#ff0064';
+    X.lineWidth = 2 * S;
+    X.fillRect(s.x, s.y, s.w, s.h);
+    X.strokeRect(s.x, s.y, s.w, s.h);
+    X.restore();
+  }
+  for (const o of el.orbs) {
+    X.save();
+    X.fillStyle = '#4488ff';
+    X.shadowColor = '#4488ff'; X.shadowBlur = 10 * S;
+    X.beginPath(); X.arc(o.x, o.y, 9 * S, 0, Math.PI * 2); X.fill();
+    X.restore();
+  }
+  if (el.portal) {
+    X.save();
+    X.fillStyle = '#ffd700';
+    X.shadowColor = '#ffd700'; X.shadowBlur = 15 * S;
+    X.beginPath(); X.arc(el.portal.x, el.portal.y, 24 * S, 0, Math.PI * 2); X.fill();
+    X.fillStyle = '#fff'; X.shadowBlur = 0;
+    X.font = `${10 * S}px sans-serif`; X.textAlign = 'center';
+    X.fillText('GOAL', el.portal.x, el.portal.y + 4 * S);
+    X.restore();
+  }
+
+  // Drag preview
+  if (editor.dragging && editor.dragStart && editor.dragEnd) {
+    const tool = editor.tool;
+    if (tool === 'platform' || tool === 'bouncy' || tool === 'crumble' || tool === 'spike') {
+      const x1 = Math.min(editor.dragStart.x, editor.dragEnd.x);
+      const y1 = Math.min(editor.dragStart.y, editor.dragEnd.y);
+      const w = Math.abs(editor.dragEnd.x - editor.dragStart.x);
+      const h = Math.max(8 * S, Math.abs(editor.dragEnd.y - editor.dragStart.y));
+      X.save();
+      X.fillStyle = 'rgba(255,255,255,0.15)';
+      X.strokeStyle = '#fff';
+      X.lineWidth = 1 * S;
+      X.setLineDash([4 * S, 4 * S]);
+      X.fillRect(x1, y1, w, h);
+      X.strokeRect(x1, y1, w, h);
+      X.restore();
+    }
+  }
+
+  // Spawn marker (always at left)
+  X.save();
+  X.fillStyle = '#00ffff';
+  X.shadowColor = '#00ffff'; X.shadowBlur = 8 * S;
+  X.beginPath(); X.arc(W * 0.05, H * 0.4, 11 * S, 0, Math.PI * 2); X.fill();
+  X.fillStyle = '#000'; X.shadowBlur = 0;
+  X.font = `bold ${8 * S}px sans-serif`; X.textAlign = 'center';
+  X.fillText('S', W * 0.05, H * 0.4 + 3 * S);
+  X.restore();
+
+  // Top toolbar
+  X.save();
+  X.fillStyle = 'rgba(0,0,0,0.6)';
+  X.fillRect(0, 0, W, 55 * S);
+  X.restore();
+
+  drawNeonText('EDITOR', W / 2, 22 * S, 16, '#00ffff');
+
+  // Tool buttons
+  gs.btns.tools = [];
+  const toolW = Math.min(48 * S, (W - 20 * S) / editorTools.length);
+  const toolStartX = (W - editorTools.length * toolW) / 2;
+  for (let i = 0; i < editorTools.length; i++) {
+    const t = editorTools[i];
+    const tx = toolStartX + i * toolW;
+    const ty = 32 * S;
+    const active = editor.tool === t.id;
+
+    X.save();
+    X.beginPath();
+    X.roundRect(tx + 2 * S, ty, toolW - 4 * S, 20 * S, 3 * S);
+    X.fillStyle = active ? t.color + '44' : 'rgba(255,255,255,0.05)';
+    X.fill();
+    if (active) {
+      X.strokeStyle = t.color;
+      X.lineWidth = 2 * S;
+      X.stroke();
+    }
+    X.fillStyle = active ? t.color : '#888';
+    X.font = `bold ${9 * S}px sans-serif`;
+    X.textAlign = 'center';
+    X.fillText(t.label, tx + toolW / 2, ty + 14 * S);
+    X.restore();
+
+    gs.btns.tools.push({ x: tx + 2 * S, y: ty, w: toolW - 4 * S, h: 20 * S, id: t.id });
+  }
+
+  // Bottom bar
+  X.save();
+  X.fillStyle = 'rgba(0,0,0,0.6)';
+  X.fillRect(0, H - 55 * S, W, 55 * S);
+  X.restore();
+
+  const bbw = 80 * S, bbh = 36 * S, bby = H - 48 * S;
+  gs.btns.edBack = drawBtn(10 * S, bby, bbw, bbh, '← BACK', false);
+  gs.btns.edClear = drawBtn(W / 2 - bbw / 2, bby, bbw, bbh, 'CLEAR', false);
+
+  const canTest = el.portal && el.orbs.length > 0 && el.platforms.length > 0;
+  if (canTest) {
+    gs.btns.edTest = drawBtn(W - bbw - 10 * S, bby, bbw, bbh, '▶ TEST');
+  } else {
+    gs.btns.edTest = null;
+    X.save();
+    X.fillStyle = 'rgba(255,255,255,0.2)';
+    X.font = `${10 * S}px sans-serif`;
+    X.textAlign = 'center';
+    X.fillText('Need: platforms + orbs + goal', W / 2, H - 55 * S - 8 * S);
+    X.restore();
+  }
+
+  // Save button
+  if (canTest) {
+    gs.btns.edSave = drawBtn(W - bbw - 10 * S, bby - bbh - 8 * S, bbw, bbh - 4 * S, 'SAVE', false);
+  } else {
+    gs.btns.edSave = null;
+  }
+}
+
+function editorBuildLevel() {
+  const el = editor.elements;
+  const platforms = el.platforms.map(p => [p.x / W, p.y / H, p.w / W, p.h / H, p.type || 'solid']);
+  const spikes = el.spikes.map(s => [s.x / W, s.y / H, s.w / W, s.h / H]);
+  const orbs = el.orbs.map(o => [o.x / W, o.y / H]);
+  const portal = el.portal ? [el.portal.x / W, el.portal.y / H] : [0.9, 0.5];
+  return {
+    name: 'Custom Level',
+    stars: [20, 30, 45],
+    spawn: [0.05, 0.4],
+    goal: portal,
+    width: 1.0,
+    platforms, spikes, orbs,
+    wells: [], lasers: [],
+    custom: true
+  };
+}
+
+function editorHandleTap(x, y) {
+  // Tool bar taps
+  if (gs.btns.tools) {
+    for (const t of gs.btns.tools) {
+      if (hit(x, y, t)) { editor.tool = t.id; sfxClick(); return; }
+    }
+  }
+  if (hit(x, y, gs.btns.edBack)) { sfxClick(); screen = 'menu'; gs.btns = {}; return; }
+  if (hit(x, y, gs.btns.edClear)) { sfxClick(); editorReset(); return; }
+  if (gs.btns.edTest && hit(x, y, gs.btns.edTest)) {
+    sfxClick();
+    const lvlData = editorBuildLevel();
+    customLevels.push(lvlData);
+    saveCustomLevels();
+    isCustomLevel = true;
+    customLevelIndex = customLevels.length - 1;
+    isInfiniteMode = false;
+    startLevel(0);
+    return;
+  }
+  if (gs.btns.edSave && hit(x, y, gs.btns.edSave)) {
+    sfxClick();
+    const lvlData = editorBuildLevel();
+    customLevels.push(lvlData);
+    saveCustomLevels();
+    editor.saved = true;
+    addFloatingText(W / 2, H / 2, 'SAVED!', '#00ff88', 22);
+    return;
+  }
+
+  // Ignore taps in toolbar/bottom areas
+  if (y < 55 * S || y > H - 55 * S) return;
+
+  const tool = editor.tool;
+  if (tool === 'orb') {
+    editor.elements.orbs.push({ x, y });
+    sfxClick();
+  } else if (tool === 'portal') {
+    editor.elements.portal = { x, y };
+    sfxClick();
+  } else if (tool === 'eraser') {
+    // Find and remove closest element
+    let minDist = 30 * S;
+    let removeType = null, removeIdx = -1;
+    editor.elements.orbs.forEach((o, i) => {
+      const d = Math.sqrt((o.x - x) ** 2 + (o.y - y) ** 2);
+      if (d < minDist) { minDist = d; removeType = 'orbs'; removeIdx = i; }
+    });
+    if (editor.elements.portal) {
+      const d = Math.sqrt((editor.elements.portal.x - x) ** 2 + (editor.elements.portal.y - y) ** 2);
+      if (d < minDist) { minDist = d; removeType = 'portal'; removeIdx = 0; }
+    }
+    editor.elements.platforms.forEach((p, i) => {
+      if (x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h) {
+        removeType = 'platforms'; removeIdx = i; minDist = 0;
+      }
+    });
+    editor.elements.spikes.forEach((s, i) => {
+      if (x >= s.x && x <= s.x + s.w && y >= s.y && y <= s.y + s.h) {
+        removeType = 'spikes'; removeIdx = i; minDist = 0;
+      }
+    });
+    if (removeType === 'portal') editor.elements.portal = null;
+    else if (removeType && removeIdx >= 0) editor.elements[removeType].splice(removeIdx, 1);
+    if (removeType) sfxClick();
+  }
+}
+
+function editorHandleDragStart(x, y) {
+  if (y < 55 * S || y > H - 55 * S) return;
+  const tool = editor.tool;
+  if (tool === 'platform' || tool === 'bouncy' || tool === 'crumble' || tool === 'spike') {
+    editor.dragging = true;
+    editor.dragStart = { x, y };
+    editor.dragEnd = { x, y };
+  }
+}
+
+function editorHandleDragMove(x, y) {
+  if (editor.dragging) {
+    editor.dragEnd = { x, y };
+  }
+}
+
+function editorHandleDragEnd() {
+  if (editor.dragging && editor.dragStart && editor.dragEnd) {
+    const x1 = Math.min(editor.dragStart.x, editor.dragEnd.x);
+    const y1 = Math.min(editor.dragStart.y, editor.dragEnd.y);
+    const w = Math.abs(editor.dragEnd.x - editor.dragStart.x);
+    const h = Math.max(8 * S, Math.abs(editor.dragEnd.y - editor.dragStart.y));
+    if (w > 10 * S) {
+      const tool = editor.tool;
+      if (tool === 'spike') {
+        editor.elements.spikes.push({ x: x1, y: y1, w, h });
+      } else {
+        editor.elements.platforms.push({ x: x1, y: y1, w, h, type: tool === 'bouncy' ? 'bouncy' : tool === 'crumble' ? 'crumble' : 'solid' });
+      }
+      sfxClick();
+    }
+    editor.dragging = false;
+    editor.dragStart = null;
+    editor.dragEnd = null;
+  }
+}
+
+// ============================================================
+// CUSTOM LEVELS SELECT
+// ============================================================
+function drawCustomSelect() {
+  drawNeonText('CUSTOM LEVELS', W / 2, 45 * S, 22, '#00ff88');
+
+  gs.btns = gs.btns || {};
+  gs.btns.customLvls = [];
+
+  if (customLevels.length === 0) {
+    X.save();
+    X.fillStyle = 'rgba(255,255,255,0.3)';
+    X.font = `${14 * S}px sans-serif`;
+    X.textAlign = 'center';
+    X.fillText('No custom levels yet', W / 2, H * 0.4);
+    X.fillText('Use the Editor to create one!', W / 2, H * 0.4 + 25 * S);
+    X.restore();
+  } else {
+    for (let i = 0; i < Math.min(customLevels.length, 8); i++) {
+      const ey = 75 * S + i * 50 * S;
+      X.save();
+      X.beginPath();
+      X.roundRect(15 * S, ey, W - 30 * S, 42 * S, 6 * S);
+      X.fillStyle = 'rgba(0,255,136,0.06)';
+      X.fill();
+      X.strokeStyle = '#00ff88';
+      X.lineWidth = 1.5 * S;
+      X.stroke();
+
+      X.fillStyle = '#fff';
+      X.font = `bold ${14 * S}px sans-serif`;
+      X.textAlign = 'left';
+      X.fillText(`Custom Level ${i + 1}`, 25 * S, ey + 18 * S);
+
+      X.fillStyle = '#888';
+      X.font = `${11 * S}px sans-serif`;
+      const cl = customLevels[i];
+      X.fillText(`${cl.platforms.length} plats  ${cl.orbs.length} orbs`, 25 * S, ey + 34 * S);
+
+      X.restore();
+      gs.btns.customLvls.push({ x: 15 * S, y: ey, w: W - 30 * S, h: 42 * S, index: i });
+    }
+  }
+
+  gs.btns.back = drawBtn(W / 2 - 50 * S, H - 55 * S, 100 * S, 40 * S, '← BACK', false);
 }
 
 // ============================================================
@@ -4181,6 +3230,7 @@ function handleTap(x, y) {
   if (screen === 'menu') {
     if (hit(x, y, gs.btns.start)) {
       sfxClick();
+      isInfiniteMode = false; isCustomLevel = false;
       let startLvl = 0;
       for (let i = 0; i < LEVELS.length; i++) {
         if (!progress[i] || !progress[i].completed) { startLvl = i; break; }
@@ -4189,31 +3239,52 @@ function handleTap(x, y) {
       startLevel(startLvl);
     }
     else if (hit(x, y, gs.btns.select)) { sfxClick(); screen = 'select'; gs.btns = {}; }
+    else if (hit(x, y, gs.btns.infinite)) {
+      sfxClick(); isInfiniteMode = true; isCustomLevel = false;
+      startLevel(LEVELS.length);
+    }
     else if (hit(x, y, gs.btns.daily)) {
       sfxClick();
-      const dailyLevel = generateDailyChallenge_v2();
+      const dailyLevel = generateDailyChallenge();
       startLevel(0, dailyLevel);
     }
-    else if (hit(x, y, gs.btns.editor)) { sfxClick(); editorInit(); }
+    else if (hit(x, y, gs.btns.editor)) { sfxClick(); editorReset(); screen = 'editor'; gs.btns = {}; }
+    else if (hit(x, y, gs.btns.leaderboard)) { sfxClick(); lbLevelId = null; screen = 'leaderboard'; gs.btns = {}; }
     else if (hit(x, y, gs.btns.stats)) { sfxClick(); screen = 'stats'; gs.btns = {}; }
-    else if (hit(x, y, gs.btns.leaders)) { sfxClick(); screen = 'highscores'; highScoreScreen = 'global'; gs.btns = {}; }
+    else if (hit(x, y, gs.btns.leaders)) { sfxClick(); screen = 'top20'; gs.btns = {}; }
   } else if (screen === 'select') {
     if (hit(x, y, gs.btns.back)) { sfxClick(); screen = 'menu'; gs.btns = {}; }
+    else if (gs.btns.customBtn && hit(x, y, gs.btns.customBtn)) { sfxClick(); screen = 'customselect'; gs.btns = {}; }
     else if (gs.btns.levelBoxes) {
       for (let i = 0; i < gs.btns.levelBoxes.length; i++) {
         const b = gs.btns.levelBoxes[i];
-        if (b && b.unlocked && hit(x, y, b)) { sfxClick(); startLevel(i); break; }
+        if (b && b.unlocked && hit(x, y, b)) {
+          sfxClick(); isInfiniteMode = false; isCustomLevel = false; startLevel(i); break;
+        }
+      }
+    }
+  } else if (screen === 'customselect') {
+    if (hit(x, y, gs.btns.back)) { sfxClick(); screen = 'select'; gs.btns = {}; }
+    else if (gs.btns.customLvls) {
+      for (const b of gs.btns.customLvls) {
+        if (hit(x, y, b)) {
+          sfxClick(); isCustomLevel = true; isInfiniteMode = false;
+          customLevelIndex = b.index;
+          startLevel(0);
+          break;
+        }
       }
     }
   } else if (screen === 'editor') {
-    handleEditorTap(x, y);
-  } else if (screen === 'highscores') {
+    editorHandleTap(x, y);
+  } else if (screen === 'leaderboard') {
     if (hit(x, y, gs.btns.back)) { sfxClick(); screen = 'menu'; gs.btns = {}; }
-    else if (gs.btns.hsLevel && hit(x, y, gs.btns.hsLevel)) { sfxClick(); highScoreScreen = 'level'; highScoreLevel = 0; gs.btns = {}; }
-    else if (gs.btns.hsGlobal && hit(x, y, gs.btns.hsGlobal)) { sfxClick(); highScoreScreen = 'global'; gs.btns = {}; }
-    else if (gs.btns.hsPrev && hit(x, y, gs.btns.hsPrev)) { sfxClick(); highScoreLevel = Math.max(0, highScoreLevel - 1); gs.btns = {}; }
-    else if (gs.btns.hsNext && hit(x, y, gs.btns.hsNext)) { sfxClick(); highScoreLevel = Math.min(LEVELS.length - 1, highScoreLevel + 1); gs.btns = {}; }
-  } else if (screen === 'stats' || screen === 'leaderboard') {
+    else if (gs.btns.lbTabs) {
+      for (const t of gs.btns.lbTabs) {
+        if (hit(x, y, t)) { sfxClick(); lbLevelId = t.id; break; }
+      }
+    }
+  } else if (screen === 'stats' || screen === 'leaderboard' || screen === 'top20') {
     if (hit(x, y, gs.btns.back)) { sfxClick(); screen = 'menu'; gs.btns = {}; }
   } else if (screen === 'game') {
     if (!gs.dead && !gs.won) {
@@ -4232,10 +3303,18 @@ function handleTap(x, y) {
     else if (hit(x, y, gs.btns.next)) {
       sfxClick();
       if (gs.isDaily) { screen = 'menu'; gs.btns = {}; }
+      else if (isInfiniteMode) startLevel(lvl + 1);
+      else if (isCustomLevel) { screen = 'menu'; gs.btns = {}; isCustomLevel = false; }
       else if (lvl < LEVELS.length - 1) startLevel(lvl + 1);
       else { screen = 'menu'; gs.btns = {}; }
     }
     else if (gs.btns.share && hit(x, y, gs.btns.share)) { sfxClick(); shareResult(); }
+    else if (gs.btns.lbBtn && hit(x, y, gs.btns.lbBtn)) {
+      sfxClick();
+      const levelId = isCustomLevel ? 'custom_' + customLevelIndex : (isInfiniteMode ? 'inf_' + lvl : '' + lvl);
+      lbLevelId = levelId;
+      screen = 'leaderboard'; gs.btns = {};
+    }
     else if (gs.btns.addScore && hit(x, y, gs.btns.addScore)) {
       sfxClick();
       enteringInitials = true;
@@ -4249,11 +3328,31 @@ function handleTap(x, y) {
 
 C.addEventListener('touchstart', e => {
   e.preventDefault();
-  handleTap(e.touches[0].clientX, e.touches[0].clientY);
+  const tx = e.touches[0].clientX, ty = e.touches[0].clientY;
+  if (screen === 'editor') editorHandleDragStart(tx, ty);
+  handleTap(tx, ty);
+}, { passive: false });
+
+C.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (screen === 'editor') editorHandleDragMove(e.touches[0].clientX, e.touches[0].clientY);
+}, { passive: false });
+
+C.addEventListener('touchend', e => {
+  if (screen === 'editor') editorHandleDragEnd();
 }, { passive: false });
 
 C.addEventListener('mousedown', e => {
+  if (screen === 'editor') editorHandleDragStart(e.clientX, e.clientY);
   handleTap(e.clientX, e.clientY);
+});
+
+C.addEventListener('mousemove', e => {
+  if (screen === 'editor') editorHandleDragMove(e.clientX, e.clientY);
+});
+
+C.addEventListener('mouseup', e => {
+  if (screen === 'editor') editorHandleDragEnd();
 });
 
 document.addEventListener('keydown', e => {
@@ -4268,6 +3367,8 @@ document.addEventListener('keydown', e => {
   }
   if (e.code === 'Escape') {
     if (screen === 'game' || screen === 'victory') {
+      screen = 'menu'; gs.btns = {}; isInfiniteMode = false; isCustomLevel = false;
+    } else if (screen === 'editor' || screen === 'leaderboard' || screen === 'select' || screen === 'customselect') {
       screen = 'menu'; gs.btns = {};
     }
   }
@@ -4293,9 +3394,8 @@ function updateSpeedLines() {
   }
   for (let i = speedLines.length - 1; i >= 0; i--) {
     const l = speedLines[i];
-    const sld60 = dt * 60;
-    l.x -= l.speed * sld60;
-    l.life -= l.decay * sld60;
+    l.x -= l.speed;
+    l.life -= l.decay;
     if (l.life <= 0 || l.x + l.len < 0) speedLines.splice(i, 1);
   }
   if (speedLines.length > 30) speedLines.splice(0, speedLines.length - 30);
@@ -4330,7 +3430,7 @@ function loop(time) {
   }
   
   // Camera zoom lerp
-  cameraZoom += (cameraZoomTarget - cameraZoom) * (1 - Math.pow(0.92, dt * 60));
+  cameraZoom += (cameraZoomTarget - cameraZoom) * 0.08;
   
   updateSpeedLines();
   
@@ -4341,8 +3441,11 @@ function loop(time) {
   
   if (screen === 'menu') drawMenu();
   else if (screen === 'select') drawSelect();
+  else if (screen === 'customselect') drawCustomSelect();
+  else if (screen === 'editor') { drawEditor(); updateParticles(); drawParticles(); }
   else if (screen === 'stats') drawStatsScreen();
-  else if (screen === 'leaderboard') drawLeaderboardScreen();
+  else if (screen === 'leaderboard') drawLeaderboard();
+  else if (screen === 'top20') drawLeaderboardScreen();
   else if (screen === 'game') {
     // Apply camera zoom
     if (cameraZoom !== 1) {

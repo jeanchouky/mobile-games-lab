@@ -77,6 +77,34 @@ let cameraActive = false;
 let cameraAvailable = false;
 let usingAvatar = true;
 
+// Score persistence
+let bestScore = 0;
+try { bestScore = parseInt(localStorage.getItem('lieDetector_best')) || 0; } catch(e){}
+function saveBestScore(score) {
+  if (score > bestScore) {
+    bestScore = score;
+    try { localStorage.setItem('lieDetector_best', String(bestScore)); } catch(e){}
+  }
+}
+
+// Category display colors
+const categoryColors = {
+  'embarrassing': '#ff5500',
+  'hypothetical': '#9933ff',
+  'would-you-rather': '#00aaff',
+  'personal': '#ff0099',
+  'spicy': '#ff3366',
+  'silly': '#ffff00'
+};
+const categoryLabels = {
+  'embarrassing': 'EMBARRASSING',
+  'hypothetical': 'HYPOTHETICAL',
+  'would-you-rather': 'WOULD YOU RATHER',
+  'personal': 'PERSONAL',
+  'spicy': 'SPICY',
+  'silly': 'SILLY'
+};
+
 // UI state
 let setupPlayerCount = 3;
 let setupNames = [];
@@ -591,6 +619,7 @@ function initAccusation() {
 }
 
 function initConfession() {
+  analysisTimer = 0; // Reset timer for confession state
   // Current player reveals truth
   const currentPlayer = players[currentPlayerIndex];
   
@@ -627,6 +656,7 @@ function initConfession() {
 }
 
 function initResults() {
+  analysisTimer = 0; // Reset timer for results state
   confettiTimer = 3;
   sfxWin();
 }
@@ -634,7 +664,7 @@ function initResults() {
 function initGameOver() {
   // Calculate superlatives
   players.sort((a, b) => b.score - a.score);
-  
+
   // Find most suspicious (lowest avg truth score)
   let mostSuspicious = players[0];
   players.forEach(p => {
@@ -642,7 +672,10 @@ function initGameOver() {
       mostSuspicious = p;
     }
   });
-  
+
+  // Save best score
+  saveBestScore(players[0].score);
+
   confettiTimer = 3;
   sfxWin();
   stopBackgroundMusic();
@@ -985,11 +1018,22 @@ function drawSplash() {
   strokeText('TAP TO START', centerX, centerY + 140 * scale, 20, '#fff', '#000', 3);
   ctx.restore();
   
+  // Best score
+  if (bestScore > 0) {
+    strokeText(`🏆 Best: ${bestScore} pts`, centerX, centerY + 100 * scale, 14, '#ffd700', '#000', 2);
+  }
+
   // How to play
   ctx.save();
   ctx.globalAlpha = 0.7;
   strokeText('A party game: answer questions while', centerX, centerY + 180 * scale, 11, '#fff', '#000', 2);
   strokeText('the AI "scans" your face. Others vote!', centerX, centerY + 200 * scale, 11, '#fff', '#000', 2);
+  ctx.restore();
+
+  // Credit
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  strokeText('v1.1 • Made for Party Chaos', centerX, H - 20 * scale, 10, '#fff', '#000', 2);
   ctx.restore();
 }
 
@@ -1088,6 +1132,13 @@ function drawQuestion() {
   
   strokeText(currentPlayer.name.toUpperCase(), centerX, centerY - 30 * scale, 20, '#fff', '#000', 3);
   
+  // Category badge
+  const catColor = categoryColors[currentQuestion.category] || '#888';
+  const catLabel = categoryLabels[currentQuestion.category] || currentQuestion.category.toUpperCase();
+  const catBadgeY = centerY + 10 * scale;
+  drawBox(centerX, catBadgeY, Math.min(W * 0.6, catLabel.length * 12 * scale + 30 * scale), 28 * scale, catColor, '#000', 3);
+  strokeText(catLabel, centerX, catBadgeY, 11, '#fff', '#000', 2);
+
   // Question box
   const qBoxY = centerY + 80 * scale;
   drawBox(centerX, qBoxY, W * 0.9, 140 * scale, '#ff0099', '#ffff00', 6);

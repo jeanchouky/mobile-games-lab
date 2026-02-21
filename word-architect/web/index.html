@@ -291,6 +291,7 @@ function renderTiles(){
     el.className=`tile ${t.type} ${selected.includes(i)?'selected':''}`;
     el.innerHTML=`<span class="letter">${t.type==='wild'?'*':t.letter}</span><span class="pts">${t.type==='wild'?'*':LETTER_PTS[t.letter]}</span>`;
     el.addEventListener('click',()=>toggleTile(i));
+    el.addEventListener('touchstart',e=>{e.preventDefault();toggleTile(i)},{passive:false});
     grid.appendChild(el);
   });
 }

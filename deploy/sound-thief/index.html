@@ -85,70 +85,6 @@ let showTutorial = true;
 // Visual recording feedback
 let recordingPulse = 0;
 
-// ---- NEW FEATURE GLOBALS ----
-
-// Sound Combination / Mixing system
-let combineMode = false; // true when in the sound mixer overlay
-let combineSlotA = -1;   // first slot selected for combining
-let combineSlotB = -1;   // second slot selected for combining
-let combineAnimation = 0; // animation progress 0..1
-let combineResult = null; // result preview while animating
-let combinedSoundsCreated = 0; // track how many combos the player has made
-
-// Waveform / Spectrum HUD
-let showSpectrumHUD = false; // toggle for the real-time spectrum overlay
-let spectrumData = new Float32Array(128); // smoothed spectrum bars
-let spectrumHistory = []; // rolling history for waterfall display
-const SPECTRUM_HISTORY_LEN = 40;
-
-// Boss battle state
-let bossState = {
-  active: false,
-  phase: 0,           // boss phases 0,1,2
-  phaseTimer: 0,
-  attackTimer: 0,
-  attackPattern: 0,
-  shieldHP: 0,
-  shieldMax: 0,
-  requiredFreqLow: 0,
-  requiredFreqHigh: 0,
-  vulnerableTimer: 0,
-  spawnTimer: 0,
-  dialog: '',
-  dialogTimer: 0,
-  shockwaves: [],     // visual shockwave rings from boss
-  beams: []           // boss beam attacks
-};
-
-// Enhanced tutorial system
-let tutorialPhase = 'none'; // 'none','welcome','movement','recording','combat','weakness','combine','spectrum','boss','complete'
-let tutorialSubStep = 0;
-let tutorialHighlightArea = null; // {x,y,w,h} rect to highlight
-let tutorialArrowTarget = null;  // {x,y} for animated arrow
-let tutorialActionRequired = null; // action player must perform to advance
-let tutorialActionDone = false;
-let tutorialTextQueue = [];
-let tutorialCharIndex = 0; // typewriter effect
-let tutorialTypeTimer = 0;
-
-// Hazards for advanced levels
-let hazards = []; // {x,y,w,h,type:'spikes'|'laser'|'vortex', ...}
-
-// Moving platforms
-let movingPlatforms = []; // {x,y,w,h,startX,startY,endX,endY,speed,t}
-
-// Collectible resonance pickups in levels
-let resonancePickups = []; // {x,y,collected,value}
-
-// Level transition banner
-let levelBanner = { text: '', timer: 0, color: '#64b5f6' };
-
-// Frequency-locked doors/gates
-let freqGates = []; // {x,y,w,h,freqLow,freqHigh,open,openTimer}
-
-// Environmental sound emitters (decorative + gameplay)
-let soundEmitters = []; // {x,y,frequency,radius,phase,color}
-
 // --- RESIZE ---
 function resize() {
   const dpr = window.devicePixelRatio || 1;
@@ -174,7 +110,9 @@ function initAudio() {
   if (!audioCtx) {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   }
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(() => {});
+  }
 }
 
 // Request microphone access
@@ -488,1191 +426,6 @@ function playSfx(type) {
 }
 
 // ============================================================
-// SOUND COMBINATION / MIXING SYSTEM
-// ============================================================
-
-function openCombineMode() {
-  if (soundInventory.length < 2) {
-    levelBanner = { text: 'Need at least 2 sounds to combine!', timer: 2, color: '#ff6b6b' };
-    return;
-  }
-  combineMode = true;
-  combineSlotA = -1;
-  combineSlotB = -1;
-  combineAnimation = 0;
-  combineResult = null;
-  playSfx('success');
-}
-
-function closeCombineMode() {
-  combineMode = false;
-  combineSlotA = -1;
-  combineSlotB = -1;
-  combineAnimation = 0;
-  combineResult = null;
-}
-
-function selectCombineSlot(index) {
-  if (index < 0 || index >= soundInventory.length) return;
-  if (combineSlotA === -1) {
-    combineSlotA = index;
-    playSfx('jump');
-  } else if (combineSlotB === -1 && index !== combineSlotA) {
-    combineSlotB = index;
-    playSfx('jump');
-    combineAnimation = 0;
-    combineResult = combineSounds(soundInventory[combineSlotA], soundInventory[combineSlotB]);
-  }
-}
-
-function combineSounds(soundA, soundB) {
-  const aVol = soundA.analysis.volume;
-  const bVol = soundB.analysis.volume;
-  const aPow = soundA.analysis.power;
-  const bPow = soundB.analysis.power;
-
-  const typeCombo = soundA.analysis.type + '+' + soundB.analysis.type;
-  let newType, newColor, bonusPower;
-
-  const comboMap = {
-    'loud+high': { type: 'shockwave', color: '#ff4081', bonus: 30 },
-    'high+loud': { type: 'shockwave', color: '#ff4081', bonus: 30 },
-    'mid+harmonic': { type: 'resonance', color: '#e040fb', bonus: 25 },
-    'harmonic+mid': { type: 'resonance', color: '#e040fb', bonus: 25 },
-    'loud+low': { type: 'earthquake', color: '#ff7043', bonus: 35 },
-    'low+loud': { type: 'earthquake', color: '#ff7043', bonus: 35 },
-    'high+harmonic': { type: 'crystal', color: '#00e5ff', bonus: 28 },
-    'harmonic+high': { type: 'crystal', color: '#00e5ff', bonus: 28 },
-    'loud+harmonic': { type: 'thunder', color: '#ffab00', bonus: 32 },
-    'harmonic+loud': { type: 'thunder', color: '#ffab00', bonus: 32 },
-    'mid+low': { type: 'pulse', color: '#76ff03', bonus: 20 },
-    'low+mid': { type: 'pulse', color: '#76ff03', bonus: 20 },
-    'loud+mid': { type: 'blast', color: '#ff9100', bonus: 22 },
-    'mid+loud': { type: 'blast', color: '#ff9100', bonus: 22 },
-    'high+low': { type: 'dissonance', color: '#d500f9', bonus: 26 },
-    'low+high': { type: 'dissonance', color: '#d500f9', bonus: 26 },
-    'loud+loud': { type: 'megabass', color: '#ff1744', bonus: 40 },
-    'high+high': { type: 'ultrasonic', color: '#18ffff', bonus: 35 },
-    'harmonic+harmonic': { type: 'symphony', color: '#ea80fc', bonus: 45 },
-    'mid+mid': { type: 'drone', color: '#ffd740', bonus: 20 },
-    'low+low': { type: 'subsonic', color: '#69f0ae', bonus: 30 },
-  };
-
-  const combo = comboMap[typeCombo];
-  if (combo) {
-    newType = combo.type;
-    newColor = combo.color;
-    bonusPower = combo.bonus;
-  } else {
-    newType = 'hybrid';
-    newColor = '#b388ff';
-    bonusPower = 15;
-  }
-
-  const newFreq = Math.round((soundA.analysis.frequency + soundB.analysis.frequency) / 2 + Math.random() * 200 - 100);
-  const newVol = Math.min(100, Math.round((aVol + bVol) / 2 + 10));
-  const newPower = Math.round((aPow + bPow) / 2 + bonusPower);
-
-  const newWaveform = [];
-  const wfA = soundA.waveform;
-  const wfB = soundB.waveform;
-  for (let i = 0; i < 100; i++) {
-    const a = wfA[i % wfA.length] || 0.5;
-    const b = wfB[i % wfB.length] || 0.5;
-    newWaveform.push(a * 0.5 + b * 0.5 + Math.sin(i * 0.3) * 0.1);
-  }
-
-  const lenA = soundA.buffer.length;
-  const lenB = soundB.buffer.length;
-  const maxLen = Math.max(lenA, lenB);
-  const newBuffer = new Float32Array(maxLen);
-  for (let i = 0; i < maxLen; i++) {
-    const sa = i < lenA ? soundA.buffer[i] : 0;
-    const sb = i < lenB ? soundB.buffer[i] : 0;
-    newBuffer[i] = (sa + sb) * 0.5;
-  }
-
-  return {
-    id: Date.now() + Math.random(),
-    buffer: newBuffer,
-    sampleRate: soundA.sampleRate,
-    analysis: {
-      volume: newVol,
-      frequency: newFreq,
-      duration: Math.max(soundA.analysis.duration, soundB.analysis.duration),
-      type: newType,
-      color: newColor,
-      power: newPower
-    },
-    waveform: newWaveform,
-    cooldown: 0,
-    isCombined: true,
-    comboName: newType.charAt(0).toUpperCase() + newType.slice(1)
-  };
-}
-
-function finalizeCombine() {
-  if (combineResult && combineSlotA >= 0 && combineSlotB >= 0) {
-    const hi = Math.max(combineSlotA, combineSlotB);
-    const lo = Math.min(combineSlotA, combineSlotB);
-    soundInventory.splice(hi, 1);
-    soundInventory.splice(lo, 1);
-    if (soundInventory.length < 5) {
-      soundInventory.push(combineResult);
-      combinedSoundsCreated++;
-      levelBanner = { text: 'Created: ' + combineResult.comboName + ' Sound!', timer: 2.5, color: combineResult.analysis.color };
-      playSfx('success');
-    }
-    closeCombineMode();
-  }
-}
-
-function updateCombineAnimation() {
-  if (!combineMode || combineSlotA < 0 || combineSlotB < 0) return;
-  combineAnimation += deltaTime * 0.8;
-  if (combineAnimation >= 1.0) combineAnimation = 1.0;
-}
-
-function drawCombineMode() {
-  if (!combineMode) return;
-  ctx.save();
-  ctx.fillStyle = 'rgba(10, 14, 26, 0.95)';
-  ctx.fillRect(0, 0, W, H);
-  ctx.textAlign = 'center';
-
-  ctx.font = 'bold 26px sans-serif';
-  ctx.fillStyle = '#e040fb';
-  ctx.fillText('SOUND MIXER', centerX, 60);
-  ctx.font = '13px sans-serif';
-  ctx.fillStyle = '#aaa';
-  ctx.fillText('Select two sounds to combine', centerX, 85);
-
-  const slotSize = Math.min(80, (W - 60) / Math.max(soundInventory.length, 1));
-  const startX = centerX - (soundInventory.length * (slotSize + 10)) / 2;
-  const slotY = 120;
-
-  for (let i = 0; i < soundInventory.length; i++) {
-    const sx = startX + i * (slotSize + 10);
-    const s = soundInventory[i];
-    const selected = (i === combineSlotA || i === combineSlotB);
-
-    ctx.strokeStyle = selected ? '#fff' : s.analysis.color;
-    ctx.lineWidth = selected ? 3 : 2;
-    ctx.fillStyle = selected ? s.analysis.color + '40' : '#1a2040';
-    ctx.fillRect(sx, slotY, slotSize, slotSize);
-    ctx.strokeRect(sx, slotY, slotSize, slotSize);
-
-    ctx.strokeStyle = s.analysis.color;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    for (let j = 0; j < s.waveform.length; j++) {
-      const wx = sx + 4 + (j / s.waveform.length) * (slotSize - 8);
-      const wy = slotY + slotSize / 2 + (s.waveform[j] - 0.5) * (slotSize * 0.5);
-      if (j === 0) ctx.moveTo(wx, wy); else ctx.lineTo(wx, wy);
-    }
-    ctx.stroke();
-
-    ctx.font = '10px sans-serif';
-    ctx.fillStyle = '#ccc';
-    ctx.fillText(s.analysis.type, sx + slotSize / 2, slotY + slotSize + 14);
-    ctx.fillStyle = s.analysis.color;
-    ctx.fillText('P:' + s.analysis.power, sx + slotSize / 2, slotY + slotSize + 26);
-
-    if (selected) {
-      ctx.fillStyle = '#fff';
-      ctx.font = 'bold 10px sans-serif';
-      ctx.fillText(i === combineSlotA ? 'A' : 'B', sx + slotSize / 2, slotY - 6);
-    }
-  }
-
-  if (combineSlotA >= 0 && combineSlotB >= 0 && combineResult) {
-    const mixY = slotY + slotSize + 60;
-    const progress = combineAnimation;
-    const mergeX = centerX;
-    const mergeY = mixY + 60;
-
-    for (let ring = 0; ring < 4; ring++) {
-      const r = 30 + ring * 15;
-      const alpha = (1 - ring / 4) * progress;
-      ctx.strokeStyle = combineResult.analysis.color;
-      ctx.lineWidth = 2;
-      ctx.globalAlpha = alpha * 0.6;
-      ctx.beginPath();
-      ctx.arc(mergeX, mergeY, r * (1 - progress * 0.3), 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-
-    ctx.strokeStyle = combineResult.analysis.color;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    for (let a = 0; a < Math.PI * 2; a += 0.05) {
-      const wIdx = Math.floor((a / (Math.PI * 2)) * combineResult.waveform.length);
-      const wVal = combineResult.waveform[wIdx] || 0.5;
-      const ringR = 20 + wVal * 25;
-      const rx = mergeX + Math.cos(a + gameTime * 3) * ringR * progress;
-      const ry = mergeY + Math.sin(a + gameTime * 3) * ringR * progress;
-      if (a === 0) ctx.moveTo(rx, ry); else ctx.lineTo(rx, ry);
-    }
-    ctx.closePath();
-    ctx.stroke();
-
-    if (progress >= 0.5) {
-      const infoAlpha = (progress - 0.5) * 2;
-      ctx.globalAlpha = infoAlpha;
-      ctx.font = 'bold 18px sans-serif';
-      ctx.fillStyle = combineResult.analysis.color;
-      ctx.fillText(combineResult.comboName, mergeX, mergeY + 70);
-      ctx.font = '12px sans-serif';
-      ctx.fillStyle = '#ccc';
-      ctx.fillText('Power: ' + combineResult.analysis.power + '  |  Freq: ' + combineResult.analysis.frequency + 'Hz', mergeX, mergeY + 90);
-      ctx.fillText('Vol: ' + combineResult.analysis.volume + 'dB', mergeX, mergeY + 106);
-      ctx.globalAlpha = 1;
-    }
-
-    if (progress >= 1.0) {
-      const btnY2 = mergeY + 125;
-      ctx.fillStyle = '#4caf50';
-      ctx.fillRect(centerX - 80, btnY2, 160, 45);
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(centerX - 80, btnY2, 160, 45);
-      ctx.fillStyle = '#fff';
-      ctx.font = 'bold 14px sans-serif';
-      ctx.fillText('COMBINE!', centerX, btnY2 + 28);
-    }
-  }
-
-  ctx.fillStyle = '#666';
-  ctx.fillRect(centerX - 60, H - 80, 120, 40);
-  ctx.strokeStyle = '#999';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(centerX - 60, H - 80, 120, 40);
-  ctx.fillStyle = '#fff';
-  ctx.font = '14px sans-serif';
-  ctx.fillText('CANCEL', centerX, H - 54);
-
-  ctx.textAlign = 'left';
-  ctx.restore();
-}
-
-// ============================================================
-// REAL-TIME WAVEFORM & SPECTRUM DISPLAY
-// ============================================================
-
-function updateSpectrumHUD() {
-  if (!analyser || !micPermission) return;
-  const freqData = new Uint8Array(analyser.frequencyBinCount);
-  analyser.getByteFrequencyData(freqData);
-
-  const binsPerBar = Math.floor(freqData.length / 128);
-  for (let i = 0; i < 128; i++) {
-    let sum = 0;
-    for (let j = 0; j < binsPerBar; j++) {
-      sum += freqData[i * binsPerBar + j];
-    }
-    const val = sum / binsPerBar / 255;
-    spectrumData[i] += (val - spectrumData[i]) * 0.3;
-  }
-
-  spectrumHistory.push(new Float32Array(spectrumData));
-  if (spectrumHistory.length > SPECTRUM_HISTORY_LEN) spectrumHistory.shift();
-}
-
-function drawSpectrumHUD() {
-  if (!showSpectrumHUD) return;
-  const hudX = 10;
-  const hudY = 65;
-  const hudW = Math.min(W - 20, 300);
-  const hudH = 90;
-
-  ctx.save();
-  ctx.fillStyle = 'rgba(10, 14, 26, 0.85)';
-  ctx.fillRect(hudX, hudY, hudW, hudH);
-  ctx.strokeStyle = '#335';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(hudX, hudY, hudW, hudH);
-
-  ctx.font = '9px sans-serif';
-  ctx.fillStyle = '#64b5f6';
-  ctx.fillText('FREQ SPECTRUM', hudX + 4, hudY + 10);
-
-  const barCount = Math.min(64, Math.floor(hudW / 4));
-  const barW = (hudW - 8) / barCount;
-  const barMaxH = hudH - 20;
-
-  for (let i = 0; i < barCount; i++) {
-    const val = spectrumData[i * 2] || 0;
-    const barH = val * barMaxH;
-    let color;
-    if (i < barCount * 0.25) color = '#ff6b6b';
-    else if (i < barCount * 0.5) color = '#ffe66d';
-    else if (i < barCount * 0.75) color = '#4ecdc4';
-    else color = '#c77dff';
-    ctx.fillStyle = color;
-    ctx.globalAlpha = 0.4 + val * 0.6;
-    ctx.fillRect(hudX + 4 + i * barW, hudY + hudH - 4 - barH, barW - 1, barH);
-  }
-  ctx.globalAlpha = 1;
-
-  if (analyser && micDataArray) {
-    analyser.getByteTimeDomainData(micDataArray);
-    ctx.strokeStyle = '#64b5f6';
-    ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.6;
-    ctx.beginPath();
-    const step = Math.floor(micDataArray.length / hudW);
-    for (let i = 0; i < hudW; i++) {
-      const v = micDataArray[i * step] / 128.0;
-      const y = hudY + 15 + (v - 1) * (barMaxH * 0.3) + barMaxH * 0.5;
-      if (i === 0) ctx.moveTo(hudX + i, y); else ctx.lineTo(hudX + i, y);
-    }
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
-
-  // Waterfall display
-  const wfY = hudY + hudH + 2;
-  const wfH = 30;
-  ctx.fillStyle = 'rgba(10, 14, 26, 0.85)';
-  ctx.fillRect(hudX, wfY, hudW, wfH);
-  ctx.strokeStyle = '#335';
-  ctx.strokeRect(hudX, wfY, hudW, wfH);
-
-  const rowH = wfH / SPECTRUM_HISTORY_LEN;
-  for (let r = 0; r < spectrumHistory.length; r++) {
-    const row = spectrumHistory[r];
-    for (let i = 0; i < barCount; i++) {
-      const val = row[i * 2] || 0;
-      if (val < 0.05) continue;
-      const hue = 200 + i * 2;
-      ctx.fillStyle = `hsla(${hue}, 80%, 60%, ${val})`;
-      ctx.fillRect(hudX + 4 + i * barW, wfY + r * rowH, barW - 1, rowH);
-    }
-  }
-  ctx.restore();
-}
-
-function drawSoundDetailPanel(soundObj, panelX, panelY) {
-  if (!soundObj) return;
-  const pw = 180;
-  const ph = 130;
-  ctx.save();
-  ctx.fillStyle = 'rgba(10, 14, 26, 0.95)';
-  ctx.fillRect(panelX, panelY, pw, ph);
-  ctx.strokeStyle = soundObj.analysis.color;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(panelX, panelY, pw, ph);
-
-  ctx.font = 'bold 11px sans-serif';
-  ctx.fillStyle = soundObj.analysis.color;
-  const label = soundObj.isCombined ? soundObj.comboName : soundObj.analysis.type.toUpperCase();
-  ctx.fillText(label, panelX + 6, panelY + 14);
-
-  ctx.strokeStyle = soundObj.analysis.color;
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  const ww = pw - 12;
-  const wh = 40;
-  for (let j = 0; j < soundObj.waveform.length; j++) {
-    const x = panelX + 6 + (j / soundObj.waveform.length) * ww;
-    const y = panelY + 25 + wh / 2 + (soundObj.waveform[j] - 0.5) * wh;
-    if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  }
-  ctx.stroke();
-
-  const numBars = 16;
-  const nbw = ww / numBars;
-  const barMH = 30;
-  for (let i = 0; i < numBars; i++) {
-    const seg = Math.floor(soundObj.waveform.length / numBars);
-    let sum = 0;
-    for (let j = 0; j < seg; j++) sum += Math.abs(soundObj.waveform[i * seg + j] - 0.5);
-    const val = Math.min(1, sum / seg * 4);
-    const barH = val * barMH;
-    const hue = 200 + i * 10;
-    ctx.fillStyle = `hsla(${hue}, 80%, 60%, 0.7)`;
-    ctx.fillRect(panelX + 6 + i * nbw, panelY + 75 + barMH - barH, nbw - 1, barH);
-  }
-
-  ctx.font = '10px sans-serif';
-  ctx.fillStyle = '#bbb';
-  ctx.fillText('Vol:' + soundObj.analysis.volume + 'dB Freq:' + soundObj.analysis.frequency + 'Hz', panelX + 6, panelY + 118);
-  ctx.fillText('Power:' + soundObj.analysis.power + ' Type:' + soundObj.analysis.type, panelX + 6, panelY + 128);
-  ctx.restore();
-}
-
-// ============================================================
-// BOSS BATTLE SYSTEM
-// ============================================================
-
-function initBoss(bossEnemy) {
-  bossState.active = true;
-  bossState.phase = 0;
-  bossState.phaseTimer = 0;
-  bossState.attackTimer = 0;
-  bossState.attackPattern = 0;
-  bossState.shieldHP = 0;
-  bossState.shieldMax = 0;
-  bossState.vulnerableTimer = 0;
-  bossState.spawnTimer = 0;
-  bossState.dialog = '';
-  bossState.dialogTimer = 0;
-  bossState.shockwaves = [];
-  bossState.beams = [];
-
-  if (bossEnemy.bossType === 'frequency_lord') {
-    bossState.shieldHP = 80;
-    bossState.shieldMax = 80;
-    bossState.dialog = 'Only mid-range sounds can break my shield!';
-    bossState.dialogTimer = 3;
-  } else if (bossEnemy.bossType === 'bass_titan') {
-    bossState.shieldHP = 100;
-    bossState.shieldMax = 100;
-    bossState.dialog = 'Bass is my weakness... if you can make it loud enough!';
-    bossState.dialogTimer = 3;
-  } else if (bossEnemy.bossType === 'harmony_queen') {
-    bossState.shieldHP = 60;
-    bossState.shieldMax = 60;
-    bossState.dialog = 'Only combined sounds can harm me!';
-    bossState.dialogTimer = 3;
-  } else if (bossEnemy.bossType === 'noise_emperor') {
-    bossState.shieldHP = 120;
-    bossState.shieldMax = 120;
-    bossState.dialog = 'High frequency will shatter my armor!';
-    bossState.dialogTimer = 3;
-  } else if (bossEnemy.bossType === 'silence_king') {
-    bossState.shieldHP = 150;
-    bossState.shieldMax = 150;
-    bossState.dialog = 'I am silence itself! No single sound can defeat me!';
-    bossState.dialogTimer = 3;
-  } else {
-    bossState.shieldHP = 60;
-    bossState.shieldMax = 60;
-    bossState.dialog = 'Harmonic sounds are my bane!';
-    bossState.dialogTimer = 3;
-  }
-}
-
-function updateBoss() {
-  if (!bossState.active) return;
-  const boss = enemies.find(e => e.isBoss);
-  if (!boss) { bossState.active = false; return; }
-
-  bossState.phaseTimer += deltaTime;
-  bossState.attackTimer += deltaTime;
-  bossState.spawnTimer += deltaTime;
-  if (bossState.dialogTimer > 0) bossState.dialogTimer -= deltaTime;
-
-  const dx = player.x - boss.x;
-  const dist = Math.abs(dx);
-
-  if (boss.bossType === 'silence_king') {
-    if (bossState.attackTimer > 3) {
-      boss.x = player.x + (Math.random() > 0.5 ? 150 : -150);
-      bossState.attackTimer = 0;
-      spawnParticles(boss.x + boss.w/2, boss.y + boss.h/2, 15, '#ffffff');
-    }
-  } else {
-    if (dist > 60) boss.vx = dx > 0 ? 2 : -2;
-    else boss.vx = 0;
-    boss.x += boss.vx * deltaTime * 60;
-  }
-
-  // Boss attacks
-  if (bossState.attackTimer > 2.5) {
-    bossState.attackTimer = 0;
-    bossState.attackPattern = (bossState.attackPattern + 1) % 3;
-
-    if (bossState.attackPattern === 0) {
-      bossState.shockwaves.push({
-        x: boss.x + boss.w/2, y: boss.y + boss.h/2,
-        radius: 0, maxRadius: 200, speed: 150, damage: 8
-      });
-      playSfx('hit');
-    } else if (bossState.attackPattern === 1) {
-      bossState.beams.push({
-        x: boss.x + boss.w/2, y: boss.y + boss.h/2,
-        angle: Math.atan2(player.y - boss.y, player.x - boss.x),
-        length: 0, maxLength: 400, width: 8, timer: 1.0,
-        damage: 12, color: boss.color
-      });
-      playSfx('shoot');
-    } else if (bossState.attackPattern === 2) {
-      if (bossState.spawnTimer > 8 && enemies.length < 6) {
-        bossState.spawnTimer = 0;
-        const minionTypes = ['silence', 'echo', 'noise'];
-        createEnemy(boss.x + (Math.random() > 0.5 ? 80 : -80), boss.y,
-          minionTypes[Math.floor(Math.random() * minionTypes.length)]);
-        levelBanner = { text: 'Boss spawns minion!', timer: 1.5, color: '#ff6b6b' };
-      }
-    }
-  }
-
-  // Update shockwaves
-  for (let i = bossState.shockwaves.length - 1; i >= 0; i--) {
-    const sw = bossState.shockwaves[i];
-    sw.radius += sw.speed * deltaTime;
-    if (sw.radius >= sw.maxRadius) { bossState.shockwaves.splice(i, 1); continue; }
-    const playerDist = Math.hypot(player.x + player.w/2 - sw.x, player.y + player.h/2 - sw.y);
-    if (Math.abs(playerDist - sw.radius) < 15 && (!player.invincible || player.invincible <= 0)) {
-      player.hp -= sw.damage;
-      player.invincible = 0.8;
-      player.vy = -5;
-      player.vx = (player.x - sw.x) > 0 ? 4 : -4;
-      spawnParticles(player.x, player.y, 6, '#ff6b6b');
-      playSfx('hit');
-    }
-  }
-
-  // Update beams
-  for (let i = bossState.beams.length - 1; i >= 0; i--) {
-    const beam = bossState.beams[i];
-    beam.length = Math.min(beam.maxLength, beam.length + 600 * deltaTime);
-    beam.timer -= deltaTime;
-    if (beam.timer <= 0) { bossState.beams.splice(i, 1); continue; }
-    const beamEndX = beam.x + Math.cos(beam.angle) * beam.length;
-    const beamEndY = beam.y + Math.sin(beam.angle) * beam.length;
-    const px2 = player.x + player.w/2, py2 = player.y + player.h/2;
-    const lineDistSq = pointToSegDistSq(px2, py2, beam.x, beam.y, beamEndX, beamEndY);
-    if (lineDistSq < (beam.width + player.radius) * (beam.width + player.radius) &&
-        (!player.invincible || player.invincible <= 0)) {
-      player.hp -= beam.damage;
-      player.invincible = 1.0;
-      spawnParticles(player.x, player.y, 8, beam.color);
-      playSfx('hit');
-    }
-  }
-
-  // Phase transitions
-  if (boss.hp < boss.maxHp * 0.66 && bossState.phase === 0) {
-    bossState.phase = 1;
-    bossState.dialog = 'Phase 2! My power grows!';
-    bossState.dialogTimer = 2;
-    spawnParticles(boss.x, boss.y, 30, boss.color);
-    bossState.shieldHP = Math.floor(bossState.shieldMax * 0.5);
-  }
-  if (boss.hp < boss.maxHp * 0.33 && bossState.phase === 1) {
-    bossState.phase = 2;
-    bossState.dialog = 'FINAL PHASE! Feel my wrath!';
-    bossState.dialogTimer = 2;
-    spawnParticles(boss.x, boss.y, 40, '#ff0000');
-    bossState.shieldHP = Math.floor(bossState.shieldMax * 0.3);
-  }
-
-  // Shield + projectile interaction
-  for (let j = projectiles.length - 1; j >= 0; j--) {
-    const proj = projectiles[j];
-    if (!checkCollision(proj, boss)) continue;
-
-    let dmg = proj.damage;
-    if (bossState.shieldHP > 0) {
-      const isCorrectType = proj.type === boss.weakness;
-      const isCombined = proj.isCombined;
-      if (boss.bossType === 'harmony_queen' && isCombined) {
-        bossState.shieldHP -= 30;
-        dmg *= 2;
-        spawnParticles(boss.x, boss.y, 12, '#e040fb');
-        levelBanner = { text: 'Combined sound shatters the shield!', timer: 1.5, color: '#e040fb' };
-      } else if (boss.bossType === 'silence_king') {
-        bossState.shieldHP -= isCombined ? 25 : 8;
-        dmg = isCombined ? dmg * 2 : Math.floor(dmg * 0.5);
-      } else if (isCorrectType) {
-        bossState.shieldHP -= 20;
-        dmg *= 1.5;
-        spawnParticles(boss.x, boss.y, 8, '#ffd700');
-      } else {
-        bossState.shieldHP -= 5;
-        dmg = Math.floor(dmg * 0.2);
-      }
-      if (bossState.shieldHP <= 0) {
-        bossState.shieldHP = 0;
-        bossState.vulnerableTimer = 5;
-        levelBanner = { text: 'SHIELD BROKEN! Attack now!', timer: 2, color: '#ffd700' };
-        spawnParticles(boss.x, boss.y, 30, '#ffd700');
-        playSfx('success');
-      }
-    } else {
-      if (proj.type === boss.weakness) {
-        dmg *= 2;
-        spawnParticles(boss.x, boss.y, 10, '#ffd700');
-      }
-    }
-
-    boss.hp -= Math.round(dmg);
-    spawnParticles(boss.x, boss.y, 5, proj.color);
-    playSfx('hit');
-    projectiles.splice(j, 1);
-
-    if (boss.hp <= 0) {
-      spawnParticles(boss.x, boss.y, 50, boss.color);
-      resonance += 50;
-      bossState.active = false;
-      const idx = enemies.indexOf(boss);
-      if (idx >= 0) enemies.splice(idx, 1);
-      levelBanner = { text: 'BOSS DEFEATED!', timer: 3, color: '#4caf50' };
-      playSfx('success');
-    }
-    break;
-  }
-
-  // Regenerate shield after vulnerability
-  if (bossState.shieldHP <= 0 && bossState.vulnerableTimer > 0) {
-    bossState.vulnerableTimer -= deltaTime;
-    if (bossState.vulnerableTimer <= 0) {
-      bossState.shieldHP = Math.floor(bossState.shieldMax * (0.3 + bossState.phase * 0.1));
-      bossState.dialog = 'Shield restored!';
-      bossState.dialogTimer = 1.5;
-    }
-  }
-}
-
-function drawBossOverlay() {
-  if (!bossState.active) return;
-  const boss = enemies.find(e => e.isBoss);
-  if (!boss) return;
-  const bx = boss.x - camera.x + boss.w/2;
-  const by = boss.y - camera.y + boss.h/2;
-
-  ctx.save();
-
-  // Shield visual
-  if (bossState.shieldHP > 0) {
-    const shieldPct = bossState.shieldHP / bossState.shieldMax;
-    ctx.strokeStyle = `rgba(255, 215, 0, ${0.3 + shieldPct * 0.5})`;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(bx, by, boss.w/2 + 15, 0, Math.PI * 2 * shieldPct);
-    ctx.stroke();
-    for (let a = 0; a < Math.PI * 2 * shieldPct; a += Math.PI / 3) {
-      ctx.fillStyle = 'rgba(255, 215, 0, 0.3)';
-      ctx.beginPath();
-      ctx.arc(bx + Math.cos(a + gameTime) * (boss.w/2 + 15), by + Math.sin(a + gameTime) * (boss.w/2 + 15), 5, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  // Boss HP bar
-  const barW2 = Math.min(W - 40, 300);
-  const barH2 = 12;
-  const barX2 = centerX - barW2/2;
-  const barY2 = 38;
-  const hpPct2 = boss.hp / boss.maxHp;
-  ctx.fillStyle = '#222';
-  ctx.fillRect(barX2, barY2, barW2, barH2);
-  const hpGrad = ctx.createLinearGradient(barX2, barY2, barX2 + barW2 * hpPct2, barY2);
-  hpGrad.addColorStop(0, boss.color);
-  hpGrad.addColorStop(1, '#ff6b6b');
-  ctx.fillStyle = hpGrad;
-  ctx.fillRect(barX2, barY2, barW2 * hpPct2, barH2);
-  ctx.strokeStyle = boss.color;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(barX2, barY2, barW2, barH2);
-
-  ctx.font = 'bold 10px sans-serif';
-  ctx.fillStyle = boss.color;
-  ctx.textAlign = 'center';
-  const bossNames = { 'boss': 'Harmonic Guardian', 'frequency_lord': 'Frequency Lord', 'bass_titan': 'Bass Titan', 'harmony_queen': 'Harmony Queen', 'noise_emperor': 'Noise Emperor', 'silence_king': 'Silence King' };
-  ctx.fillText(bossNames[boss.bossType] || 'BOSS', centerX, barY2 - 3);
-
-  if (bossState.shieldMax > 0) {
-    const sBarY = barY2 + barH2 + 3;
-    const sPct = bossState.shieldHP / bossState.shieldMax;
-    ctx.fillStyle = '#222';
-    ctx.fillRect(barX2, sBarY, barW2, 5);
-    ctx.fillStyle = '#ffd700';
-    ctx.fillRect(barX2, sBarY, barW2 * sPct, 5);
-    ctx.font = '8px sans-serif';
-    ctx.fillStyle = '#ffd700';
-    ctx.fillText('SHIELD', centerX, sBarY + 13);
-  }
-  ctx.textAlign = 'left';
-
-  // Shockwaves
-  for (const sw of bossState.shockwaves) {
-    const swx = sw.x - camera.x, swy = sw.y - camera.y;
-    const alpha = 1 - sw.radius / sw.maxRadius;
-    ctx.strokeStyle = `rgba(255, 100, 100, ${alpha * 0.6})`;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(swx, swy, sw.radius, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-
-  // Beams
-  for (const beam of bossState.beams) {
-    const beamX = beam.x - camera.x, beamY = beam.y - camera.y;
-    const endX = beamX + Math.cos(beam.angle) * beam.length;
-    const endY = beamY + Math.sin(beam.angle) * beam.length;
-    ctx.strokeStyle = beam.color;
-    ctx.lineWidth = beam.width;
-    ctx.globalAlpha = beam.timer;
-    ctx.beginPath();
-    ctx.moveTo(beamX, beamY);
-    ctx.lineTo(endX, endY);
-    ctx.stroke();
-    ctx.lineWidth = beam.width * 2;
-    ctx.globalAlpha = beam.timer * 0.2;
-    ctx.beginPath();
-    ctx.moveTo(beamX, beamY);
-    ctx.lineTo(endX, endY);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
-
-  // Dialog
-  if (bossState.dialogTimer > 0) {
-    ctx.font = 'bold 12px sans-serif';
-    ctx.fillStyle = '#fff';
-    ctx.textAlign = 'center';
-    ctx.globalAlpha = Math.min(1, bossState.dialogTimer);
-    ctx.fillText(bossState.dialog, bx, by - boss.h/2 - 30);
-    ctx.globalAlpha = 1;
-    ctx.textAlign = 'left';
-  }
-
-  // Phase dots
-  for (let p = 0; p < 3; p++) {
-    ctx.fillStyle = p <= bossState.phase ? '#ff6b6b' : '#444';
-    ctx.beginPath();
-    ctx.arc(centerX - 15 + p * 15, barY2 + barH2 + 22, 4, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-function pointToSegDistSq(px, py, ax, ay, bx, by) {
-  const ddx = bx - ax, ddy = by - ay;
-  const lenSq = ddx * ddx + ddy * ddy;
-  if (lenSq === 0) return (px - ax) * (px - ax) + (py - ay) * (py - ay);
-  let t = ((px - ax) * ddx + (py - ay) * ddy) / lenSq;
-  t = Math.max(0, Math.min(1, t));
-  const projX = ax + t * ddx, projY = ay + t * ddy;
-  return (px - projX) * (px - projX) + (py - projY) * (py - projY);
-}
-
-// ============================================================
-// HAZARDS, MOVING PLATFORMS, PICKUPS, FREQ GATES
-// ============================================================
-
-function updateHazards() {
-  for (const h of hazards) {
-    if (h.type === 'laser') {
-      h.phase = (h.phase || 0) + deltaTime;
-      h.active = Math.sin(h.phase * h.speed) > 0;
-    }
-    if (h.type === 'vortex') {
-      h.phase = (h.phase || 0) + deltaTime;
-      const dvx = h.x + h.w/2 - player.x, dvy = h.y + h.h/2 - player.y;
-      const vdist = Math.hypot(dvx, dvy);
-      if (vdist < h.radius && vdist > 5) {
-        player.vx += (dvx / vdist) * 0.5;
-        player.vy += (dvy / vdist) * 0.3;
-      }
-    }
-    if (h.type === 'spikes' && checkCollision(player, h) && (!player.invincible || player.invincible <= 0)) {
-      player.hp -= 15;
-      player.invincible = 1.0;
-      player.vy = -8;
-      spawnParticles(player.x, player.y, 10, '#ff6b6b');
-      playSfx('hit');
-    }
-    if (h.type === 'laser' && h.active && checkCollision(player, h) && (!player.invincible || player.invincible <= 0)) {
-      player.hp -= 8;
-      player.invincible = 0.5;
-      spawnParticles(player.x, player.y, 5, '#ff0000');
-      playSfx('hit');
-    }
-  }
-}
-
-function drawHazards() {
-  for (const h of hazards) {
-    const hx = h.x - camera.x, hy = h.y - camera.y;
-    ctx.save();
-    if (h.type === 'spikes') {
-      ctx.fillStyle = '#ff4444';
-      const spikeCount = Math.floor(h.w / 12);
-      for (let s = 0; s < spikeCount; s++) {
-        const sx = hx + s * 12;
-        ctx.beginPath();
-        ctx.moveTo(sx, hy + h.h);
-        ctx.lineTo(sx + 6, hy);
-        ctx.lineTo(sx + 12, hy + h.h);
-        ctx.closePath();
-        ctx.fill();
-      }
-    } else if (h.type === 'laser') {
-      if (h.active) {
-        ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
-        ctx.fillRect(hx, hy, h.w, h.h);
-        ctx.strokeStyle = '#ff0000';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(hx, hy, h.w, h.h);
-        ctx.globalAlpha = 0.2;
-        ctx.fillRect(hx - 2, hy - 2, h.w + 4, h.h + 4);
-      } else {
-        ctx.fillStyle = 'rgba(255, 0, 0, 0.15)';
-        ctx.fillRect(hx, hy, h.w, h.h);
-      }
-    } else if (h.type === 'vortex') {
-      const vcx = hx + h.w/2, vcy = hy + h.h/2;
-      for (let ring = 0; ring < 4; ring++) {
-        const r = 10 + ring * 8 + Math.sin(gameTime * 3 + ring) * 3;
-        ctx.strokeStyle = `rgba(148, 0, 255, ${0.5 - ring * 0.1})`;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(vcx, vcy, r, gameTime * 2 + ring, gameTime * 2 + ring + Math.PI * 1.5);
-        ctx.stroke();
-      }
-    }
-    ctx.restore();
-  }
-}
-
-function updateMovingPlatforms() {
-  for (const mp of movingPlatforms) {
-    mp.t += mp.speed * deltaTime;
-    if (mp.t > 1) mp.t -= 2;
-    const t = Math.abs(mp.t);
-    mp.x = mp.startX + (mp.endX - mp.startX) * t;
-    mp.y = mp.startY + (mp.endY - mp.startY) * t;
-  }
-}
-
-function updateResonancePickups() {
-  for (const p of resonancePickups) {
-    if (p.collected) continue;
-    if (checkCollision(player, { x: p.x - 10, y: p.y - 10, w: 20, h: 20 })) {
-      p.collected = true;
-      resonance += p.value;
-      spawnParticles(p.x, p.y, 8, '#ffd700');
-      playSfx('success');
-    }
-  }
-}
-
-function drawResonancePickups() {
-  for (const p of resonancePickups) {
-    if (p.collected) continue;
-    const rpx = p.x - camera.x, rpy = p.y - camera.y;
-    const bob = Math.sin(gameTime * 3 + p.x) * 4;
-    ctx.save();
-    ctx.fillStyle = '#ffd700';
-    ctx.globalAlpha = 0.6 + Math.sin(gameTime * 4) * 0.3;
-    ctx.beginPath();
-    ctx.arc(rpx, rpy + bob, 8, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#ffab00';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-    ctx.font = 'bold 8px sans-serif';
-    ctx.fillStyle = '#fff';
-    ctx.textAlign = 'center';
-    ctx.fillText('+' + p.value, rpx, rpy + bob - 12);
-    ctx.textAlign = 'left';
-    ctx.restore();
-  }
-}
-
-function updateFreqGates() {
-  for (const g of freqGates) {
-    if (g.open) { g.openTimer = Math.min(1, (g.openTimer || 0) + deltaTime * 2); continue; }
-    for (let j = projectiles.length - 1; j >= 0; j--) {
-      const proj = projectiles[j];
-      if (checkCollision(proj, g)) {
-        if (proj.type === g.requiredType || (proj.isCombined && g.requiredType === 'combined')) {
-          g.open = true;
-          g.openTimer = 0;
-          spawnParticles(g.x + g.w/2, g.y + g.h/2, 20, '#4caf50');
-          levelBanner = { text: 'Gate Opened!', timer: 1.5, color: '#4caf50' };
-          playSfx('success');
-        }
-        projectiles.splice(j, 1);
-        break;
-      }
-    }
-  }
-}
-
-function drawFreqGates() {
-  for (const g of freqGates) {
-    const gx = g.x - camera.x, gy = g.y - camera.y;
-    ctx.save();
-    if (g.open) {
-      const alpha = 1 - (g.openTimer || 0);
-      if (alpha <= 0) { ctx.restore(); continue; }
-      ctx.globalAlpha = alpha;
-    }
-    ctx.fillStyle = g.color || '#ff6b6b';
-    ctx.globalAlpha = (ctx.globalAlpha || 1) * (0.5 + Math.sin(gameTime * 3) * 0.2);
-    ctx.fillRect(gx, gy, g.w, g.h);
-    ctx.strokeStyle = g.color || '#ff6b6b';
-    ctx.lineWidth = 2;
-    ctx.globalAlpha = 1;
-    if (!g.open) {
-      ctx.strokeRect(gx, gy, g.w, g.h);
-      ctx.font = '9px sans-serif';
-      ctx.fillStyle = '#fff';
-      ctx.textAlign = 'center';
-      ctx.fillText(g.requiredType.toUpperCase(), gx + g.w/2, gy + g.h/2 + 3);
-      ctx.textAlign = 'left';
-    }
-    ctx.restore();
-  }
-}
-
-function updateSoundEmitters() {
-  for (const em of soundEmitters) em.phase += deltaTime * 2;
-}
-
-function drawSoundEmitters() {
-  for (const em of soundEmitters) {
-    const ex = em.x - camera.x, ey = em.y - camera.y;
-    ctx.save();
-    for (let ring = 0; ring < 3; ring++) {
-      const r = 5 + (ring * 12 + em.phase * 20) % (em.radius || 40);
-      const alpha = 1 - r / (em.radius || 40);
-      ctx.strokeStyle = em.color || '#64b5f6';
-      ctx.lineWidth = 1;
-      ctx.globalAlpha = alpha * 0.4;
-      ctx.beginPath();
-      ctx.arc(ex, ey, r, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 0.8;
-    ctx.fillStyle = em.color || '#64b5f6';
-    ctx.beginPath();
-    ctx.arc(ex, ey, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-}
-
-// ============================================================
-// ENHANCED INTERACTIVE TUTORIAL
-// ============================================================
-
-const TUTORIAL_PHASES = {
-  welcome: {
-    steps: [
-      { text: 'Welcome to Sound Thief!', subtext: 'Your microphone is your ultimate weapon.', duration: 3 },
-      { text: 'You are a Sound Thief', subtext: 'Steal sounds from the world and use them to fight!', duration: 3 }
-    ]
-  },
-  movement: {
-    steps: [
-      { text: 'MOVEMENT', subtext: 'Use arrow keys or tap the buttons below', highlight: 'dpad', duration: 0, action: 'move' },
-      { text: 'Great!', subtext: 'Now try jumping!', highlight: 'jump', duration: 0, action: 'jump' }
-    ]
-  },
-  recording: {
-    steps: [
-      { text: 'SOUND CAPTURE', subtext: 'Tap the REC button to record a sound from your mic', highlight: 'rec', duration: 0, action: 'record' },
-      { text: 'Excellent!', subtext: 'Your sound is now a weapon! Each sound has unique properties.', duration: 2.5 }
-    ]
-  },
-  combat: {
-    steps: [
-      { text: 'COMBAT', subtext: 'Tap a sound slot or the game area to fire!', highlight: 'inventory', duration: 0, action: 'shoot' },
-      { text: 'Direct hit!', subtext: 'Different sounds do different damage.', duration: 2 }
-    ]
-  },
-  weakness: {
-    steps: [
-      { text: 'WEAKNESSES', subtext: 'Enemies are weak to specific sound types!', duration: 3 },
-      { text: 'Sound Types:', subtext: 'Loud (bass), Mid, High (treble), Harmonic, Low', duration: 3.5 },
-      { text: 'Pro tip:', subtext: 'Hit an enemy weakness for 2x damage!', duration: 3 }
-    ]
-  },
-  combine: {
-    steps: [
-      { text: 'SOUND MIXING', subtext: 'Combine two sounds to create powerful hybrids!', duration: 3 },
-      { text: 'Tap MIX button', subtext: 'Select two sounds to merge them', highlight: 'mix', duration: 3 },
-      { text: 'Combined sounds', subtext: 'Have unique types and bonus power!', duration: 2.5 }
-    ]
-  },
-  spectrum: {
-    steps: [
-      { text: 'SPECTRUM DISPLAY', subtext: 'The frequency spectrum shows real-time audio analysis', duration: 3 },
-      { text: 'Watch the bars', subtext: 'Red=bass, Yellow=mid, Teal=high, Purple=treble', duration: 3 }
-    ]
-  },
-  boss: {
-    steps: [
-      { text: 'BOSS BATTLES', subtext: 'Bosses have shields! Use the right sound type to break them.', duration: 3.5 },
-      { text: 'Phase Shifts', subtext: 'Bosses become more dangerous as they lose HP!', duration: 3 },
-      { text: 'Some bosses', subtext: 'Can only be hurt by COMBINED sounds!', duration: 3 }
-    ]
-  }
-};
-
-function advanceTutorialPhase() {
-  const phaseOrder = ['welcome', 'movement', 'recording', 'combat', 'weakness', 'combine', 'spectrum', 'boss', 'complete'];
-  const currentIdx = phaseOrder.indexOf(tutorialPhase);
-  if (currentIdx < phaseOrder.length - 1) {
-    tutorialPhase = phaseOrder[currentIdx + 1];
-    tutorialSubStep = 0;
-    tutorialActionDone = false;
-    tutorialCharIndex = 0;
-  }
-  if (tutorialPhase === 'complete') {
-    showTutorial = false;
-    tutorialStep = 0;
-    levelBanner = { text: 'Tutorial Complete! Good luck, Sound Thief!', timer: 3, color: '#4caf50' };
-  }
-}
-
-function updateEnhancedTutorial() {
-  if (!showTutorial || tutorialPhase === 'none' || tutorialPhase === 'complete') return;
-  const phaseData = TUTORIAL_PHASES[tutorialPhase];
-  if (!phaseData) { advanceTutorialPhase(); return; }
-  const stepData = phaseData.steps[tutorialSubStep];
-  if (!stepData) { advanceTutorialPhase(); return; }
-
-  const fullText = stepData.text + (stepData.subtext ? '|' + stepData.subtext : '');
-  if (tutorialCharIndex < fullText.length) {
-    tutorialTypeTimer += deltaTime;
-    if (tutorialTypeTimer > 0.03) { tutorialCharIndex++; tutorialTypeTimer = 0; }
-  }
-
-  if (stepData.action) {
-    if (stepData.action === 'move' && (Math.abs(player.vx) > 0.5)) tutorialActionDone = true;
-    if (stepData.action === 'jump' && !player.onGround) tutorialActionDone = true;
-    if (stepData.action === 'record' && soundInventory.length > 2) tutorialActionDone = true;
-    if (stepData.action === 'shoot' && projectiles.length > 0) tutorialActionDone = true;
-    if (tutorialActionDone) {
-      tutorialSubStep++;
-      tutorialActionDone = false;
-      tutorialCharIndex = 0;
-      if (tutorialSubStep >= phaseData.steps.length) advanceTutorialPhase();
-    }
-  } else if (stepData.duration > 0) {
-    tutorialTimer += deltaTime;
-    if (tutorialTimer >= stepData.duration) {
-      tutorialTimer = 0;
-      tutorialSubStep++;
-      tutorialCharIndex = 0;
-      if (tutorialSubStep >= phaseData.steps.length) advanceTutorialPhase();
-    }
-  }
-}
-
-function drawEnhancedTutorial() {
-  if (!showTutorial || tutorialPhase === 'none' || tutorialPhase === 'complete') return;
-  const phaseData = TUTORIAL_PHASES[tutorialPhase];
-  if (!phaseData) return;
-  const stepData = phaseData.steps[tutorialSubStep];
-  if (!stepData) return;
-
-  ctx.save();
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-  ctx.fillRect(0, 0, W, H);
-
-  if (stepData.highlight) {
-    ctx.save();
-    let hlRect = null;
-    if (stepData.highlight === 'dpad') hlRect = { x: 5, y: H - 210, w: 130, h: 70 };
-    else if (stepData.highlight === 'jump') hlRect = { x: W - 80, y: H - 210, w: 70, h: 70 };
-    else if (stepData.highlight === 'rec') hlRect = { x: W - 80, y: H - 120, w: 70, h: 50 };
-    else if (stepData.highlight === 'inventory') hlRect = { x: 5, y: H - 85, w: W - 10, h: 75 };
-    else if (stepData.highlight === 'mix') hlRect = { x: W - 145, y: H - 120, w: 65, h: 50 };
-    if (hlRect) {
-      ctx.strokeStyle = '#ffd700';
-      ctx.lineWidth = 3;
-      ctx.setLineDash([6, 4]);
-      ctx.strokeRect(hlRect.x, hlRect.y, hlRect.w, hlRect.h);
-      ctx.setLineDash([]);
-      ctx.globalAlpha = 0.15 + Math.sin(gameTime * 4) * 0.1;
-      ctx.fillStyle = '#ffd700';
-      ctx.fillRect(hlRect.x, hlRect.y, hlRect.w, hlRect.h);
-      ctx.globalAlpha = 1;
-      const arrowX = hlRect.x + hlRect.w / 2, arrowY = hlRect.y - 20;
-      ctx.fillStyle = '#ffd700';
-      ctx.beginPath();
-      ctx.moveTo(arrowX, arrowY + 15);
-      ctx.lineTo(arrowX - 8, arrowY);
-      ctx.lineTo(arrowX + 8, arrowY);
-      ctx.closePath();
-      ctx.fill();
-    }
-    ctx.restore();
-  }
-
-  const cardW = Math.min(W - 30, 340);
-  const cardH = 90;
-  const cardX = centerX - cardW / 2;
-  const cardY = 70;
-  ctx.fillStyle = 'rgba(26, 32, 64, 0.95)';
-  ctx.fillRect(cardX, cardY, cardW, cardH);
-  ctx.strokeStyle = '#64b5f6';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(cardX, cardY, cardW, cardH);
-
-  const phaseNames = Object.keys(TUTORIAL_PHASES);
-  const currentPhaseIdx = phaseNames.indexOf(tutorialPhase);
-  const dotStartX = centerX - (phaseNames.length * 12) / 2;
-  for (let i = 0; i < phaseNames.length; i++) {
-    ctx.fillStyle = i <= currentPhaseIdx ? '#64b5f6' : '#444';
-    ctx.beginPath();
-    ctx.arc(dotStartX + i * 12, cardY + 10, 3, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  const fullTitle = stepData.text;
-  const displayTitle = fullTitle.substring(0, Math.min(tutorialCharIndex, fullTitle.length));
-  ctx.font = 'bold 16px sans-serif';
-  ctx.fillStyle = '#fff';
-  ctx.textAlign = 'center';
-  ctx.fillText(displayTitle, centerX, cardY + 38);
-
-  if (stepData.subtext && tutorialCharIndex > fullTitle.length) {
-    const subIndex = tutorialCharIndex - fullTitle.length - 1;
-    const displaySub = stepData.subtext.substring(0, Math.min(subIndex, stepData.subtext.length));
-    ctx.font = '12px sans-serif';
-    ctx.fillStyle = '#aaa';
-    ctx.fillText(displaySub, centerX, cardY + 58);
-  }
-
-  if (stepData.action) {
-    ctx.font = '10px sans-serif';
-    ctx.fillStyle = '#ffd700';
-    const prompts = { move: 'Move left or right to continue', jump: 'Press jump to continue', record: 'Record a sound to continue', shoot: 'Fire a sound to continue' };
-    ctx.fillText(prompts[stepData.action] || 'Perform the action', centerX, cardY + 78);
-  } else {
-    ctx.font = '10px sans-serif';
-    ctx.fillStyle = '#888';
-    ctx.fillText('Tap to skip', centerX, cardY + 78);
-  }
-  ctx.textAlign = 'left';
-  ctx.restore();
-}
-
-// ============================================================
-// LEVEL BANNER
-// ============================================================
-
-function updateLevelBanner() {
-  if (levelBanner.timer > 0) levelBanner.timer -= deltaTime;
-}
-
-function drawLevelBanner() {
-  if (levelBanner.timer <= 0) return;
-  ctx.save();
-  ctx.globalAlpha = Math.min(1, levelBanner.timer);
-  ctx.fillStyle = 'rgba(10, 14, 26, 0.85)';
-  ctx.fillRect(0, 62, W, 40);
-  ctx.font = 'bold 14px sans-serif';
-  ctx.fillStyle = levelBanner.color || '#fff';
-  ctx.textAlign = 'center';
-  ctx.fillText(levelBanner.text, centerX, 87);
-  ctx.textAlign = 'left';
-  ctx.globalAlpha = 1;
-  ctx.restore();
-}
-
-// ============================================================
 // BACKGROUND WAVEFORMS
 // ============================================================
 
@@ -1733,13 +486,12 @@ function spawnParticles(x, y, count, color) {
 }
 
 function updateParticles() {
-  const dt60 = deltaTime * 60;
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
-    p.x += p.vx * dt60;
-    p.y += p.vy * dt60;
-    p.vy += 0.2 * dt60;
-    p.life -= p.decay * dt60;
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.2;
+    p.life -= p.decay;
     if (p.life <= 0) particles.splice(i, 1);
   }
 }
@@ -1764,25 +516,24 @@ function updatePlayer() {
   if (keys['ArrowLeft'] || keys['a'] || touchControls.left) moveX = -1;
   if (keys['ArrowRight'] || keys['d'] || touchControls.right) moveX = 1;
   
-  const dt60 = deltaTime * 60;
   player.vx = moveX * player.moveSpeed;
   if (moveX !== 0) player.facing = moveX;
-
+  
   // Jump
   if ((keys[' '] || keys['ArrowUp'] || keys['w'] || touchControls.jump) && player.onGround) {
     player.vy = player.jumpPower;
     player.onGround = false;
     playSfx('jump');
   }
-
+  
   // Gravity
   if (!player.onGround) {
-    player.vy += player.gravity * dt60;
+    player.vy += player.gravity;
   }
-
+  
   // Update position
-  player.x += player.vx * dt60;
-  player.y += player.vy * dt60;
+  player.x += player.vx;
+  player.y += player.vy;
   
   // Collision with platforms
   player.onGround = false;
@@ -1818,9 +569,8 @@ function updatePlayer() {
   // Camera follow
   camera.targetX = player.x - W / 2 + player.w / 2;
   camera.targetY = player.y - H / 2 + player.h / 2;
-  const camLerp = 1 - Math.pow(0.9, dt60);
-  camera.x += (camera.targetX - camera.x) * camLerp;
-  camera.y += (camera.targetY - camera.y) * camLerp;
+  camera.x += (camera.targetX - camera.x) * 0.1;
+  camera.y += (camera.targetY - camera.y) * 0.1;
   
   // Invincibility frames
   if (player.invincible > 0) player.invincible -= deltaTime;
@@ -1961,8 +711,8 @@ function updateEnemies() {
       e.vx = 0;
     }
     
-    e.x += e.vx * deltaTime * 60;
-
+    e.x += e.vx;
+    
     // Collision with player (with invincibility frames)
     if (checkCollision(player, e) && (!player.invincible || player.invincible <= 0)) {
       player.hp -= 10;
@@ -2091,8 +841,8 @@ function drawEnemies() {
 function updateProjectiles() {
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const proj = projectiles[i];
-    proj.x += proj.vx * deltaTime * 60;
-    proj.y += proj.vy * deltaTime * 60;
+    proj.x += proj.vx;
+    proj.y += proj.vy;
     proj.lifetime -= deltaTime;
     
     if (proj.lifetime <= 0) {
@@ -2493,26 +1243,84 @@ function drawRecordingScreen() {
   ctx.textAlign = 'center';
   ctx.fillText('CAPTURE SOUND', centerX, 80);
   
-  // Concentric circles animation
+  // Get current mic volume for reactive visuals
+  let currentVolume = 0;
+  if (recordingState.active && analyser && micDataArray) {
+    analyser.getByteTimeDomainData(micDataArray);
+    let sum = 0;
+    for (let i = 0; i < micDataArray.length; i++) {
+      const v = (micDataArray[i] - 128) / 128;
+      sum += v * v;
+    }
+    currentVolume = Math.sqrt(sum / micDataArray.length);
+  }
+
+  // Concentric circles animation — react to mic input
   const numCircles = 5;
   const baseRadius = 60;
-  const pulse = Math.sin(gameTime * 3) * 10;
-  
+  const volBoost = currentVolume * 80;
+  const pulse = Math.sin(gameTime * 3) * 10 + volBoost;
+
   for (let i = 0; i < numCircles; i++) {
     const radius = baseRadius + i * 30 + pulse;
     const alpha = 1 - (i / numCircles);
-    
-    ctx.strokeStyle = `rgba(255, 107, 107, ${alpha * 0.6})`;
-    ctx.lineWidth = 3;
+    const r = Math.min(255, 107 + currentVolume * 300);
+    const g = Math.max(0, 107 - currentVolume * 200);
+
+    ctx.strokeStyle = `rgba(${Math.round(r)}, ${Math.round(g)}, 107, ${alpha * 0.6})`;
+    ctx.lineWidth = 3 + currentVolume * 4;
     ctx.beginPath();
     ctx.arc(centerX, centerY - 40, radius, 0, Math.PI * 2);
     ctx.stroke();
   }
-  
-  // Microphone icon
-  ctx.fillStyle = '#ff6b6b';
-  ctx.font = `40px sans-serif`;
+
+  // Microphone icon — pulse size with volume
+  const micScale = 1 + currentVolume * 0.5;
+  ctx.fillStyle = recordingState.active ? (currentVolume > 0.1 ? '#ff3333' : '#ff6b6b') : '#ff6b6b';
+  ctx.font = `${Math.round(40 * micScale)}px sans-serif`;
   ctx.fillText('🎤', centerX, centerY - 30);
+
+  // Volume meter bar
+  if (recordingState.active) {
+    const meterX = 30;
+    const meterY = centerY - 100;
+    const meterW = 20;
+    const meterH = 120;
+    // Background
+    ctx.fillStyle = '#222';
+    ctx.fillRect(meterX, meterY, meterW, meterH);
+    // Level
+    const level = Math.min(1, currentVolume * 3);
+    const levelH = meterH * level;
+    const meterGrad = ctx.createLinearGradient(meterX, meterY + meterH, meterX, meterY);
+    meterGrad.addColorStop(0, '#4caf50');
+    meterGrad.addColorStop(0.6, '#ffd700');
+    meterGrad.addColorStop(1, '#ff6b6b');
+    ctx.fillStyle = meterGrad;
+    ctx.fillRect(meterX, meterY + meterH - levelH, meterW, levelH);
+    // Border
+    ctx.strokeStyle = '#64b5f6';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(meterX, meterY, meterW, meterH);
+    // Label
+    ctx.fillStyle = '#888';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('VOL', meterX + meterW / 2, meterY + meterH + 14);
+    ctx.textAlign = 'center';
+
+    // Also show a right-side meter mirrored
+    const rmX = W - 50;
+    ctx.fillStyle = '#222';
+    ctx.fillRect(rmX, meterY, meterW, meterH);
+    ctx.fillStyle = meterGrad;
+    ctx.fillRect(rmX, meterY + meterH - levelH, meterW, levelH);
+    ctx.strokeStyle = '#64b5f6';
+    ctx.strokeRect(rmX, meterY, meterW, meterH);
+    ctx.fillStyle = '#888';
+    ctx.font = '10px sans-serif';
+    ctx.fillText('VOL', rmX + meterW / 2, meterY + meterH + 14);
+  }
   
   // Live waveform if recording
   if (recordingState.active && analyser && micDataArray) {

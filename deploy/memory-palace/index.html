@@ -9,1394 +9,605 @@
 body{background:#0a0a1e;overflow:hidden;font-family:-apple-system,system-ui,sans-serif;color:#fff}
 canvas{display:block;width:100vw;height:100vh}
 #hud{position:absolute;top:0;left:0;width:100%;padding:8px 12px;display:flex;justify-content:space-between;align-items:center;z-index:10;pointer-events:none}
-.hud-box{background:rgba(0,0,0,0.5);border-radius:10px;padding:5px 10px;backdrop-filter:blur(8px);pointer-events:auto}
+.hud-box{background:rgba(0,0,0,0.5);border-radius:10px;padding:5px 12px;backdrop-filter:blur(8px);pointer-events:auto}
 .hud-box .lbl{font-size:9px;color:#888;text-transform:uppercase;letter-spacing:0.5px}
-.hud-box .val{font-size:16px;font-weight:900}
-#power-ups{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);display:flex;gap:6px;z-index:10;pointer-events:auto;flex-wrap:wrap;justify-content:center;max-width:95vw}
-.power-btn{width:48px;height:48px;border-radius:12px;border:2px solid rgba(255,255,255,0.2);background:rgba(0,0,0,0.5);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer;position:relative;transition:transform 0.1s}
+.hud-box .val{font-size:18px;font-weight:900}
+#power-ups{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:10;pointer-events:auto}
+.power-btn{width:50px;height:50px;border-radius:12px;border:2px solid rgba(255,255,255,0.2);background:rgba(0,0,0,0.5);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer;position:relative}
 .power-btn:active{transform:scale(0.9)}
 .power-btn.disabled{opacity:0.3;pointer-events:none}
 .power-btn .badge{position:absolute;top:-4px;right:-4px;background:#e94560;color:#fff;font-size:10px;font-weight:700;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center}
 #combo-display{position:absolute;top:50px;left:50%;transform:translateX(-50%);z-index:10;pointer-events:none;font-size:24px;font-weight:900;opacity:0;transition:all 0.3s;text-shadow:0 0 20px currentColor}
-.overlay{position:absolute;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:20;overflow-y:auto;padding:20px;background:rgba(10,10,30,0.95)}
-.overlay h1{font-size:32px;margin-bottom:4px}
-.overlay h2{font-size:26px;margin-bottom:6px}
-.overlay p{color:#888;margin-bottom:8px;font-size:13px;text-align:center;padding:0 16px}
-.overlay button{border:none;color:#fff;padding:12px 28px;border-radius:50px;font-size:15px;font-weight:700;cursor:pointer;min-width:180px;text-align:center;margin:4px}
-.overlay button:active{transform:scale(0.95)}
+#menu{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(10,10,30,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:20;overflow-y:auto;padding:20px}
+#menu h1{font-size:36px;margin-bottom:4px}
+#menu p{color:#888;margin-bottom:16px;font-size:13px;text-align:center;padding:0 20px}
+#menu .diff-btns{display:flex;flex-direction:column;gap:8px;width:100%;max-width:260px}
+#menu button{border:none;color:#fff;padding:12px 30px;border-radius:50px;font-size:15px;font-weight:700;cursor:pointer;min-width:200px;text-align:center}
+#menu button:active{transform:scale(0.95)}
 .btn-easy{background:linear-gradient(135deg,#6bcb77,#1dd1a1)}
 .btn-med{background:linear-gradient(135deg,#ffd93d,#e17055)}
 .btn-hard{background:linear-gradient(135deg,#e94560,#a55eea)}
-.btn-primary{background:linear-gradient(135deg,#4d96ff,#a55eea)}
-.btn-relax{background:linear-gradient(135deg,#00cec9,#6bcb77)}
-.btn-timed{background:linear-gradient(135deg,#fd79a8,#e94560)}
-.btn-daily{background:linear-gradient(135deg,#ffd93d,#f0932b)}
-.btn-stats{background:linear-gradient(135deg,#636e72,#2d3436)}
-.btn-back{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2)!important;min-width:120px}
 .hidden{display:none!important}
-#theme-select{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;justify-content:center;max-width:380px}
-.theme-btn{width:54px;height:54px;border-radius:12px;border:2px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;font-size:9px;gap:1px}
+#theme-select{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;justify-content:center}
+.theme-btn{width:60px;height:60px;border-radius:12px;border:2px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;font-size:10px;gap:2px}
 .theme-btn.selected{border-color:#ffd93d;background:rgba(255,217,61,0.15)}
-.theme-btn span{font-size:20px}
+.theme-btn span{font-size:22px}
 #result{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:15;text-align:center;pointer-events:none;opacity:0;transition:opacity .3s}
 #result h2{font-size:32px;margin-bottom:6px}
 #result p{color:#888;font-size:13px}
-.popup{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:15;text-align:center;background:rgba(10,10,30,0.95);border-radius:20px;padding:24px;border:1px solid rgba(255,255,255,0.1);backdrop-filter:blur(10px);pointer-events:auto;max-width:90vw}
-.popup h3{font-size:22px;margin-bottom:6px}
-.popup .lc-stars{font-size:32px;margin:6px 0}
-.popup p{color:#888;font-size:13px;margin:3px 0}
-.popup button{background:linear-gradient(135deg,#6bcb77,#1dd1a1);border:none;color:#fff;padding:10px 24px;border-radius:50px;font-size:14px;font-weight:700;margin-top:10px;cursor:pointer}
-.mode-btns{display:flex;flex-direction:column;gap:8px;width:100%;max-width:260px;margin-bottom:12px}
-.diff-btns{display:flex;flex-direction:column;gap:8px;width:100%;max-width:260px}
-.stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;max-width:340px;margin:12px 0}
-.stat-card{background:rgba(255,255,255,0.05);border-radius:12px;padding:10px;text-align:center}
-.stat-card .stat-val{font-size:22px;font-weight:900;background:linear-gradient(135deg,#ffd93d,#e94560);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.stat-card .stat-lbl{font-size:10px;color:#888;text-transform:uppercase;margin-top:2px}
-.achievement-list{width:100%;max-width:340px;max-height:50vh;overflow-y:auto;padding:4px}
-.ach-item{display:flex;align-items:center;gap:10px;padding:8px;background:rgba(255,255,255,0.03);border-radius:10px;margin-bottom:6px;border:1px solid rgba(255,255,255,0.05)}
-.ach-item.unlocked{border-color:rgba(255,217,61,0.3);background:rgba(255,217,61,0.05)}
-.ach-icon{font-size:24px;width:36px;text-align:center;filter:grayscale(1) opacity(0.3)}
-.ach-item.unlocked .ach-icon{filter:none}
-.ach-info{text-align:left;flex:1}
-.ach-info .ach-name{font-size:13px;font-weight:700}
-.ach-info .ach-desc{font-size:10px;color:#888}
-.ach-toast{position:fixed;top:60px;left:50%;transform:translateX(-50%) translateY(-100px);z-index:100;background:rgba(10,10,30,0.95);border:1px solid rgba(255,217,61,0.4);border-radius:14px;padding:10px 18px;display:flex;align-items:center;gap:10px;backdrop-filter:blur(10px);transition:transform 0.4s cubic-bezier(0.34,1.56,0.64,1);pointer-events:none}
-.ach-toast.show{transform:translateX(-50%) translateY(0)}
-.ach-toast .at-icon{font-size:24px}
-.ach-toast .at-text{font-size:12px;font-weight:700}
-#timer-bar{position:absolute;top:44px;left:0;width:100%;height:4px;z-index:11;pointer-events:none}
-#timer-bar-fill{height:100%;background:linear-gradient(90deg,#e94560,#ffd93d);transition:width 0.3s;border-radius:0 2px 2px 0}
-.score-text{font-size:48px;font-weight:900;background:linear-gradient(135deg,#ffd93d,#e94560);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.daily-info{background:rgba(255,217,61,0.1);border:1px solid rgba(255,217,61,0.2);border-radius:12px;padding:10px 16px;margin:8px 0;text-align:center}
-.daily-info .di-date{font-size:11px;color:#ffd93d;font-weight:700}
-.daily-info .di-best{font-size:13px;color:#888;margin-top:2px}
-.tabs{display:flex;gap:4px;margin-bottom:12px}
-.tab-btn{padding:6px 14px;border-radius:20px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:#888;font-size:12px;font-weight:700;cursor:pointer}
-.tab-btn.active{background:rgba(255,255,255,0.15);color:#fff;border-color:rgba(255,255,255,0.3)}
+#game-over{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(10,10,30,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:20;text-align:center;padding:20px}
+#game-over h2{font-size:28px;margin-bottom:6px}
+#game-over .score{font-size:48px;font-weight:900;background:linear-gradient(135deg,#ffd93d,#e94560);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+#game-over .stars{font-size:36px;margin:8px 0}
+#game-over p{color:#888;margin:3px}
+#game-over button{background:linear-gradient(135deg,#4d96ff,#a55eea);border:none;color:#fff;padding:12px 30px;border-radius:50px;font-size:15px;font-weight:700;margin-top:12px;cursor:pointer}
+#level-complete{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:15;text-align:center;background:rgba(10,10,30,0.95);border-radius:20px;padding:24px;border:1px solid rgba(255,255,255,0.1);backdrop-filter:blur(10px);pointer-events:auto}
+#level-complete h3{font-size:22px;margin-bottom:6px}
+#level-complete .lc-stars{font-size:32px;margin:6px 0}
+#level-complete p{color:#888;font-size:13px;margin:3px 0}
+#level-complete button{background:linear-gradient(135deg,#6bcb77,#1dd1a1);border:none;color:#fff;padding:10px 24px;border-radius:50px;font-size:14px;font-weight:700;margin-top:10px;cursor:pointer}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="hud" class="hidden">
-  <div class="hud-box"><div class="lbl">Matches</div><div class="val" id="hud-matches">0/0</div></div>
-  <div class="hud-box"><div class="lbl" id="hud-time-lbl">Time</div><div class="val" id="hud-timer">0:00</div></div>
-  <div class="hud-box"><div class="lbl">Moves</div><div class="val" id="hud-moves">0</div></div>
-  <div class="hud-box"><div class="lbl">Level</div><div class="val" id="hud-level">1</div></div>
+<div id="hud">
+  <div class="hud-box"><div class="lbl">Matches</div><div class="val" id="matches">0/0</div></div>
+  <div class="hud-box"><div class="lbl">Time</div><div class="val" id="timer">0:00</div></div>
+  <div class="hud-box"><div class="lbl">Moves</div><div class="val" id="moves">0</div></div>
+  <div class="hud-box"><div class="lbl">Level</div><div class="val" id="level">1</div></div>
+  <div class="hud-box"><div class="lbl">Speed</div><div class="val" id="speed">1x</div></div>
 </div>
-<div id="timer-bar" class="hidden"><div id="timer-bar-fill" style="width:100%"></div></div>
 <div id="combo-display"></div>
-<div id="power-ups" class="hidden"></div>
+<div id="power-ups">
+  <div class="power-btn" id="pw-peek" onclick="usePowerUp('peek')"><span>&#128064;</span><div class="badge" id="pw-peek-count">2</div></div>
+  <div class="power-btn" id="pw-freeze" onclick="usePowerUp('freeze')"><span>&#10052;</span><div class="badge" id="pw-freeze-count">1</div></div>
+  <div class="power-btn" id="pw-hint" onclick="usePowerUp('hint')"><span>&#128161;</span><div class="badge" id="pw-hint-count">3</div></div>
+</div>
 <div id="result"><h2 id="res-text">Nice!</h2><p id="res-sub"></p></div>
-<div id="level-complete" class="popup hidden"></div>
-<div id="ach-toast" class="ach-toast"><div class="at-icon"></div><div class="at-text"></div></div>
-
-<div id="menu" class="overlay">
+<div id="level-complete" class="hidden"></div>
+<div id="menu">
   <h1>Memory Palace</h1>
   <p>Match cards in 3D space.<br>The view rotates - remember positions!</p>
-  <div id="theme-select"></div>
-  <div class="mode-btns">
-    <button class="btn-primary" onclick="showDifficultySelect('classic')">Classic Mode</button>
-    <button class="btn-relax" onclick="showDifficultySelect('relaxed')">Relaxed Mode</button>
-    <button class="btn-timed" onclick="showDifficultySelect('timed')">Timed Challenge</button>
-    <button class="btn-daily" onclick="startDailyChallenge()">Daily Challenge</button>
-    <button class="btn-stats" onclick="showStats()">Stats & Achievements</button>
+  <div id="theme-select">
+    <div class="theme-btn selected" data-theme="space" onclick="selectTheme('space')"><span>&#127756;</span>Space</div>
+    <div class="theme-btn" data-theme="egypt" onclick="selectTheme('egypt')"><span>&#127963;</span>Egypt</div>
+    <div class="theme-btn" data-theme="ocean" onclick="selectTheme('ocean')"><span>&#127754;</span>Ocean</div>
+    <div class="theme-btn" data-theme="forest" onclick="selectTheme('forest')"><span>&#127794;</span>Forest</div>
   </div>
-</div>
-
-<div id="diff-select" class="overlay hidden">
-  <h2 id="diff-title">Select Difficulty</h2>
-  <p id="diff-desc">Choose your challenge level</p>
   <div class="diff-btns">
-    <button class="btn-easy" onclick="startGame('easy')">Easy - 5 Levels</button>
-    <button class="btn-med" onclick="startGame('medium')">Medium - 8 Levels</button>
-    <button class="btn-hard" onclick="startGame('hard')">Hard - 12 Levels</button>
+    <button class="btn-easy" onclick="startGame('easy')">Easy (3x2) - 5 levels</button>
+    <button class="btn-med" onclick="startGame('medium')">Medium (4x3) - 8 levels</button>
+    <button class="btn-hard" onclick="startGame('hard')">Hard (4x4) - 12 levels</button>
   </div>
-  <button class="btn-back" onclick="showMenu()" style="margin-top:12px">Back</button>
 </div>
-
-<div id="stats-screen" class="overlay hidden"></div>
-<div id="game-over" class="overlay hidden"></div>
+<div id="game-over" class="hidden"></div>
 
 <script>
-const C = document.getElementById('c'), ctx = C.getContext('2d');
-let W, H, dpr;
+const C=document.getElementById('c'),ctx=C.getContext('2d');
+let W,H,dpr;
 
+// AudioContext pattern - lazy init
 let audioCtx;
-function ensureAudio() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+function ensureAudio(){
+  try{
+    if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==='suspended')audioCtx.resume().catch(()=>{});
+  }catch(e){}
   return audioCtx;
 }
-function snd(f, d, t = 'sine', v = 0.08) {
-  try {
-    const a = ensureAudio();
-    const o = a.createOscillator(), g = a.createGain();
-    o.type = t; o.frequency.value = f;
-    g.gain.setValueAtTime(v, a.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + d);
-    o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime + d);
-  } catch (e) {}
-}
-function playMatch(combo) {
-  const base = 500 + Math.min(combo, 8) * 60;
-  snd(base, 0.2, 'sine', 0.07);
-  snd(base * 1.5, 0.15, 'triangle', 0.05);
-  if (combo > 1) snd(base * 2, 0.1, 'sine', 0.03);
-}
-function playMismatch() {
-  snd(200, 0.2, 'square', 0.04);
-  snd(150, 0.15, 'sawtooth', 0.03);
-}
-function playFlip() {
-  snd(400 + Math.random() * 100, 0.08, 'sine', 0.04);
-}
-function playLevelComplete() {
-  const notes = [523, 659, 784, 1047];
-  notes.forEach((n, i) => {
-    setTimeout(() => snd(n, 0.3, 'sine', 0.06), i * 120);
-  });
-}
-function playAchievement() {
-  [800, 1000, 1200, 1600].forEach((n, i) => {
-    setTimeout(() => snd(n, 0.2, 'triangle', 0.05), i * 80);
-  });
-}
-function playPowerUp() {
-  snd(600, 0.15, 'sine', 0.06);
-  snd(900, 0.1, 'triangle', 0.04);
-}
-function playEarnPowerUp() {
-  snd(700, 0.12, 'sine', 0.05);
-  snd(1050, 0.1, 'triangle', 0.04);
-  snd(1400, 0.08, 'sine', 0.03);
+function snd(f,d,t='sine',v=0.08){
+  try{
+    let a=ensureAudio();
+    const o=a.createOscillator(),g=a.createGain();
+    o.type=t;o.frequency.value=f;g.gain.setValueAtTime(v,a.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,a.currentTime+d);
+    o.connect(g);g.connect(a.destination);o.start();o.stop(a.currentTime+d);
+  }catch(e){}
 }
 
-function saveData(key, data) { try { localStorage.setItem('mp_' + key, JSON.stringify(data)); } catch (e) {} }
-function loadData(key) { try { return JSON.parse(localStorage.getItem('mp_' + key)); } catch (e) { return null; } }
+function saveData(key,data){try{localStorage.setItem(key,JSON.stringify(data))}catch(e){}}
+function loadData(key){try{return JSON.parse(localStorage.getItem(key))}catch(e){return null}}
 
-const THEMES = {
-  space: {
-    name: 'Space', icon: '\u{1F30C}', bg: '#0a0a1e',
-    symbols: ['\u{2B50}', '\u{1F320}', '\u{1F525}', '\u{1F48E}', '\u{1F3B5}', '\u{1F340}', '\u{26A1}', '\u{1F338}', '\u{1F3AF}', '\u{1F987}', '\u{1F319}', '\u{2744}', '\u{1F3B2}', '\u{1F33C}', '\u{1F3A9}', '\u{1F33A}', '\u{1F4AB}', '\u{1F3AE}', '\u{1F431}'],
-    cardBack: '#2d3436', cardBackAlt: '#1a1a2e', starColor: 'rgba(255,255,255,0.3)',
-    ambient: [0.05, 0.05, 0.15]
+// Themes
+const THEMES={
+  space:{
+    bg:'#0a0a1e',symbols:['&#127775;','&#127752;','&#128293;','&#128142;','&#127752;','&#127925;','&#127808;','&#9889;','&#127800;','&#127919;','&#129419;','&#127769;','&#10052;','&#127914;','&#127804;','&#127913;','&#127802;','&#128171;','&#127922;','&#128049;'],
+    cardBack:'#2d3436',cardBackAlt:'#1a1a2e',starColor:'rgba(255,255,255,0.3)'
   },
-  egypt: {
-    name: 'Egypt', icon: '\u{1F3DB}', bg: '#1a150a',
-    symbols: ['\u{1F451}', '\u{1F525}', '\u{2600}', '\u{1F48E}', '\u{1F3AF}', '\u{1F335}', '\u{1F40D}', '\u{1F316}', '\u{2B50}', '\u{1FA84}', '\u{1F52E}', '\u{1F30A}', '\u{1F47B}', '\u{1F994}', '\u{1F3C6}', '\u{1F310}', '\u{1F4A1}', '\u{2693}', '\u{1F4DD}'],
-    cardBack: '#3a2a10', cardBackAlt: '#251a08', starColor: 'rgba(255,200,50,0.2)',
-    ambient: [0.15, 0.12, 0.05]
+  egypt:{
+    bg:'#1a150a',symbols:['&#128081;','&#128293;','&#9728;','&#128142;','&#127919;','&#127793;','&#128013;','&#127774;','&#11088;','&#129477;','&#128302;','&#127754;','&#128123;','&#129412;','&#127942;','&#127760;','&#128161;','&#9875;','&#128221;','&#128295;'],
+    cardBack:'#3a2a10',cardBackAlt:'#251a08',starColor:'rgba(255,200,50,0.2)'
   },
-  ocean: {
-    name: 'Ocean', icon: '\u{1F30A}', bg: '#0a1a2e',
-    symbols: ['\u{1F30A}', '\u{1F420}', '\u{1F41F}', '\u{1F419}', '\u{1F988}', '\u{1F310}', '\u{1F41A}', '\u{2693}', '\u{1F316}', '\u{1F42B}', '\u{1F98A}', '\u{1F418}', '\u{1F41B}', '\u{1F388}', '\u{1F4AB}', '\u{1F338}', '\u{1F52E}', '\u{26A1}', '\u{1F433}'],
-    cardBack: '#1a3040', cardBackAlt: '#0a1a2e', starColor: 'rgba(100,200,255,0.2)',
-    ambient: [0.05, 0.1, 0.18]
+  ocean:{
+    bg:'#0a1a2e',symbols:['&#127754;','&#128032;','&#128031;','&#128025;','&#129416;','&#127776;','&#128026;','&#9875;','&#127774;','&#128043;','&#129418;','&#128024;','&#128027;','&#127880;','&#128171;','&#127800;','&#128302;','&#9889;','&#128051;','&#127756;'],
+    cardBack:'#1a3040',cardBackAlt:'#0a1a2e',starColor:'rgba(100,200,255,0.2)'
   },
-  forest: {
-    name: 'Forest', icon: '\u{1F332}', bg: '#0a1a0e',
-    symbols: ['\u{1F332}', '\u{1F33F}', '\u{1F344}', '\u{1F343}', '\u{1F404}', '\u{1F338}', '\u{1F33C}', '\u{1F340}', '\u{1F426}', '\u{1F98F}', '\u{1F33E}', '\u{1F341}', '\u{1F345}', '\u{1F490}', '\u{1F342}', '\u{1F41C}', '\u{1F33B}', '\u{1F33D}', '\u{1F427}'],
-    cardBack: '#1a2a1a', cardBackAlt: '#0a1a0a', starColor: 'rgba(100,200,100,0.2)',
-    ambient: [0.05, 0.12, 0.06]
-  },
-  candy: {
-    name: 'Candy', icon: '\u{1F36D}', bg: '#1e0a1a',
-    symbols: ['\u{1F370}', '\u{1F369}', '\u{1F36D}', '\u{1F36B}', '\u{1F36C}', '\u{1F366}', '\u{1F382}', '\u{1F36F}', '\u{1F353}', '\u{1F352}', '\u{1F34E}', '\u{1F34A}', '\u{1F347}', '\u{1F349}', '\u{1F95E}', '\u{1F354}', '\u{1F355}', '\u{1F32E}', '\u{1F363}'],
-    cardBack: '#3a1a30', cardBackAlt: '#2a0a20', starColor: 'rgba(255,150,200,0.25)',
-    ambient: [0.15, 0.06, 0.12]
-  },
-  music: {
-    name: 'Music', icon: '\u{1F3B5}', bg: '#12081e',
-    symbols: ['\u{1F3B8}', '\u{1F3B9}', '\u{1F3BA}', '\u{1F3BB}', '\u{1F941}', '\u{1F3B7}', '\u{1F3BC}', '\u{1F3B6}', '\u{1F3A4}', '\u{1F3A7}', '\u{1F4FB}', '\u{1F4E2}', '\u{1F514}', '\u{1F3B5}', '\u{1F399}', '\u{1F50A}', '\u{1F4BF}', '\u{1F3AC}', '\u{1F3AD}'],
-    cardBack: '#2a1a3a', cardBackAlt: '#1a0a2a', starColor: 'rgba(180,100,255,0.25)',
-    ambient: [0.1, 0.05, 0.15]
+  forest:{
+    bg:'#0a1a0e',symbols:['&#127794;','&#127807;','&#127812;','&#127811;','&#128004;','&#127800;','&#127804;','&#127808;','&#128038;','&#129415;','&#127806;','&#127809;','&#127813;','&#128144;','&#127810;','&#128028;','&#127803;','&#127805;','&#128039;','&#129425;'],
+    cardBack:'#1a2a1a',cardBackAlt:'#0a1a0a',starColor:'rgba(100,200,100,0.2)'
   }
 };
-const CARD_COLORS = ['#e94560', '#4d96ff', '#6bcb77', '#ffd93d', '#a55eea', '#fd79a8', '#00cec9', '#e17055', '#74b9ff', '#badc58', '#ff7675', '#55efc4', '#dfe6e9', '#fab1a0'];
+const CARD_COLORS=['#e94560','#4d96ff','#6bcb77','#ffd93d','#a55eea','#fd79a8','#00cec9','#e17055','#74b9ff','#badc58'];
 
-const GRID_PROGRESSION = {
-  easy:   [[3,2],[4,2],[4,3],[4,4],[4,4]],
-  medium: [[4,3],[4,3],[4,4],[4,4],[5,4],[5,4],[6,4],[6,4]],
-  hard:   [[4,4],[4,4],[5,4],[5,4],[6,4],[6,4],[6,5],[6,5],[6,5],[6,5],[6,5],[6,5]]
-};
+let currentTheme='space';
+let cards=[],cols=4,rows=3,totalPairs=0;
+let flipped=[],matched=new Set(),moves=0,gameActive=false,level=1,maxLevel=8;
+let rotAngle=0,rotSpeed=0.003;
+let difficulty='medium';
+let cardW,cardH,gapX,gapY,baseX,baseY;
+let flipAnims={};
+let matchParticles=[];
+let totalScore=0;
 
-let currentTheme = 'space';
-let gameMode = 'classic';
-let cards = [], cols = 4, rows = 3, totalPairs = 0;
-let flipped = [], matched = new Set(), moves = 0, wrongMoves = 0, gameActive = false, level = 1, maxLevel = 8;
-let rotAngle = 0, rotSpeed = 0.003, baseRotSpeed = 0.003;
-let difficulty = 'medium';
-let cardW, cardH, gapX, gapY, baseX, baseY;
-let flipAnims = {};
-let matchParticles = [];
-let confettiParticles = [];
-let ambientParticles = [];
-let sparkleTrail = [];
-let totalScore = 0;
-let consecutiveCorrect = 0;
+// Timer
+let gameTime=0,timerInterval=null;
 
-let gameTime = 0, timerInterval = null;
-let timedModeTimeLeft = 0, timedModeMaxTime = 0;
+// Combo system
+let comboCount=0,comboTimer=0,lastMatchTime=0;
+const COMBO_WINDOW=3000; // 3 seconds to keep combo
 
-let comboCount = 0, comboTimer = 0, lastMatchTime = 0;
-const COMBO_WINDOW = 3500;
+// Power-ups
+let powerUps={peek:2,freeze:1,hint:3};
+let freezeActive=false,freezeTimer=0;
+let hintCard=-1,hintTimer=0;
+let peekActive=false,peekTimer=0;
 
-let powerUps = { peek: 2, freeze: 1, hint: 3, shuffle: 1, slowmo: 1, extralife: 1, xray: 1 };
-let freezeActive = false, freezeEndTime = 0;
-let hintCard = -1, hintTimer = 0;
-let peekActive = false;
-let slowmoActive = false, slowmoEndTime = 0;
-let xrayActive = false, xrayEndTime = 0;
-let extraLifeAvailable = false;
-let shakeCards = {};
-let matchFlashAlpha = 0;
-let matchFlashPos = null;
-let mouseX = -1000, mouseY = -1000;
-let hoverCard = -1;
-let hoverBounce = {};
-
-function initThemeSelect() {
-  const container = document.getElementById('theme-select');
-  container.innerHTML = '';
-  for (const [key, theme] of Object.entries(THEMES)) {
-    const el = document.createElement('div');
-    el.className = 'theme-btn' + (key === currentTheme ? ' selected' : '');
-    el.dataset.theme = key;
-    el.innerHTML = `<span>${theme.icon}</span>${theme.name}`;
-    el.onclick = () => selectTheme(key);
-    container.appendChild(el);
-  }
+function selectTheme(t){
+  currentTheme=t;
+  document.querySelectorAll('.theme-btn').forEach(b=>b.classList.toggle('selected',b.dataset.theme===t));
+  document.body.style.background=THEMES[t].bg;
 }
 
-function selectTheme(t) {
-  currentTheme = t;
-  document.querySelectorAll('.theme-btn').forEach(b => b.classList.toggle('selected', b.dataset.theme === t));
-  document.body.style.background = THEMES[t].bg;
-}
-
-function showMenu() {
-  ['diff-select', 'stats-screen', 'game-over', 'hud', 'power-ups', 'timer-bar'].forEach(id => {
-    document.getElementById(id).classList.add('hidden');
-  });
-  document.getElementById('menu').classList.remove('hidden');
-  gameActive = false;
-  if (timerInterval) clearInterval(timerInterval);
-}
-
-function showDifficultySelect(mode) {
-  gameMode = mode;
-  document.getElementById('menu').classList.add('hidden');
-  document.getElementById('diff-select').classList.remove('hidden');
-  const titles = { classic: 'Classic Mode', relaxed: 'Relaxed Mode', timed: 'Timed Challenge' };
-  const descs = {
-    classic: '3D rotation + progressive levels',
-    relaxed: 'No timer, no rotation. Pure zen matching.',
-    timed: 'Race the clock! Bonus time for combos.'
-  };
-  document.getElementById('diff-title').textContent = titles[mode];
-  document.getElementById('diff-desc').textContent = descs[mode];
-}
-
-function resize() {
-  dpr = window.devicePixelRatio || 1;
-  W = window.innerWidth; H = window.innerHeight;
-  C.width = W * dpr; C.height = H * dpr;
-  C.style.width = W + 'px'; C.style.height = H + 'px';
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+function resize(){
+  dpr=window.devicePixelRatio||1;W=window.innerWidth;H=window.innerHeight;
+  C.width=W*dpr;C.height=H*dpr;C.style.width=W+'px';C.style.height=H+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
   layoutCards();
 }
 
-function layoutCards() {
-  const maxW = (W - 30) / cols;
-  const maxH = (H - 140) / rows;
-  cardW = Math.min(maxW, 72);
-  cardH = Math.min(maxH, 95);
-  if (cardW < 44) cardW = 44;
-  if (cardH < 50) cardH = 50;
-  gapX = (W - cols * cardW) / (cols + 1);
-  gapY = (H - 100 - rows * cardH) / (rows + 1);
-  baseX = gapX;
-  baseY = 55 + gapY;
+function layoutCards(){
+  let maxW=(W-40)/cols;
+  let maxH=(H-140)/rows;
+  cardW=Math.min(maxW,75);cardH=Math.min(maxH,100);
+  gapX=(W-cols*cardW)/(cols+1);
+  gapY=(H-100-rows*cardH)/(rows+1);
+  baseX=gapX;baseY=55+gapY;
 }
 
-function cardPos(idx) {
-  const c = idx % cols, r = Math.floor(idx / cols);
-  const x = baseX + c * (cardW + gapX) + cardW / 2;
-  const y = baseY + r * (cardH + gapY) + cardH / 2;
-  return { x, y };
+function cardPos(idx){
+  let c=idx%cols,r=Math.floor(idx/cols);
+  let x=baseX+c*(cardW+gapX)+cardW/2;
+  let y=baseY+r*(cardH+gapY)+cardH/2;
+  return{x,y};
 }
 
-function project3D(x, y) {
-  if (gameMode === 'relaxed') return { x, y, scale: 1, z: 0 };
-  const cx = W / 2, cy = H / 2;
-  const dx = x - cx, dy = y - cy;
-  const amplitude = 0.15;
-  const effAngle = rotAngle * amplitude;
-  const cos = Math.cos(effAngle), sin = Math.sin(effAngle);
-  const px = dx * cos;
-  const pz = dx * sin;
-  const perspective = 900;
-  const scale = perspective / (perspective + pz);
-  return { x: cx + px * scale, y: cy + dy * scale, scale, z: pz };
+function project3D(x,y){
+  let cx=W/2,cy=H/2;
+  let dx=x-cx,dy=y-cy;
+  let cos=Math.cos(rotAngle),sin=Math.sin(rotAngle);
+  let px=dx*cos;
+  let pz=dx*sin;
+  let perspective=800;
+  let scale=perspective/(perspective+pz);
+  return{x:cx+px*scale,y:cy+dy*scale,scale,z:pz};
 }
 
-function unproject(screenX, screenY) {
-  let bestIdx = -1, bestD = Infinity;
-  const hitPad = 8;
-  for (let i = 0; i < cards.length; i++) {
-    if (matched.has(i)) continue;
-    const pos = cardPos(i);
-    const pp = project3D(pos.x, pos.y);
-    const w = cardW * pp.scale * 0.5 + hitPad;
-    const h = cardH * pp.scale * 0.5 + hitPad;
-    if (screenX >= pp.x - w && screenX <= pp.x + w && screenY >= pp.y - h && screenY <= pp.y + h) {
-      if (pp.z < bestD || bestIdx === -1) { bestD = pp.z; bestIdx = i; }
+// FIXED: Inverse projection for accurate hit detection
+function unproject(screenX,screenY){
+  let cx=W/2,cy=H/2;
+  let cos=Math.cos(rotAngle),sin=Math.sin(rotAngle);
+  // For each card, compute its projected position and check against screen coords
+  // This avoids the distortion in the old project3D-based hit test
+  let bestIdx=-1,bestD=Infinity;
+  for(let i=0;i<cards.length;i++){
+    if(matched.has(i))continue;
+    let pos=cardPos(i);
+    let pp=project3D(pos.x,pos.y);
+    let w=cardW*pp.scale*0.5;
+    let h=cardH*pp.scale*0.5;
+    // Rectangular hit test (more accurate than distance)
+    if(screenX>=pp.x-w&&screenX<=pp.x+w&&screenY>=pp.y-h&&screenY<=pp.y+h){
+      // Prefer closer cards (higher z = closer to camera)
+      if(pp.z<bestD||bestIdx===-1){bestD=pp.z;bestIdx=i}
     }
   }
   return bestIdx;
 }
 
-function seededRandom(seed) {
-  let s = seed;
-  return function() {
-    s = (s * 1664525 + 1013904223) & 0xFFFFFFFF;
-    return (s >>> 0) / 0xFFFFFFFF;
-  };
+function initCards(){
+  let theme=THEMES[currentTheme];
+  let n=cols*rows;
+  totalPairs=n/2;
+  let symbols=theme.symbols.slice(0,totalPairs);
+  let deck=[...symbols,...symbols];
+  for(let i=deck.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[deck[i],deck[j]]=[deck[j],deck[i]]}
+  cards=deck.map((sym,i)=>({symbol:sym,color:CARD_COLORS[i%CARD_COLORS.length]}));
+  flipped=[];matched=new Set();moves=0;flipAnims={};
+  rotAngle=0;comboCount=0;
+  hintCard=-1;hintTimer=0;peekActive=false;
+  document.getElementById('matches').textContent=`0/${totalPairs}`;
+  document.getElementById('moves').textContent='0';
+  document.getElementById('level').textContent=level+'/'+maxLevel;
+
+  // Brief peek at start
+  cards.forEach((c,i)=>flipAnims[i]={progress:1,direction:-1,timer:1.5+i*0.05});
 }
 
-function getDailySeed() {
-  const d = new Date();
-  return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
-}
-
-function getTodayStr() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-}
-
-function initCards(seed) {
-  const theme = THEMES[currentTheme];
-  const n = cols * rows;
-  totalPairs = n / 2;
-  const symbols = theme.symbols.slice(0, totalPairs);
-  let deck = [...symbols, ...symbols];
-  const rng = seed ? seededRandom(seed) : Math.random.bind(Math);
-  for (let i = deck.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [deck[i], deck[j]] = [deck[j], deck[i]];
-  }
-  cards = deck.map((sym, i) => ({ symbol: sym, color: CARD_COLORS[i % CARD_COLORS.length] }));
-  flipped = [];
-  matched = new Set();
-  moves = 0;
-  wrongMoves = 0;
-  flipAnims = {};
-  rotAngle = 0;
-  comboCount = 0;
-  consecutiveCorrect = 0;
-  hintCard = -1;
-  hintTimer = 0;
-  peekActive = false;
-  shakeCards = {};
-  matchFlashAlpha = 0;
-  hoverBounce = {};
-  ambientParticles = [];
-  confettiParticles = [];
-  for (let i = 0; i < 25; i++) {
-    ambientParticles.push({
-      x: Math.random() * W,
-      y: Math.random() * H,
-      vx: (Math.random() - 0.5) * 0.3,
-      vy: -0.2 - Math.random() * 0.3,
-      size: 1 + Math.random() * 2,
-      alpha: 0.1 + Math.random() * 0.2,
-      life: 999
-    });
-  }
-  document.getElementById('hud-matches').textContent = `0/${totalPairs}`;
-  document.getElementById('hud-moves').textContent = '0';
-  document.getElementById('hud-level').textContent = level + '/' + maxLevel;
-  cards.forEach((c, i) => {
-    flipAnims[i] = { progress: 1, direction: -1, timer: 1.2 + i * 0.04 };
-  });
-}
-
-function setGridForLevel() {
-  const prog = GRID_PROGRESSION[difficulty];
-  const idx = Math.min(level - 1, prog.length - 1);
-  cols = prog[idx][0];
-  rows = prog[idx][1];
-}
-
-function startGame(diff) {
+let baseRotSpeed=0.003;
+function startGame(diff){
   ensureAudio();
-  difficulty = diff;
-  level = 1;
-  totalScore = 0;
-  maxLevel = diff === 'easy' ? 5 : diff === 'medium' ? 8 : 12;
-  powerUps = { peek: 2, freeze: 1, hint: 3, shuffle: 1, slowmo: 1, extralife: 1, xray: 1 };
-  setGridForLevel();
-  buildPowerUpUI();
+  difficulty=diff;level=1;totalScore=0;
+  if(diff==='easy'){cols=3;rows=2;maxLevel=5}
+  else if(diff==='medium'){cols=4;rows=3;maxLevel=8}
+  else{cols=4;rows=4;maxLevel=12}
+  powerUps={peek:2,freeze:1,hint:3};
   updatePowerUpUI();
-  document.getElementById('diff-select').classList.add('hidden');
   document.getElementById('menu').classList.add('hidden');
   document.getElementById('game-over').classList.add('hidden');
   document.getElementById('level-complete').classList.add('hidden');
-  document.getElementById('hud').classList.remove('hidden');
-  document.getElementById('power-ups').classList.remove('hidden');
-  if (gameMode === 'timed') {
-    document.getElementById('timer-bar').classList.remove('hidden');
-    document.getElementById('hud-time-lbl').textContent = 'Left';
-    timedModeMaxTime = diff === 'easy' ? 60 : diff === 'medium' ? 90 : 120;
-    timedModeTimeLeft = timedModeMaxTime;
-  } else {
-    document.getElementById('timer-bar').classList.add('hidden');
-    document.getElementById('hud-time-lbl').textContent = 'Time';
-  }
-  if (gameMode === 'relaxed') {
-    baseRotSpeed = 0;
-    rotSpeed = 0;
-  } else {
-    baseRotSpeed = 0.003 * (diff === 'hard' ? 1.5 : diff === 'medium' ? 1 : 0.7);
-    rotSpeed = baseRotSpeed;
-  }
-  layoutCards();
-  initCards();
-  gameActive = true;
-  gameTime = 0;
-  if (timerInterval) clearInterval(timerInterval);
-  timerInterval = setInterval(() => {
-    if (!gameActive) return;
-    if (freezeActive) return;
-    if (gameMode === 'timed') {
-      timedModeTimeLeft--;
-      if (timedModeTimeLeft <= 0) {
-        timedModeTimeLeft = 0;
-        gameActive = false;
-        timedTimeUp();
-      }
-      const m = Math.floor(timedModeTimeLeft / 60), s = timedModeTimeLeft % 60;
-      document.getElementById('hud-timer').textContent = m + ':' + (s < 10 ? '0' : '') + s;
-      document.getElementById('timer-bar-fill').style.width = (timedModeTimeLeft / timedModeMaxTime * 100) + '%';
-    } else if (gameMode === 'relaxed') {
+  layoutCards();initCards();
+  baseRotSpeed=0.003*(diff==='hard'?2:diff==='medium'?1.5:1);
+  rotSpeed=baseRotSpeed;
+  updateSpeedDisplay();
+  gameActive=true;
+  gameTime=0;
+  if(timerInterval)clearInterval(timerInterval);
+  timerInterval=setInterval(()=>{
+    if(gameActive&&!freezeActive){
       gameTime++;
-      const m = Math.floor(gameTime / 60), s = gameTime % 60;
-      document.getElementById('hud-timer').textContent = m + ':' + (s < 10 ? '0' : '') + s;
-    } else {
-      gameTime++;
-      const m = Math.floor(gameTime / 60), s = gameTime % 60;
-      document.getElementById('hud-timer').textContent = m + ':' + (s < 10 ? '0' : '') + s;
+      let m=Math.floor(gameTime/60),s=gameTime%60;
+      document.getElementById('timer').textContent=m+':'+(s<10?'0':'')+s;
     }
-  }, 1000);
-  updateStats('gamesPlayed', difficulty);
+  },1000);
 }
 
-function startDailyChallenge() {
-  gameMode = 'daily';
-  difficulty = 'medium';
-  level = 1;
-  maxLevel = 1;
-  totalScore = 0;
-  cols = 5; rows = 4;
-  powerUps = { peek: 1, freeze: 1, hint: 2, shuffle: 1, slowmo: 0, extralife: 0, xray: 1 };
-  baseRotSpeed = 0.003;
-  rotSpeed = baseRotSpeed;
-  buildPowerUpUI();
-  updatePowerUpUI();
-  document.getElementById('menu').classList.add('hidden');
-  document.getElementById('game-over').classList.add('hidden');
-  document.getElementById('level-complete').classList.add('hidden');
-  document.getElementById('hud').classList.remove('hidden');
-  document.getElementById('power-ups').classList.remove('hidden');
-  document.getElementById('timer-bar').classList.add('hidden');
-  document.getElementById('hud-time-lbl').textContent = 'Time';
-  document.getElementById('hud-level').textContent = 'Daily';
-  layoutCards();
-  initCards(getDailySeed());
-  gameActive = true;
-  gameTime = 0;
-  if (timerInterval) clearInterval(timerInterval);
-  timerInterval = setInterval(() => {
-    if (!gameActive || freezeActive) return;
-    gameTime++;
-    const m = Math.floor(gameTime / 60), s = gameTime % 60;
-    document.getElementById('hud-timer').textContent = m + ':' + (s < 10 ? '0' : '') + s;
-  }, 1000);
-  updateStats('gamesPlayed', 'daily');
-}
-
-function timedTimeUp() {
-  if (timerInterval) clearInterval(timerInterval);
-  recordGameStats();
-  const go = document.getElementById('game-over');
-  go.innerHTML = `
-    <h2>Time's Up!</h2>
-    <div class="score-text">${totalScore}</div>
-    <p>You matched ${matched.size / 2} of ${totalPairs} pairs</p>
-    <p>Level ${level} - ${difficulty}</p>
-    <button class="btn-primary" onclick="showMenu()">Main Menu</button>
-    <button class="btn-timed" onclick="document.getElementById('game-over').classList.add('hidden');showDifficultySelect('timed')">Try Again</button>
-  `;
-  go.classList.remove('hidden');
-  snd(200, 0.3, 'sawtooth', 0.06);
-  snd(150, 0.4, 'square', 0.04);
-}
-
-function buildPowerUpUI() {
-  const container = document.getElementById('power-ups');
-  const defs = [
-    { id: 'peek', icon: '\u{1F440}', label: 'Peek' },
-    { id: 'freeze', icon: '\u{2744}', label: 'Freeze' },
-    { id: 'hint', icon: '\u{1F4A1}', label: 'Hint' },
-    { id: 'shuffle', icon: '\u{1F500}', label: 'Shuffle' },
-    { id: 'slowmo', icon: '\u{1F40C}', label: 'Slow' },
-    { id: 'extralife', icon: '\u{1F49A}', label: 'Undo' },
-    { id: 'xray', icon: '\u{1F453}', label: 'X-Ray' }
-  ];
-  container.innerHTML = '';
-  for (const d of defs) {
-    const btn = document.createElement('div');
-    btn.className = 'power-btn';
-    btn.id = 'pw-' + d.id;
-    btn.onclick = () => usePowerUp(d.id);
-    btn.innerHTML = `<span>${d.icon}</span><div class="badge" id="pw-${d.id}-count">${powerUps[d.id]}</div>`;
-    container.appendChild(btn);
-  }
-}
-
-function updatePowerUpUI() {
-  for (const key of Object.keys(powerUps)) {
-    const countEl = document.getElementById('pw-' + key + '-count');
-    const btnEl = document.getElementById('pw-' + key);
-    if (countEl) countEl.textContent = powerUps[key];
-    if (btnEl) btnEl.classList.toggle('disabled', powerUps[key] <= 0);
-  }
-}
-
-function usePowerUp(type) {
-  if (!gameActive) return;
+function usePowerUp(type){
+  if(!gameActive)return;
   ensureAudio();
-  if (powerUps[type] <= 0) return;
 
-  if (type === 'peek') {
+  if(type==='peek'&&powerUps.peek>0){
     powerUps.peek--;
-    peekActive = true;
-    cards.forEach((c, i) => {
-      if (!matched.has(i)) flipAnims[i] = { progress: 0, direction: 1, timer: 0 };
+    peekActive=true;peekTimer=2;
+    cards.forEach((c,i)=>{
+      if(!matched.has(i)){
+        flipAnims[i]={progress:0,direction:1,timer:0};
+      }
     });
-    setTimeout(() => {
-      cards.forEach((c, i) => {
-        if (!matched.has(i) && !flipped.includes(i)) {
-          flipAnims[i] = { progress: 1, direction: -1, timer: 0 };
+    setTimeout(()=>{
+      cards.forEach((c,i)=>{
+        if(!matched.has(i)&&!flipped.includes(i)){
+          flipAnims[i]={progress:1,direction:-1,timer:0};
         }
       });
-      peekActive = false;
-    }, 2000);
-    playPowerUp();
-  } else if (type === 'freeze') {
+      peekActive=false;
+    },2000);
+    snd(600,0.15);snd(800,0.1,'triangle');
+  }
+  else if(type==='freeze'&&powerUps.freeze>0){
     powerUps.freeze--;
-    freezeActive = true;
-    freezeEndTime = Date.now() + 5000;
-    setTimeout(() => { freezeActive = false; }, 5000);
-    playPowerUp();
-  } else if (type === 'hint') {
-    for (let i = 0; i < cards.length; i++) {
-      if (matched.has(i)) continue;
-      for (let j = i + 1; j < cards.length; j++) {
-        if (matched.has(j)) continue;
-        if (cards[i].symbol === cards[j].symbol) {
+    freezeActive=true;freezeTimer=5;
+    setTimeout(()=>{freezeActive=false},5000);
+    snd(300,0.2);snd(500,0.15,'triangle');
+  }
+  else if(type==='hint'&&powerUps.hint>0){
+    // Find an unmatched pair and highlight one
+    for(let i=0;i<cards.length;i++){
+      if(matched.has(i))continue;
+      for(let j=i+1;j<cards.length;j++){
+        if(matched.has(j))continue;
+        if(cards[i].symbol===cards[j].symbol){
           powerUps.hint--;
-          hintCard = i;
-          hintTimer = 2;
-          setTimeout(() => { hintCard = -1; }, 2000);
-          playPowerUp();
+          hintCard=i;hintTimer=2;
+          setTimeout(()=>{hintCard=-1},2000);
+          snd(700,0.1);snd(900,0.08,'triangle');
           updatePowerUpUI();
           return;
         }
       }
     }
-    return;
-  } else if (type === 'shuffle') {
-    powerUps.shuffle--;
-    const unmatchedIndices = [];
-    const unmatchedSymbols = [];
-    for (let i = 0; i < cards.length; i++) {
-      if (!matched.has(i)) {
-        unmatchedIndices.push(i);
-        unmatchedSymbols.push({ symbol: cards[i].symbol, color: cards[i].color });
-      }
-    }
-    for (let i = unmatchedSymbols.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [unmatchedSymbols[i], unmatchedSymbols[j]] = [unmatchedSymbols[j], unmatchedSymbols[i]];
-    }
-    unmatchedIndices.forEach((idx, k) => {
-      cards[idx].symbol = unmatchedSymbols[k].symbol;
-      cards[idx].color = unmatchedSymbols[k].color;
-    });
-    flipped = [];
-    cards.forEach((c, i) => {
-      if (!matched.has(i)) flipAnims[i] = { progress: 1, direction: -1, timer: 0.1 };
-    });
-    playPowerUp();
-  } else if (type === 'slowmo') {
-    powerUps.slowmo--;
-    slowmoActive = true;
-    slowmoEndTime = Date.now() + 10000;
-    rotSpeed = baseRotSpeed * 0.5;
-    setTimeout(() => {
-      slowmoActive = false;
-      rotSpeed = baseRotSpeed;
-    }, 10000);
-    playPowerUp();
-  } else if (type === 'extralife') {
-    powerUps.extralife--;
-    extraLifeAvailable = true;
-    playPowerUp();
-  } else if (type === 'xray') {
-    powerUps.xray--;
-    xrayActive = true;
-    xrayEndTime = Date.now() + 3000;
-    setTimeout(() => { xrayActive = false; }, 3000);
-    playPowerUp();
   }
   updatePowerUpUI();
 }
 
-function awardFreePowerUp() {
-  const types = ['peek', 'hint', 'freeze', 'shuffle', 'slowmo', 'xray'];
-  const chosen = types[Math.floor(Math.random() * types.length)];
-  powerUps[chosen]++;
-  updatePowerUpUI();
-  playEarnPowerUp();
-  showResult(`+1 ${chosen.charAt(0).toUpperCase() + chosen.slice(1)}!`, 'Earned for 3 perfect matches');
+function updatePowerUpUI(){
+  document.getElementById('pw-peek-count').textContent=powerUps.peek;
+  document.getElementById('pw-freeze-count').textContent=powerUps.freeze;
+  document.getElementById('pw-hint-count').textContent=powerUps.hint;
+  document.getElementById('pw-peek').classList.toggle('disabled',powerUps.peek<=0);
+  document.getElementById('pw-freeze').classList.toggle('disabled',powerUps.freeze<=0);
+  document.getElementById('pw-hint').classList.toggle('disabled',powerUps.hint<=0);
+}
+function updateSpeedDisplay(){
+  let speedMult=rotSpeed/0.003;
+  document.getElementById('speed').textContent=speedMult.toFixed(1)+'x';
+  // Color code the speed indicator
+  let el=document.getElementById('speed');
+  if(speedMult>=3)el.style.color='#e94560';
+  else if(speedMult>=2)el.style.color='#ffd93d';
+  else el.style.color='#6bcb77';
 }
 
-function clickCard(idx) {
-  if (!gameActive) return;
-  if (peekActive) return;
-  if (matched.has(idx)) return;
-  if (flipped.includes(idx)) return;
-  if (flipped.length >= 2) return;
-  if (flipAnims[idx] && flipAnims[idx].progress > 0 && flipAnims[idx].direction === 1) return;
+function clickCard(idx){
+  if(!gameActive)return;
+  if(peekActive)return;
+  if(matched.has(idx))return;
+  if(flipped.includes(idx))return;
+  if(flipped.length>=2)return;
+  if(flipAnims[idx]&&flipAnims[idx].progress>0&&flipAnims[idx].direction===1)return;
 
   flipped.push(idx);
-  flipAnims[idx] = { progress: 0, direction: 1, timer: 0 };
-  playFlip();
+  flipAnims[idx]={progress:0,direction:1,timer:0};
+  snd(400+idx*20,0.1);
 
-  if (flipped.length === 2) {
+  if(flipped.length===2){
     moves++;
-    document.getElementById('hud-moves').textContent = moves;
-    const [a, b] = flipped;
-    if (cards[a].symbol === cards[b].symbol) {
-      const now = Date.now();
-      if (now - lastMatchTime < COMBO_WINDOW) { comboCount++; } else { comboCount = 1; }
-      lastMatchTime = now;
-      consecutiveCorrect++;
-      if (consecutiveCorrect > 0 && consecutiveCorrect % 3 === 0) {
-        setTimeout(() => awardFreePowerUp(), 600);
+    document.getElementById('moves').textContent=moves;
+    let [a,b]=flipped;
+    if(cards[a].symbol===cards[b].symbol){
+      // Match!
+      let now=Date.now();
+      if(now-lastMatchTime<COMBO_WINDOW){comboCount++}else{comboCount=1}
+      lastMatchTime=now;
+
+      // Show combo
+      if(comboCount>1){
+        let cd=document.getElementById('combo-display');
+        cd.textContent=comboCount+'x Combo!';
+        cd.style.color=comboCount>=4?'#ffd93d':comboCount>=3?'#e94560':'#6bcb77';
+        cd.style.opacity='1';cd.style.transform='translateX(-50%) scale(1.2)';
+        setTimeout(()=>{cd.style.opacity='0';cd.style.transform='translateX(-50%) scale(0.8)'},1000);
       }
-      if (comboCount > 1) {
-        const cd = document.getElementById('combo-display');
-        cd.textContent = comboCount + 'x Combo!';
-        cd.style.color = comboCount >= 5 ? '#ffd93d' : comboCount >= 3 ? '#e94560' : '#6bcb77';
-        cd.style.opacity = '1';
-        cd.style.transform = 'translateX(-50%) scale(1.2)';
-        setTimeout(() => { cd.style.opacity = '0'; cd.style.transform = 'translateX(-50%) scale(0.8)'; }, 1200);
-      }
-      if (gameMode === 'timed') {
-        let bonus = 3 + comboCount * 2;
-        timedModeTimeLeft = Math.min(timedModeTimeLeft + bonus, timedModeMaxTime + 30);
-      }
-      setTimeout(() => {
-        matched.add(a); matched.add(b);
-        flipped = [];
-        playMatch(comboCount);
-        const posA = cardPos(a), ppA = project3D(posA.x, posA.y);
-        const posB = cardPos(b), ppB = project3D(posB.x, posB.y);
-        matchFlashAlpha = 0.3;
-        matchFlashPos = { x: (ppA.x + ppB.x) / 2, y: (ppA.y + ppB.y) / 2 };
-        const particleCount = 10 + comboCount * 4;
-        [a, b].forEach(ci => {
-          const pos = cardPos(ci), pp = project3D(pos.x, pos.y);
-          for (let k = 0; k < particleCount; k++) {
-            const ang = Math.random() * Math.PI * 2, sp = 1 + Math.random() * (2 + comboCount);
-            matchParticles.push({
-              x: pp.x, y: pp.y,
-              vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
-              life: 1, color: cards[ci].color,
-              size: 2 + Math.random() * (2 + comboCount)
-            });
+
+      setTimeout(()=>{
+        matched.add(a);matched.add(b);
+        flipped=[];
+        snd(600,0.2);snd(800,0.15,'triangle');
+        if(comboCount>1)snd(1000,0.1,'sine',0.05);
+
+        [a,b].forEach(idx=>{
+          let pos=cardPos(idx);let pp=project3D(pos.x,pos.y);
+          for(let k=0;k<12;k++){
+            let ang=Math.random()*Math.PI*2,sp=1+Math.random()*3;
+            matchParticles.push({x:pp.x,y:pp.y,vx:Math.cos(ang)*sp,vy:Math.sin(ang)*sp,life:1,color:cards[idx].color,size:3+Math.random()*3});
           }
         });
-        document.getElementById('hud-matches').textContent = `${matched.size / 2}/${totalPairs}`;
-        checkAchievements();
-        if (matched.size === cards.length) {
-          setTimeout(() => levelComplete(), 500);
+        document.getElementById('matches').textContent=`${matched.size/2}/${totalPairs}`;
+
+        if(matched.size===cards.length){
+          // Level complete
+          setTimeout(()=>levelComplete(),500);
         }
-      }, 400);
-    } else {
-      wrongMoves++;
-      if (extraLifeAvailable) {
-        extraLifeAvailable = false;
-        moves--;
-        wrongMoves--;
-        document.getElementById('hud-moves').textContent = moves;
-        setTimeout(() => {
-          flipAnims[a] = { progress: 1, direction: -1, timer: 0 };
-          flipAnims[b] = { progress: 1, direction: -1, timer: 0 };
-          flipped = [];
-        }, 500);
-        showResult('Extra Life Used!', 'Move not counted');
-        return;
-      }
-      consecutiveCorrect = 0;
-      shakeCards[a] = { timer: 0.5, intensity: 4 };
-      shakeCards[b] = { timer: 0.5, intensity: 4 };
-      setTimeout(() => {
-        flipAnims[a] = { progress: 1, direction: -1, timer: 0 };
-        flipAnims[b] = { progress: 1, direction: -1, timer: 0 };
-        flipped = [];
-        comboCount = 0;
-        playMismatch();
-      }, 800);
+      },400);
+    }else{
+      setTimeout(()=>{
+        flipAnims[a]={progress:1,direction:-1,timer:0};
+        flipAnims[b]={progress:1,direction:-1,timer:0};
+        flipped=[];
+        comboCount=0;
+        snd(200,0.15,'square',0.05);
+      },800);
     }
   }
 }
 
-function showResult(text, sub) {
-  const r = document.getElementById('result');
-  document.getElementById('res-text').textContent = text;
-  document.getElementById('res-sub').textContent = sub || '';
-  r.style.opacity = '1';
-  setTimeout(() => { r.style.opacity = '0'; }, 1500);
-}
+function levelComplete(){
+  // Calculate star rating
+  let perfectMoves=totalPairs;
+  let moveRatio=moves/perfectMoves;
+  let timeBonus=Math.max(0,120-gameTime);
+  let stars=moveRatio<=1.5?3:moveRatio<=2.5?2:1;
+  let comboBonus=comboCount>1?comboCount*50:0;
+  let levelScore=Math.max(0,1000-moves*20+timeBonus*5+comboBonus+stars*200);
+  totalScore+=levelScore;
 
-function spawnConfetti(cx, cy, count) {
-  const colors = ['#e94560', '#4d96ff', '#6bcb77', '#ffd93d', '#a55eea', '#fd79a8', '#00cec9'];
-  for (let i = 0; i < count; i++) {
-    const ang = Math.random() * Math.PI * 2;
-    const sp = 2 + Math.random() * 5;
-    confettiParticles.push({
-      x: cx, y: cy,
-      vx: Math.cos(ang) * sp,
-      vy: Math.sin(ang) * sp - 3,
-      rotation: Math.random() * Math.PI * 2,
-      rotSpeed: (Math.random() - 0.5) * 0.3,
-      w: 4 + Math.random() * 4,
-      h: 2 + Math.random() * 3,
-      color: colors[Math.floor(Math.random() * colors.length)],
-      life: 1,
-      decay: 0.008 + Math.random() * 0.005
-    });
-  }
-}
-
-function levelComplete() {
-  gameActive = false;
-  const perfectMoves = totalPairs;
-  const moveRatio = moves / perfectMoves;
-  const timeBonus = Math.max(0, 120 - gameTime);
-  const stars = wrongMoves === 0 ? 3 : moveRatio <= 2 ? 2 : 1;
-  const comboBonus = comboCount > 1 ? comboCount * 50 : 0;
-  const levelScore = Math.max(0, 1000 - moves * 15 + timeBonus * 5 + comboBonus + stars * 200);
-  totalScore += levelScore;
-  playLevelComplete();
-  spawnConfetti(W / 2, H / 2, 60);
-  if (gameMode === 'daily') {
-    const today = getTodayStr();
-    const dailyData = loadData('daily') || {};
-    if (!dailyData[today] || totalScore > dailyData[today].score) {
-      dailyData[today] = { score: totalScore, moves, time: gameTime, wrongMoves };
-      saveData('daily', dailyData);
-    }
-    if (timerInterval) clearInterval(timerInterval);
-    recordGameStats();
-    let starStr = '';
-    for (let i = 0; i < 3; i++) starStr += i < stars ? '\u2B50' : '\u2606';
-    const go = document.getElementById('game-over');
-    go.innerHTML = `
-      <h2>Daily Challenge Complete!</h2>
-      <div class="score-text">${totalScore}</div>
-      <div style="font-size:32px;margin:6px 0">${starStr}</div>
-      <p>Moves: ${moves} | Time: ${Math.floor(gameTime/60)}:${(gameTime%60).toString().padStart(2,'0')}</p>
-      <p>Wrong matches: ${wrongMoves}</p>
-      <div class="daily-info">
-        <div class="di-date">${today}</div>
-        <div class="di-best">Best today: ${dailyData[today].score}</div>
-      </div>
-      <button class="btn-primary" onclick="showMenu()">Main Menu</button>
-    `;
-    go.classList.remove('hidden');
-    return;
-  }
-  let starStr = '';
-  for (let i = 0; i < 3; i++) starStr += i < stars ? '\u2B50' : '\u2606';
-  const lc = document.getElementById('level-complete');
-  lc.innerHTML = `
+  let lc=document.getElementById('level-complete');
+  let starStr='';
+  for(let i=0;i<3;i++)starStr+=i<stars?'&#11088;':'&#9734;';
+  lc.innerHTML=`
     <h3>Level ${level} Complete!</h3>
     <div class="lc-stars">${starStr}</div>
     <p>Moves: ${moves} | Time: ${Math.floor(gameTime/60)}:${(gameTime%60).toString().padStart(2,'0')}</p>
-    <p>Wrong matches: ${wrongMoves}</p>
-    <p>Score: +${levelScore} (Total: ${totalScore})</p>
+    <p>Score: +${levelScore}</p>
     <button onclick="nextLevel()">Next Level</button>
   `;
   lc.classList.remove('hidden');
-  if (stars === 3) {
-    powerUps.hint++;
-    powerUps.peek++;
+  gameActive=false;
+
+  // Award extra power-ups for 3 stars
+  if(stars===3){
+    powerUps.hint++;powerUps.peek++;
     updatePowerUpUI();
   }
-  if (wrongMoves === 0) updateStats('perfectGames');
-  checkAchievements();
 }
 
-function nextLevel() {
+function nextLevel(){
   document.getElementById('level-complete').classList.add('hidden');
   level++;
-  if (level > maxLevel) {
-    gameActive = false;
-    if (timerInterval) clearInterval(timerInterval);
-    recordGameStats();
-    const overallStars = totalScore >= maxLevel * 800 ? 3 : totalScore >= maxLevel * 500 ? 2 : 1;
-    let starStr = '';
-    for (let i = 0; i < 3; i++) starStr += i < overallStars ? '\u2B50' : '\u2606';
-    const go = document.getElementById('game-over');
-    go.innerHTML = `
+  if(level>maxLevel){
+    // Game complete
+    gameActive=false;
+    if(timerInterval)clearInterval(timerInterval);
+    let go=document.getElementById('game-over');
+    let overallStars=totalScore>=maxLevel*800?3:totalScore>=maxLevel*500?2:1;
+    let starStr='';for(let i=0;i<3;i++)starStr+=i<overallStars?'&#11088;':'&#9734;';
+    go.innerHTML=`
       <h2>All Levels Complete!</h2>
-      <div class="score-text">${totalScore}</div>
-      <div style="font-size:36px;margin:8px 0">${starStr}</div>
-      <p>Difficulty: ${difficulty} | Mode: ${gameMode}</p>
+      <div class="score">${totalScore}</div>
+      <div class="stars">${starStr}</div>
+      <p>Difficulty: ${difficulty}</p>
       <p>Theme: ${currentTheme}</p>
-      <button class="btn-primary" onclick="showMenu()">Main Menu</button>
+      <button onclick="document.getElementById('game-over').classList.add('hidden');document.getElementById('menu').classList.remove('hidden')">Play Again</button>
     `;
     go.classList.remove('hidden');
-    checkAchievements();
-    updateStats('winStreak');
     return;
   }
-  setGridForLevel();
-  if (gameMode !== 'relaxed') {
-    baseRotSpeed += 0.0008;
-    rotSpeed = slowmoActive ? baseRotSpeed * 0.5 : baseRotSpeed;
-  }
-  if (gameMode === 'timed') {
-    timedModeMaxTime = Math.max(30, timedModeMaxTime - 5);
-    timedModeTimeLeft = timedModeMaxTime;
-  }
-  gameTime = 0;
-  moves = 0;
-  wrongMoves = 0;
-  layoutCards();
-  initCards();
-  gameActive = true;
-  document.getElementById('hud-level').textContent = level + '/' + maxLevel;
+  rotSpeed+=0.001;
+  updateSpeedDisplay();
+  // Increase grid on harder levels
+  if(difficulty==='medium'&&level>=5){cols=4;rows=4}
+  if(difficulty==='hard'&&level>=7){cols=5;rows=4}
+  gameTime=0;moves=0;
+  layoutCards();initCards();
+  gameActive=true;
 }
 
-function handleClick(mx, my) {
-  if (!gameActive) return;
+function handleClick(mx,my){
+  if(!gameActive)return;
   ensureAudio();
-  const bestIdx = unproject(mx, my);
-  if (bestIdx >= 0) clickCard(bestIdx);
+  let bestIdx=unproject(mx,my);
+  if(bestIdx>=0)clickCard(bestIdx);
 }
 
-C.addEventListener('click', e => handleClick(e.clientX, e.clientY));
-C.addEventListener('touchstart', e => {
+C.addEventListener('click',e=>handleClick(e.clientX,e.clientY));
+C.addEventListener('touchstart',e=>{
   e.preventDefault();
-  if (!e.touches[0]) return;
-  handleClick(e.touches[0].clientX, e.touches[0].clientY);
-});
-C.addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
-C.addEventListener('touchmove', e => {
-  if (e.touches[0]) { mouseX = e.touches[0].clientX; mouseY = e.touches[0].clientY; }
+  if(!e.touches[0])return;
+  handleClick(e.touches[0].clientX,e.touches[0].clientY);
 });
 
-const STATS_DEFAULT = {
-  gamesPlayedEasy: 0, gamesPlayedMedium: 0, gamesPlayedHard: 0, gamesPlayedDaily: 0,
-  bestTimeEasy: Infinity, bestTimeMedium: Infinity, bestTimeHard: Infinity,
-  totalMatches: 0, highestCombo: 0, currentWinStreak: 0, bestWinStreak: 0,
-  perfectGames: 0, totalMoves: 0, totalWrongMoves: 0,
-  themesPlayed: [], achievementsUnlocked: []
-};
+let lastT=0;
+function loop(t){
+  let dt=Math.min((t-lastT)/1000,0.05);lastT=t;
 
-function getStats() {
-  return Object.assign({}, STATS_DEFAULT, loadData('stats') || {});
-}
+  if(gameActive&&!freezeActive)rotAngle+=rotSpeed*dt*60;
 
-function updateStats(type, value) {
-  const stats = getStats();
-  if (type === 'gamesPlayed') {
-    const key = 'gamesPlayed' + value.charAt(0).toUpperCase() + value.slice(1);
-    if (stats[key] !== undefined) stats[key]++;
-    if (!stats.themesPlayed.includes(currentTheme)) stats.themesPlayed.push(currentTheme);
-  } else if (type === 'perfectGames') {
-    stats.perfectGames++;
-  } else if (type === 'winStreak') {
-    stats.currentWinStreak++;
-    if (stats.currentWinStreak > stats.bestWinStreak) stats.bestWinStreak = stats.currentWinStreak;
-  }
-  saveData('stats', stats);
-}
-
-function recordGameStats() {
-  const stats = getStats();
-  stats.totalMatches += matched.size / 2;
-  stats.totalMoves += moves;
-  stats.totalWrongMoves += wrongMoves;
-  if (comboCount > stats.highestCombo) stats.highestCombo = comboCount;
-  if (matched.size === cards.length) {
-    const timeKey = 'bestTime' + difficulty.charAt(0).toUpperCase() + difficulty.slice(1);
-    if (stats[timeKey] !== undefined && gameTime < stats[timeKey]) stats[timeKey] = gameTime;
-  }
-  saveData('stats', stats);
-}
-
-function showStats() {
-  document.getElementById('menu').classList.add('hidden');
-  const screen = document.getElementById('stats-screen');
-  const stats = getStats();
-  const formatTime = t => t === Infinity ? '--:--' : `${Math.floor(t/60)}:${(t%60).toString().padStart(2,'0')}`;
-  const achs = getAchievements();
-  const unlockedCount = achs.filter(a => a.unlocked).length;
-  screen.innerHTML = `
-    <h2>Statistics</h2>
-    <div class="tabs">
-      <div class="tab-btn active" onclick="switchStatsTab('stats',this)">Stats</div>
-      <div class="tab-btn" onclick="switchStatsTab('achievements',this)">Achievements (${unlockedCount}/${achs.length})</div>
-    </div>
-    <div id="stats-tab-stats">
-      <div class="stats-grid">
-        <div class="stat-card"><div class="stat-val">${stats.gamesPlayedEasy + stats.gamesPlayedMedium + stats.gamesPlayedHard}</div><div class="stat-lbl">Games Played</div></div>
-        <div class="stat-card"><div class="stat-val">${stats.totalMatches}</div><div class="stat-lbl">Total Matches</div></div>
-        <div class="stat-card"><div class="stat-val">${stats.highestCombo}x</div><div class="stat-lbl">Highest Combo</div></div>
-        <div class="stat-card"><div class="stat-val">${stats.perfectGames}</div><div class="stat-lbl">Perfect Games</div></div>
-        <div class="stat-card"><div class="stat-val">${stats.bestWinStreak}</div><div class="stat-lbl">Best Win Streak</div></div>
-        <div class="stat-card"><div class="stat-val">${stats.currentWinStreak}</div><div class="stat-lbl">Current Streak</div></div>
-        <div class="stat-card"><div class="stat-val">${formatTime(stats.bestTimeEasy)}</div><div class="stat-lbl">Best Time (Easy)</div></div>
-        <div class="stat-card"><div class="stat-val">${formatTime(stats.bestTimeMedium)}</div><div class="stat-lbl">Best Time (Med)</div></div>
-        <div class="stat-card"><div class="stat-val">${formatTime(stats.bestTimeHard)}</div><div class="stat-lbl">Best Time (Hard)</div></div>
-        <div class="stat-card"><div class="stat-val">${stats.themesPlayed.length}/${Object.keys(THEMES).length}</div><div class="stat-lbl">Themes Played</div></div>
-        <div class="stat-card"><div class="stat-val">${stats.totalMoves}</div><div class="stat-lbl">Total Moves</div></div>
-        <div class="stat-card"><div class="stat-val">${stats.gamesPlayedDaily}</div><div class="stat-lbl">Daily Challenges</div></div>
-      </div>
-    </div>
-    <div id="stats-tab-achievements" class="hidden">
-      <div class="achievement-list">
-        ${achs.map(a => `
-          <div class="ach-item ${a.unlocked ? 'unlocked' : ''}">
-            <div class="ach-icon">${a.icon}</div>
-            <div class="ach-info">
-              <div class="ach-name">${a.name}</div>
-              <div class="ach-desc">${a.desc}</div>
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    </div>
-    <button class="btn-back" onclick="showMenu()" style="margin-top:12px">Back</button>
-  `;
-  screen.classList.remove('hidden');
-}
-
-function switchStatsTab(tab, btn) {
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById('stats-tab-stats').classList.toggle('hidden', tab !== 'stats');
-  document.getElementById('stats-tab-achievements').classList.toggle('hidden', tab !== 'achievements');
-}
-
-const ACHIEVEMENTS = [
-  { id: 'first_match', name: 'First Steps', desc: 'Find your first match', icon: '\u{1F476}', check: s => s.totalMatches >= 1 },
-  { id: 'match_50', name: 'Memory Novice', desc: 'Find 50 total matches', icon: '\u{1F9E0}', check: s => s.totalMatches >= 50 },
-  { id: 'match_200', name: 'Memory Expert', desc: 'Find 200 total matches', icon: '\u{1F393}', check: s => s.totalMatches >= 200 },
-  { id: 'match_500', name: 'Memory Master', desc: 'Find 500 total matches', icon: '\u{1F451}', check: s => s.totalMatches >= 500 },
-  { id: 'speed_demon', name: 'Speed Demon', desc: 'Complete a level in under 30 seconds', icon: '\u{26A1}', check: s => s.bestTimeEasy < 30 || s.bestTimeMedium < 30 || s.bestTimeHard < 30 },
-  { id: 'perfect_memory', name: 'Perfect Memory', desc: 'Complete a level with zero wrong matches', icon: '\u{1F4AF}', check: s => s.perfectGames >= 1 },
-  { id: 'perfect_10', name: 'Flawless Ten', desc: 'Get 10 perfect games', icon: '\u{1F48E}', check: s => s.perfectGames >= 10 },
-  { id: 'combo_3', name: 'Combo Starter', desc: 'Get a 3x combo', icon: '\u{1F525}', check: s => s.highestCombo >= 3 },
-  { id: 'combo_5', name: 'Combo King', desc: 'Get a 5x combo', icon: '\u{1F451}', check: s => s.highestCombo >= 5 },
-  { id: 'combo_8', name: 'Combo Legend', desc: 'Get an 8x combo', icon: '\u{1F31F}', check: s => s.highestCombo >= 8 },
-  { id: 'theme_all', name: 'Theme Explorer', desc: 'Play with all 6 themes', icon: '\u{1F308}', check: s => s.themesPlayed.length >= 6 },
-  { id: 'win_streak_3', name: 'On A Roll', desc: 'Win 3 games in a row', icon: '\u{1F3B2}', check: s => s.bestWinStreak >= 3 },
-  { id: 'win_streak_5', name: 'Unstoppable', desc: 'Win 5 games in a row', icon: '\u{1F680}', check: s => s.bestWinStreak >= 5 },
-  { id: 'games_10', name: 'Dedicated Player', desc: 'Play 10 games', icon: '\u{1F3AE}', check: s => (s.gamesPlayedEasy + s.gamesPlayedMedium + s.gamesPlayedHard) >= 10 },
-  { id: 'games_50', name: 'Veteran', desc: 'Play 50 games', icon: '\u{1F3C6}', check: s => (s.gamesPlayedEasy + s.gamesPlayedMedium + s.gamesPlayedHard) >= 50 },
-  { id: 'daily_1', name: 'Daily Devotee', desc: 'Complete a daily challenge', icon: '\u{1F4C5}', check: s => s.gamesPlayedDaily >= 1 },
-  { id: 'hard_win', name: 'Hardcore', desc: 'Complete all levels on hard', icon: '\u{1F480}', check: s => s.bestTimeHard < Infinity },
-  { id: 'moves_1000', name: 'Card Flipper', desc: 'Make 1000 total moves', icon: '\u{1F0CF}', check: s => s.totalMoves >= 1000 }
-];
-
-function getAchievements() {
-  const stats = getStats();
-  return ACHIEVEMENTS.map(a => ({
-    ...a,
-    unlocked: stats.achievementsUnlocked.includes(a.id)
-  }));
-}
-
-function checkAchievements() {
-  const stats = getStats();
-  let newUnlocks = [];
-  for (const ach of ACHIEVEMENTS) {
-    if (stats.achievementsUnlocked.includes(ach.id)) continue;
-    if (ach.check(stats)) {
-      stats.achievementsUnlocked.push(ach.id);
-      newUnlocks.push(ach);
-    }
-  }
-  if (newUnlocks.length > 0) {
-    saveData('stats', stats);
-    let delay = 0;
-    for (const ach of newUnlocks) {
-      setTimeout(() => showAchievementToast(ach), delay);
-      delay += 2500;
-    }
-  }
-}
-
-function showAchievementToast(ach) {
-  playAchievement();
-  const toast = document.getElementById('ach-toast');
-  toast.querySelector('.at-icon').textContent = ach.icon;
-  toast.querySelector('.at-text').textContent = ach.name;
-  toast.classList.add('show');
-  setTimeout(() => toast.classList.remove('show'), 2000);
-}
-
-let lastT = 0;
-function loop(t) {
-  const dt = Math.min((t - lastT) / 1000, 0.05);
-  lastT = t;
-
-  if (gameActive && !freezeActive) {
-    rotAngle += rotSpeed * dt * 60;
+  // Update flip animations
+  for(let idx in flipAnims){
+    let a=flipAnims[idx];
+    if(a.timer>0){a.timer-=dt;continue}
+    a.progress+=a.direction*dt*4;
+    a.progress=Math.max(0,Math.min(1,a.progress));
   }
 
-  for (const idx in flipAnims) {
-    const a = flipAnims[idx];
-    if (a.timer > 0) { a.timer -= dt; continue; }
-    a.progress += a.direction * dt * 4;
-    a.progress = Math.max(0, Math.min(1, a.progress));
+  // Render
+  let theme=THEMES[currentTheme];
+  ctx.fillStyle=theme.bg;ctx.clearRect(0,0,W,H);
+  ctx.fillRect(0,0,W,H);
+
+  // Background stars/particles
+  ctx.fillStyle=theme.starColor;
+  for(let i=0;i<40;i++){
+    let sx=(i*137.5+Date.now()*0.001*i*0.1)%W;
+    let sy=(i*97.3)%H;
+    ctx.fillRect(sx,sy,1.5,1.5);
   }
 
-  for (const idx in shakeCards) {
-    shakeCards[idx].timer -= dt;
-    if (shakeCards[idx].timer <= 0) delete shakeCards[idx];
+  // Freeze effect
+  if(freezeActive){
+    ctx.fillStyle='rgba(100,200,255,0.05)';
+    ctx.fillRect(0,0,W,H);
   }
 
-  if (matchFlashAlpha > 0) matchFlashAlpha -= dt * 0.8;
-
-  if (gameActive) {
-    const hitIdx = unproject(mouseX, mouseY);
-    hoverCard = hitIdx;
-    for (let i = 0; i < cards.length; i++) {
-      if (!hoverBounce[i]) hoverBounce[i] = 0;
-      if (i === hoverCard && !matched.has(i)) {
-        hoverBounce[i] = Math.min(hoverBounce[i] + dt * 8, 1);
-      } else {
-        hoverBounce[i] = Math.max(hoverBounce[i] - dt * 6, 0);
-      }
-    }
-  }
-
-  if (gameActive && Math.random() < 0.3) {
-    sparkleTrail.push({
-      x: mouseX + (Math.random() - 0.5) * 10,
-      y: mouseY + (Math.random() - 0.5) * 10,
-      life: 0.5,
-      size: 1 + Math.random() * 2,
-      color: CARD_COLORS[Math.floor(Math.random() * CARD_COLORS.length)]
-    });
-  }
-  for (let i = sparkleTrail.length - 1; i >= 0; i--) {
-    sparkleTrail[i].life -= dt;
-    sparkleTrail[i].y -= 0.3;
-    if (sparkleTrail[i].life <= 0) sparkleTrail.splice(i, 1);
-  }
-
-  for (let i = ambientParticles.length - 1; i >= 0; i--) {
-    const p = ambientParticles[i];
-    p.x += p.vx;
-    p.y += p.vy;
-    if (p.y < -10) { p.y = H + 10; p.x = Math.random() * W; }
-    if (p.x < -10) p.x = W + 10;
-    if (p.x > W + 10) p.x = -10;
-  }
-
-  const theme = THEMES[currentTheme];
-  ctx.fillStyle = theme.bg;
-  ctx.clearRect(0, 0, W, H);
-  ctx.fillRect(0, 0, W, H);
-
-  if (gameMode === 'relaxed') {
-    const grd = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W,H)*0.7);
-    grd.addColorStop(0, `rgba(${theme.ambient[0]*255|0},${theme.ambient[1]*255|0},${theme.ambient[2]*255|0},0.15)`);
-    grd.addColorStop(1, 'transparent');
-    ctx.fillStyle = grd;
-    ctx.fillRect(0, 0, W, H);
-  }
-
-  ctx.fillStyle = theme.starColor;
-  for (let i = 0; i < 50; i++) {
-    const sx = (i * 137.5 + Date.now() * 0.001 * i * 0.08) % W;
-    const sy = (i * 97.3 + Math.sin(Date.now() * 0.0005 + i) * 3) % H;
-    const sz = 1 + Math.sin(Date.now() * 0.002 + i * 0.7) * 0.5;
-    ctx.fillRect(sx, sy, sz, sz);
-  }
-
-  for (const p of ambientParticles) {
-    ctx.globalAlpha = p.alpha;
-    ctx.fillStyle = theme.starColor;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-
-  if (freezeActive) {
-    ctx.fillStyle = 'rgba(100,200,255,0.06)';
-    ctx.fillRect(0, 0, W, H);
-    const remaining = Math.max(0, (freezeEndTime - Date.now()) / 1000);
-    ctx.fillStyle = 'rgba(100,200,255,0.5)';
-    ctx.font = 'bold 12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(`FROZEN ${remaining.toFixed(1)}s`, W / 2, H - 70);
-  }
-
-  if (slowmoActive) {
-    ctx.fillStyle = 'rgba(160,100,255,0.04)';
-    ctx.fillRect(0, 0, W, H);
-    const remaining = Math.max(0, (slowmoEndTime - Date.now()) / 1000);
-    ctx.fillStyle = 'rgba(160,100,255,0.5)';
-    ctx.font = 'bold 12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(`SLOW MO ${remaining.toFixed(1)}s`, W / 2, H - 70);
-  }
-
-  const indices = [...Array(cards.length).keys()];
-  indices.sort((a, b) => {
-    const pa = cardPos(a), pb = cardPos(b);
-    const za = project3D(pa.x, pa.y).z;
-    const zb = project3D(pb.x, pb.y).z;
-    return zb - za;
+  // Sort cards by z for proper overlap
+  let indices=[...Array(cards.length).keys()];
+  indices.sort((a,b)=>{
+    let pa=cardPos(a),pb=cardPos(b);
+    let za=project3D(pa.x,pa.y).z;
+    let zb=project3D(pb.x,pb.y).z;
+    return zb-za;
   });
 
-  for (const idx of indices) {
-    const isMatched = matched.has(idx);
-    const card = cards[idx];
-    const pos = cardPos(idx);
-    const pp = project3D(pos.x, pos.y);
-    const s = pp.scale;
+  for(let idx of indices){
+    if(matched.has(idx))continue;
+    let card=cards[idx];
+    let pos=cardPos(idx);
+    let pp=project3D(pos.x,pos.y);
+    let s=pp.scale;
+    let w=cardW*s*0.9,h=cardH*s*0.9;
 
-    const bounce = hoverBounce[idx] || 0;
-    const bounceOffset = Math.sin(bounce * Math.PI) * 3;
-
-    const shake = shakeCards[idx];
-    let shakeX = 0, shakeY = 0;
-    if (shake) {
-      const freq = shake.timer * 40;
-      shakeX = Math.sin(freq) * shake.intensity * shake.timer;
-      shakeY = Math.cos(freq * 1.3) * shake.intensity * shake.timer * 0.5;
+    let flipProg=flipAnims[idx]?flipAnims[idx].progress:0;
+    let isFlipped=flipProg>0.5;
+    // Smoother flip with easing (ease-in-out cubic)
+    let eased=flipProg<0.5?4*flipProg*flipProg*flipProg:1-Math.pow(-2*flipProg+2,3)/2;
+    let flipScale=Math.abs(Math.cos(eased*Math.PI));
+    // Add subtle scale bounce at end of flip
+    let bounceScale=1;
+    if(flipProg>0.8&&flipAnims[idx]&&flipAnims[idx].direction>0){
+      bounceScale=1+Math.sin((flipProg-0.8)*Math.PI/0.2)*0.06;
     }
 
-    let w = cardW * s * 0.9, h = cardH * s * 0.9;
-
-    let flipProg = flipAnims[idx] ? flipAnims[idx].progress : 0;
-    const isFlipped = flipProg > 0.5;
-    const flipAngle = flipProg * Math.PI;
-    const flipScaleX = Math.abs(Math.cos(flipAngle));
-
-    if (isMatched) {
-      const shimmerT = (Date.now() * 0.003 + idx * 0.5) % (Math.PI * 2);
-      const shimmerAlpha = 0.08 + Math.sin(shimmerT) * 0.04;
-      ctx.save();
-      ctx.translate(pp.x, pp.y);
-      const shimmerGrad = ctx.createLinearGradient(-w/2, -h/2, w/2, h/2);
-      const hue1 = (Date.now() * 0.05 + idx * 30) % 360;
-      shimmerGrad.addColorStop(0, `hsla(${hue1},80%,60%,${shimmerAlpha})`);
-      shimmerGrad.addColorStop(0.5, `hsla(${(hue1+60)%360},80%,60%,${shimmerAlpha * 1.5})`);
-      shimmerGrad.addColorStop(1, `hsla(${(hue1+120)%360},80%,60%,${shimmerAlpha})`);
-      ctx.fillStyle = shimmerGrad;
-      roundRect(ctx, -w/2, -h/2, w, h, 8 * s);
-      ctx.fill();
-      ctx.globalAlpha = 0.1 + Math.sin(Date.now() * 0.003) * 0.05;
-      ctx.fillStyle = card.color;
-      ctx.beginPath();
-      ctx.arc(0, 0, 10 * s, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.restore();
-      continue;
-    }
-
-    const isHinted = idx === hintCard;
+    // Hint glow
+    let isHinted=idx===hintCard;
 
     ctx.save();
-    ctx.translate(pp.x + shakeX, pp.y - bounceOffset + shakeY);
+    ctx.translate(pp.x,pp.y);
+    ctx.scale(flipScale*bounceScale,bounceScale);
 
-    if (flipProg > 0 && flipProg < 1) {
-      const tilt = Math.sin(flipAngle) * 0.15;
-      ctx.transform(1, tilt * 0.3, 0, 1, 0, 0);
-    }
-    ctx.scale(flipScaleX, 1);
+    // Card shadow
+    ctx.fillStyle='rgba(0,0,0,0.3)';
+    roundRect(ctx,-(w/2)+3,-(h/2)+3,w,h,8*s);ctx.fill();
 
-    ctx.fillStyle = 'rgba(0,0,0,0.25)';
-    roundRect(ctx, -(w/2) + 3, -(h/2) + 3, w, h, 8 * s);
-    ctx.fill();
-
-    if (isHinted) {
-      ctx.shadowColor = '#ffd93d';
-      ctx.shadowBlur = 20;
+    if(isHinted){
+      ctx.shadowColor='#ffd93d';ctx.shadowBlur=20;
     }
 
-    if (shake) {
-      ctx.strokeStyle = `rgba(255,50,50,${shake.timer * 2})`;
-      ctx.lineWidth = 3;
-      roundRect(ctx, -w/2 - 2, -h/2 - 2, w + 4, h + 4, 10 * s);
-      ctx.stroke();
-    }
-
-    if (isFlipped) {
-      const grad = ctx.createLinearGradient(-w/2, -h/2, w/2, h/2);
-      grad.addColorStop(0, card.color);
-      grad.addColorStop(1, shadeColor(card.color, -30));
-      ctx.fillStyle = grad;
-      roundRect(ctx, -w/2, -h/2, w, h, 8 * s);
-      ctx.fill();
-      ctx.font = `${Math.max(18, 28 * s)}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(card.symbol, 0, 0);
-    } else {
-      const grad = ctx.createLinearGradient(-w/2, -h/2, w/2, h/2);
-      grad.addColorStop(0, theme.cardBack);
-      grad.addColorStop(1, theme.cardBackAlt);
-      ctx.fillStyle = grad;
-      roundRect(ctx, -w/2, -h/2, w, h, 8 * s);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-      ctx.lineWidth = 1;
-      for (let i = -4; i <= 4; i++) {
-        ctx.beginPath();
-        ctx.moveTo(-w/2 + i * 10 * s, -h/2);
-        ctx.lineTo(-w/2 + i * 10 * s + h, h/2);
-        ctx.stroke();
+    if(isFlipped){
+      let grad=ctx.createLinearGradient(-w/2,-h/2,w/2,h/2);
+      grad.addColorStop(0,card.color);
+      grad.addColorStop(1,shadeColor(card.color,-30));
+      ctx.fillStyle=grad;
+      roundRect(ctx,-w/2,-h/2,w,h,8*s);ctx.fill();
+      ctx.font=`${28*s}px sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(card.symbol,0,0);
+    }else{
+      let grad=ctx.createLinearGradient(-w/2,-h/2,w/2,h/2);
+      grad.addColorStop(0,theme.cardBack);grad.addColorStop(1,theme.cardBackAlt);
+      ctx.fillStyle=grad;
+      roundRect(ctx,-w/2,-h/2,w,h,8*s);ctx.fill();
+      ctx.strokeStyle='rgba(255,255,255,0.08)';ctx.lineWidth=1;
+      for(let i=-3;i<=3;i++){
+        ctx.beginPath();ctx.moveTo(-w/2+i*12*s,-h/2);ctx.lineTo(-w/2+i*12*s+h*s,h/2);ctx.stroke();
       }
-      if (xrayActive) {
-        ctx.globalAlpha = 0.3;
-        ctx.font = `${Math.max(16, 24 * s)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#fff';
-        ctx.fillText(card.symbol, 0, 0);
-        ctx.globalAlpha = 1;
-      } else {
-        ctx.fillStyle = 'rgba(255,255,255,0.12)';
-        ctx.font = `bold ${Math.max(14, 18 * s)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('?', 0, 0);
-      }
+      ctx.fillStyle='rgba(255,255,255,0.15)';
+      ctx.font=`bold ${20*s}px sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText('?',0,0);
     }
 
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = isHinted ? 'rgba(255,217,61,0.6)' : bounce > 0 ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.12)';
-    ctx.lineWidth = isHinted ? 2 : 1;
-    roundRect(ctx, -w/2, -h/2, w, h, 8 * s);
-    ctx.stroke();
+    ctx.shadowBlur=0;
+    ctx.strokeStyle=isHinted?'rgba(255,217,61,0.6)':'rgba(255,255,255,0.15)';ctx.lineWidth=isHinted?2:1;
+    roundRect(ctx,-w/2,-h/2,w,h,8*s);ctx.stroke();
 
     ctx.restore();
   }
 
-  for (let i = matchParticles.length - 1; i >= 0; i--) {
-    const p = matchParticles[i];
-    p.x += p.vx;
-    p.y += p.vy;
-    p.vy += 0.08;
-    p.life -= 0.018;
-    if (p.life <= 0) { matchParticles.splice(i, 1); continue; }
-    ctx.globalAlpha = p.life;
-    ctx.fillStyle = p.color;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-
-  for (let i = confettiParticles.length - 1; i >= 0; i--) {
-    const p = confettiParticles[i];
-    p.x += p.vx;
-    p.y += p.vy;
-    p.vy += 0.1;
-    p.vx *= 0.99;
-    p.rotation += p.rotSpeed;
-    p.life -= p.decay;
-    if (p.life <= 0) { confettiParticles.splice(i, 1); continue; }
-    ctx.save();
-    ctx.translate(p.x, p.y);
-    ctx.rotate(p.rotation);
-    ctx.globalAlpha = Math.min(1, p.life * 2);
-    ctx.fillStyle = p.color;
-    ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
-    ctx.restore();
-  }
-  ctx.globalAlpha = 1;
-
-  for (let i = sparkleTrail.length - 1; i >= 0; i--) {
-    const p = sparkleTrail[i];
-    ctx.globalAlpha = p.life * 0.6;
-    ctx.fillStyle = p.color;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-
-  if (matchFlashAlpha > 0 && matchFlashPos) {
-    const radius = (0.3 - matchFlashAlpha) * 500;
-    ctx.strokeStyle = `rgba(255,255,255,${matchFlashAlpha})`;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(matchFlashPos.x, matchFlashPos.y, radius, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fillStyle = `rgba(255,255,255,${matchFlashAlpha * 0.1})`;
-    ctx.fill();
+  // Match particles
+  for(let i=matchParticles.length-1;i>=0;i--){
+    let p=matchParticles[i];
+    p.x+=p.vx;p.y+=p.vy;p.vy+=0.08;p.life-=0.02;
+    if(p.life<=0){matchParticles.splice(i,1);continue}
+    ctx.globalAlpha=p.life;ctx.fillStyle=p.color;
+    ctx.beginPath();ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;
   }
 
-  if (extraLifeAvailable) {
-    ctx.fillStyle = 'rgba(100,200,100,0.5)';
-    ctx.font = 'bold 11px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('\u{1F49A} Extra Life Active', W / 2, H - 68);
-  }
+  // Matched card glow
+  matched.forEach(idx=>{
+    let pos=cardPos(idx);
+    let pp=project3D(pos.x,pos.y);
+    ctx.fillStyle=cards[idx].color;
+    ctx.globalAlpha=0.1+Math.sin(Date.now()*0.003)*0.05;
+    ctx.beginPath();ctx.arc(pp.x,pp.y,8*pp.scale,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;
+  });
 
   requestAnimationFrame(loop);
 }
 
-function roundRect(c, x, y, w, h, r) {
-  c.beginPath();
-  c.moveTo(x + r, y);
-  c.lineTo(x + w - r, y);
-  c.quadraticCurveTo(x + w, y, x + w, y + r);
-  c.lineTo(x + w, y + h - r);
-  c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  c.lineTo(x + r, y + h);
-  c.quadraticCurveTo(x, y + h, x, y + h - r);
-  c.lineTo(x, y + r);
-  c.quadraticCurveTo(x, y, x + r, y);
-  c.closePath();
+function roundRect(c,x,y,w,h,r){
+  c.beginPath();c.moveTo(x+r,y);c.lineTo(x+w-r,y);c.quadraticCurveTo(x+w,y,x+w,y+r);
+  c.lineTo(x+w,y+h-r);c.quadraticCurveTo(x+w,y+h,x+w-r,y+h);c.lineTo(x+r,y+h);
+  c.quadraticCurveTo(x,y+h,x,y+h-r);c.lineTo(x,y+r);c.quadraticCurveTo(x,y,x+r,y);c.closePath();
 }
 
-function shadeColor(color, percent) {
-  const num = parseInt(color.replace('#', ''), 16);
-  const r = Math.min(255, Math.max(0, (num >> 16) + percent));
-  const g = Math.min(255, Math.max(0, ((num >> 8) & 0xff) + percent));
-  const b = Math.min(255, Math.max(0, (num & 0xff) + percent));
-  return '#' + (r << 16 | g << 8 | b).toString(16).padStart(6, '0');
+function shadeColor(color,percent){
+  let num=parseInt(color.replace('#',''),16);
+  let r=Math.min(255,Math.max(0,(num>>16)+percent));
+  let g=Math.min(255,Math.max(0,((num>>8)&0xff)+percent));
+  let b=Math.min(255,Math.max(0,(num&0xff)+percent));
+  return`#${(r<<16|g<<8|b).toString(16).padStart(6,'0')}`;
 }
 
-window.addEventListener('resize', resize);
-initThemeSelect();
+window.addEventListener('resize',resize);
 resize();
 requestAnimationFrame(loop);
 </script>

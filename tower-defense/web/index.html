@@ -240,6 +240,35 @@ C.addEventListener('click',e=>{
 C.addEventListener('mousemove',e=>{hoverCell=pixelToCell(e.clientX,e.clientY)});
 C.addEventListener('mouseleave',()=>{hoverCell=null});
 
+C.addEventListener('touchstart',e=>{
+  e.preventDefault();
+  if(!gameActive)return;
+  getACtx();
+  let touch=e.touches[0];
+  let cell=pixelToCell(touch.clientX,touch.clientY);
+  if(!cell)return;
+  hoverCell=cell;
+  let existing=towers.find(t=>t.c===cell.c&&t.r===cell.r);
+  if(existing&&!selectedType){selectedTower=existing;showUpgrade(existing);return}
+  if(!selectedType)return;
+  if(grid[cell.r][cell.c]!==0)return;
+  let cost=TOWER_TYPES[selectedType].cost;
+  if(gold<cost)return;
+  gold-=cost;
+  let tt=TOWER_TYPES[selectedType];
+  let t={...tt,type:selectedType,c:cell.c,r:cell.r,level:1,cooldown:0,kills:0};
+  towers.push(t);
+  grid[cell.r][cell.c]=2;
+  snd(600,0.1);
+  updateHUD();
+},{passive:false});
+C.addEventListener('touchmove',e=>{
+  e.preventDefault();
+  let touch=e.touches[0];
+  hoverCell=pixelToCell(touch.clientX,touch.clientY);
+},{passive:false});
+C.addEventListener('touchend',e=>{e.preventDefault();hoverCell=null},{passive:false});
+
 function showUpgrade(t){
   let panel=document.getElementById('upgrade-panel');
   panel.classList.remove('hidden');

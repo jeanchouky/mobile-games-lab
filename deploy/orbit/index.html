@@ -35,7 +35,7 @@ canvas{display:block}
   <h1>ORBIT</h1>
   <div class="sub">Tap to launch satellites into orbit around planets. Find stable orbits to complete each level.<br><br><b>How to play:</b> Tap near a planet to launch a satellite. Gravity pulls it — aim for a stable orbit that lasts 3 seconds.</div>
   <button class="btn" onclick="startLevel(1)">LAUNCH</button>
-  <button class="btn" style="background:rgba(255,255,255,0.08);border-color:rgba(255,215,0,0.3);color:#ffd700" onclick="startSandbox()">SANDBOX</button>
+  <button class="btn" style="background:linear-gradient(135deg,#2a3a2a,#3a5a3a);border-color:rgba(107,203,119,0.3);color:#6bcb77" onclick="startSandbox()">🪐 SANDBOX</button>
   <div style="color:#556;font-size:0.7rem;margin-top:12px">Sandbox: place planets freely and experiment</div>
 </div>
 
@@ -75,11 +75,13 @@ function playTone(f,d=0.2,t='sine',v=0.06){
 const G=0.5;
 let planets,satellites,blackHoles,asteroids;
 let level,satsToLaunch,satsInOrbit,totalSats,gameActive,launchMode;
+let sandboxMode=false;
 let stars=[];
 let particles=[];
 let checkTimer=0; // seconds for fail check
+let predictTrail=[];
+let hoverPos=null;
 let lastFrameTime=0;
-let sandboxMode=false;
 let showPrediction=true;
 
 for(let i=0;i<200;i++)stars.push({x:Math.random(),y:Math.random(),s:Math.random()*1.5+0.5,b:Math.random()});
@@ -105,8 +107,10 @@ function showMenu(){
   gameActive=false;
 }
 
+// startSandbox is defined below after predictOrbit
+
 function startLevel(n){
-  ensureAudio();
+  ensureAudio();sandboxMode=false;predictTrail=[];hoverPos=null;
   if(n>LEVELS.length-1){showMenu();return}
   level=n;
   document.getElementById('menu').classList.add('hidden');
@@ -136,6 +140,9 @@ function updateHud(){
 
 canvas.addEventListener('touchstart',e=>{e.preventDefault();handleTap(e.touches[0].clientX,e.touches[0].clientY)},{passive:false});
 canvas.addEventListener('click',e=>handleTap(e.clientX,e.clientY));
+canvas.addEventListener('mousemove',e=>{if(gameActive&&launchMode)computePredict(e.clientX,e.clientY)});
+canvas.addEventListener('touchmove',e=>{e.preventDefault();if(gameActive&&launchMode&&e.touches[0])computePredict(e.touches[0].clientX,e.touches[0].clientY)},{passive:false});
+canvas.addEventListener('mouseleave',()=>{predictTrail=[];hoverPos=null});
 
 function handleTap(tx,ty){
   if(!gameActive||!launchMode||satsToLaunch<=0)return;
@@ -162,6 +169,27 @@ function handleTap(tx,ty){
 }
 
 function dist(x1,y1,x2,y2){return Math.sqrt((x1-x2)**2+(y1-y2)**2)}
+
+function computePredict(tx,ty){
+  hoverPos={x:tx,y:ty};
+  for(const p of planets)if(dist(tx,ty,p.x,p.y)<p.r+20){predictTrail=[];return}
+  for(const b of blackHoles)if(dist(tx,ty,b.x,b.y)<b.r+20){predictTrail=[];return}
+  let nearest=planets[0],nd=Infinity;
+  for(const p of planets){const d=dist(tx,ty,p.x,p.y);if(d<nd){nd=d;nearest=p}}
+  const dx=tx-nearest.x,dy=ty-nearest.y;
+  const d=Math.sqrt(dx*dx+dy*dy);
+  const orbV=Math.sqrt(G*nearest.m/d)*0.7;
+  let sx=tx,sy=ty,svx=-dy/d*orbV,svy=dx/d*orbV;
+  predictTrail=[];
+  for(let i=0;i<120;i++){
+    let ax=0,ay=0;let hit=false;
+    for(const p of planets){const ddx=p.x-sx,ddy=p.y-sy;const dd=Math.max(dist(sx,sy,p.x,p.y),p.r);const f=G*p.m/(dd*dd);ax+=f*ddx/dd;ay+=f*ddy/dd;if(dist(sx,sy,p.x,p.y)<p.r)hit=true}
+    for(const b of blackHoles){const ddx=b.x-sx,ddy=b.y-sy;const dd=Math.max(dist(sx,sy,b.x,b.y),5);const f=G*b.m/(dd*dd);ax+=f*ddx/dd;ay+=f*ddy/dd;if(dist(sx,sy,b.x,b.y)<b.r)hit=true}
+    if(hit||sx<-50||sx>W+50||sy<-50||sy>H+50)break;
+    svx+=ax;svy+=ay;sx+=svx;sy+=svy;
+    if(i%2===0)predictTrail.push({x:sx,y:sy});
+  }
+}
 
 function tick(dt){
   if(!gameActive)return;
@@ -229,7 +257,7 @@ function tick(dt){
     return;
   }
 
-  // Fail check: time-based, not frame-count based
+  // Fail check: time-based, only after all launched and waited a bit (skip in sandbox)
   if(!launchMode&&!sandboxMode){
     checkTimer+=dt;
     if(checkTimer>2){
@@ -291,8 +319,9 @@ function startSandbox(){
   document.getElementById('level-complete').classList.add('hidden');
   document.getElementById('fail-screen').classList.add('hidden');
   document.getElementById('hud').classList.remove('hidden');
-  planets=[{x:W/2,y:H/2,r:25,m:800,color:'#4a9eff',pulse:0}];
-  blackHoles=[];asteroids=[];satellites=[];particles=[];
+  level=0;
+  planets=[{x:W*0.5,y:H*0.5,r:30,m:1000,color:'#ffd700',pulse:0},{x:W*0.25,y:H*0.35,r:18,m:400,color:'#4a9eff',pulse:0},{x:W*0.75,y:H*0.65,r:20,m:500,color:'#ff6b6b',pulse:0}];
+  blackHoles=[];asteroids=[];satellites=[];particles=[];predictTrail=[];hoverPos=null;
   totalSats=999;satsToLaunch=999;satsInOrbit=0;
   gameActive=true;launchMode=true;checkTimer=0;
   document.getElementById('level-text').textContent='Sandbox';
@@ -368,6 +397,17 @@ function draw(timestamp){
     }
   }
   
+  // Prediction trail (dotted)
+  if(predictTrail.length>1&&gameActive&&launchMode){
+    ctx.setLineDash([4,6]);ctx.lineWidth=1.5;
+    for(let i=1;i<predictTrail.length;i++){
+      const alpha=0.5*(1-i/predictTrail.length);
+      ctx.strokeStyle=`rgba(126,200,227,${alpha})`;
+      ctx.beginPath();ctx.moveTo(predictTrail[i-1].x,predictTrail[i-1].y);ctx.lineTo(predictTrail[i].x,predictTrail[i].y);ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  }
+
   // Asteroids
   for(const a of asteroids){
     ctx.fillStyle='#555';ctx.beginPath();ctx.arc(a.x,a.y,a.r,0,Math.PI*2);ctx.fill();
@@ -453,7 +493,7 @@ function draw(timestamp){
   // Particles
   for(let i=particles.length-1;i>=0;i--){
     const p=particles[i];
-    const d60=dt*60;p.x+=p.vx*d60;p.y+=p.vy*d60;p.vx*=Math.pow(0.98,d60);p.vy*=Math.pow(0.98,d60);p.life-=dt*1.2;
+    p.x+=p.vx;p.y+=p.vy;p.vx*=0.98;p.vy*=0.98;p.life-=dt*1.2;
     if(p.life<=0){particles.splice(i,1);continue}
     ctx.globalAlpha=p.life;ctx.fillStyle=p.color;
     ctx.beginPath();ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);ctx.fill();
