@@ -32,6 +32,14 @@ canvas{display:block}
 .grade{font-size:3rem;font-weight:900;margin:8px 0}
 .controls-hint{color:#555;font-size:0.7rem;margin-top:16px;line-height:1.6}
 .hidden{display:none!important}
+.song-card{background:rgba(255,255,255,0.05);border:2px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px;margin:6px 0;cursor:pointer;transition:all .15s;text-align:left}
+.song-card:active{transform:scale(0.97)}
+.song-card.selected{border-color:#ff006e;background:rgba(255,0,110,0.12);box-shadow:0 0 15px rgba(255,0,110,0.3)}
+.song-card .s-name{font-weight:800;font-size:0.95rem;color:#fff}
+.song-card .s-artist{font-size:0.75rem;color:#888}
+.song-card .s-info{font-size:0.7rem;color:#666;margin-top:4px;display:flex;gap:8px}
+.song-card .s-best{font-size:0.7rem;color:#ffd700;margin-top:2px}
+.combo-overlay{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5}
 </style>
 </head>
 <body>
@@ -40,6 +48,7 @@ canvas{display:block}
 <div class="overlay" id="menu">
   <h1>RHYTHM TAP</h1>
   <div class="sub">Tap the notes as they cross the line</div>
+  <div id="song-select" style="width:90%;max-width:340px;margin-bottom:12px"></div>
   <div style="color:#666;font-size:0.8rem;margin-bottom:4px">Difficulty</div>
   <div class="diff-btns">
     <button class="diff-btn" data-diff="easy">Easy<br><span style="font-size:0.7rem;color:#888">2 lanes</span></button>
@@ -67,7 +76,7 @@ let W,H;
 function resize(){W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight}
 window.addEventListener('resize',resize);resize();
 
-let audioCtx,difficulty='normal';
+let audioCtx,difficulty='normal',selectedSong=0;
 const CONFIGS={easy:{lanes:2,bpm:100,noteInterval:600},normal:{lanes:3,bpm:120,noteInterval:450},hard:{lanes:4,bpm:140,noteInterval:350}};
 const LANE_COLORS=['#ff006e','#8338ec','#3a86ff','#ff9500'];
 const HIT_LINE_Y_PCT=0.82;
@@ -75,8 +84,169 @@ const HIT_LINE_Y_PCT=0.82;
 let notes,score,combo,maxCombo,perfects,goods,misses,particles;
 let songTime,gameActive,notePattern;
 let hitEffects=[];
-let laneFlash=[]; // per-lane flash on tap
+let laneFlash=[];
 let bgPulse=0;
+let comboGlowIntensity=0;
+let screenFlashColor='';
+let screenFlashAlpha=0;
+
+// ============================================================
+// BUILT-IN SONGS WITH BEAT MAPS
+// ============================================================
+const SONGS=[
+  {
+    name:'Neon Dreams',
+    artist:'Synthwave',
+    bpm:120,
+    duration:32000,
+    color:'#ff006e',
+    // Beat map: [time_ms, lane(0-3)] — composed to feel musical
+    buildBeatMap(lanes){
+      const b=60000/this.bpm; // beat duration in ms
+      const map=[];
+      // Intro: gentle single notes (bars 1-4)
+      [0,1,2,3,4,5,6,7].forEach(i=>{
+        map.push({time:2000+i*b,lane:i%lanes});
+      });
+      // Build: alternating pattern (bars 5-8)
+      for(let i=0;i<16;i++){
+        map.push({time:6000+i*b/2,lane:i%2===0?0:lanes-1});
+      }
+      // Chorus 1: intense rhythm (bars 9-16)
+      for(let i=0;i<16;i++){
+        map.push({time:10000+i*b,lane:i%lanes});
+        if(i%4===2&&lanes>2)map.push({time:10000+i*b,lane:Math.min(2,lanes-1)});// doubles
+        if(i%2===1)map.push({time:10000+i*b+b/2,lane:(i+1)%lanes});// offbeats
+      }
+      // Break: sparse melody (bars 17-20)
+      [0,2,3,5,7].forEach(i=>{
+        map.push({time:18000+i*b,lane:i%lanes});
+      });
+      // Chorus 2: full intensity (bars 21-28)
+      for(let i=0;i<16;i++){
+        map.push({time:22000+i*b/2,lane:i%lanes});
+        if(i%8===4)map.push({time:22000+i*b/2,lane:(i+2)%lanes});
+      }
+      // Outro: fade (bars 29-32)
+      [0,2,4,7].forEach(i=>{
+        map.push({time:30000+i*b,lane:i%lanes});
+      });
+      return map;
+    }
+  },
+  {
+    name:'Pixel Warrior',
+    artist:'Chiptune',
+    bpm:140,
+    duration:30000,
+    color:'#8338ec',
+    buildBeatMap(lanes){
+      const b=60000/this.bpm;
+      const map=[];
+      // Fast intro: gallop rhythm
+      for(let i=0;i<8;i++){
+        map.push({time:1500+i*b,lane:0});
+        map.push({time:1500+i*b+b*0.33,lane:Math.min(1,lanes-1)});
+        map.push({time:1500+i*b+b*0.66,lane:0});
+      }
+      // Verse: melodic pattern
+      const melody=[0,1,2,1,0,2,1,0,1,2,0,2];
+      melody.forEach((l,i)=>{
+        map.push({time:5000+i*b,lane:l%lanes});
+      });
+      // Pre-chorus: build tension with doubles
+      for(let i=0;i<8;i++){
+        map.push({time:10000+i*b/2,lane:i%lanes});
+        if(i>=4)map.push({time:10000+i*b/2+b/4,lane:(i+1)%lanes});
+      }
+      // Chorus: 16th note streams
+      for(let i=0;i<32;i++){
+        map.push({time:13000+i*b/2,lane:i%lanes});
+      }
+      // Bridge: syncopated
+      for(let i=0;i<12;i++){
+        const offset=i%3===2?b*0.75:i%3===1?b*0.5:0;
+        map.push({time:20000+i*b+offset,lane:i%lanes});
+      }
+      // Final chorus: everything
+      for(let i=0;i<24;i++){
+        map.push({time:24000+i*b/2,lane:i%lanes});
+        if(i%6===3&&lanes>=3)map.push({time:24000+i*b/2,lane:2});
+      }
+      return map;
+    }
+  },
+  {
+    name:'Midnight Drive',
+    artist:'Lo-Fi',
+    bpm:95,
+    duration:35000,
+    color:'#3a86ff',
+    buildBeatMap(lanes){
+      const b=60000/this.bpm;
+      const map=[];
+      // Slow intro: spacious (bars 1-4)
+      [0,3,4,7].forEach(i=>{
+        map.push({time:2500+i*b,lane:i%lanes});
+      });
+      // Groove: laid-back swing (bars 5-12)
+      for(let i=0;i<16;i++){
+        map.push({time:6000+i*b,lane:i%lanes});
+        if(i%2===1)map.push({time:6000+i*b+b*0.6,lane:(i+1)%lanes}); // swing feel
+      }
+      // Drop: heavy beats (bars 13-20)
+      for(let i=0;i<16;i++){
+        map.push({time:14000+i*b,lane:0});
+        if(i%2===0)map.push({time:14000+i*b+b/2,lane:Math.min(1,lanes-1)});
+        if(i%4===0&&lanes>2)map.push({time:14000+i*b,lane:2});
+      }
+      // Chill section (bars 21-24)
+      for(let i=0;i<8;i++){
+        map.push({time:22000+i*b*1.5,lane:i%lanes});
+      }
+      // Final groove (bars 25-32)
+      for(let i=0;i<16;i++){
+        map.push({time:26000+i*b,lane:i%lanes});
+        if(i%3===0)map.push({time:26000+i*b+b*0.33,lane:(i+2)%lanes});
+      }
+      // Ending
+      [0,1,3].forEach(i=>{
+        map.push({time:33000+i*b,lane:i%lanes});
+      });
+      return map;
+    }
+  },
+];
+
+// Song melodies for audio (frequency sequences per song)
+const SONG_MELODIES=[
+  // Neon Dreams - C major pentatonic
+  [523,587,659,784,880,784,659,587,523,659,784,880,1047,880,784,659],
+  // Pixel Warrior - A minor fast
+  [440,523,587,659,587,523,440,523,659,784,659,523,440,392,440,523],
+  // Midnight Drive - D minor jazzy
+  [293,349,440,523,440,349,293,262,293,349,392,440,392,349,293,262],
+];
+
+function renderSongSelect(){
+  const el=document.getElementById('song-select');
+  el.innerHTML='<div style="color:#666;font-size:0.8rem;margin-bottom:4px;text-align:center">Select Song</div>';
+  SONGS.forEach((song,i)=>{
+    const card=document.createElement('div');
+    card.className='song-card'+(i===selectedSong?' selected':'');
+    const key=`rhythmtap_${song.name}_${difficulty}`;
+    const best=parseInt(localStorage.getItem(key))||0;
+    card.innerHTML=`
+      <div class="s-name" style="color:${song.color}">${song.name}</div>
+      <div class="s-artist">${song.artist}</div>
+      <div class="s-info"><span>♫ ${song.bpm} BPM</span><span>⏱ ${Math.round(song.duration/1000)}s</span></div>
+      ${best>0?`<div class="s-best">★ Best: ${best}</div>`:''}
+    `;
+    card.onclick=()=>{selectedSong=i;renderSongSelect()};
+    el.appendChild(card);
+  });
+}
+renderSongSelect();
 
 function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)()}
 
@@ -120,44 +290,16 @@ function playHit(quality){
 
 function playMiss(){playNote(200,0.15,'sawtooth',0.04)}
 
-// Generate musical patterns with structure
+// Legacy random pattern generator (fallback)
 function generatePattern(cfg){
   const pattern=[];
   const duration=35000;
   const beatMs=60000/cfg.bpm;
   let t=2000;
-  const lanes=cfg.lanes;
-  
-  // Create sections: intro, build, chorus, break, chorus, outro
-  const sections=[
-    {start:2000,end:8000,density:0.5,name:'intro'},
-    {start:8000,end:16000,density:0.7,name:'build'},
-    {start:16000,end:24000,density:0.9,name:'chorus'},
-    {start:24000,end:28000,density:0.4,name:'break'},
-    {start:28000,end:34000,density:0.95,name:'chorus2'},
-  ];
-  
   while(t<duration){
-    const section=sections.find(s=>t>=s.start&&t<s.end)||{density:0.3};
-    
-    if(Math.random()<section.density){
-      const lane=Math.floor(Math.random()*lanes);
-      pattern.push({time:t,lane});
-      
-      // Double notes in chorus
-      if(section.name?.includes('chorus')&&Math.random()<0.25){
-        let lane2;
-        do{lane2=Math.floor(Math.random()*lanes)}while(lane2===lane);
-        pattern.push({time:t,lane:lane2});
-      }
+    if(Math.random()<0.7){
+      pattern.push({time:t,lane:Math.floor(Math.random()*cfg.lanes)});
     }
-    
-    // Occasional half-beat notes
-    if(Math.random()<section.density*0.3){
-      const lane=Math.floor(Math.random()*lanes);
-      pattern.push({time:t+beatMs/2,lane});
-    }
-    
     t+=beatMs;
   }
   return{pattern,duration};
@@ -167,6 +309,7 @@ document.querySelectorAll('.diff-btn').forEach(b=>{
   b.addEventListener('click',()=>{
     document.querySelectorAll('.diff-btn').forEach(x=>x.classList.remove('active'));
     b.classList.add('active');difficulty=b.dataset.diff;
+    renderSongSelect();
   });
 });
 
@@ -177,33 +320,44 @@ function startGame(){
   initAudio();
   document.getElementById('menu').classList.add('hidden');
   document.getElementById('results').classList.add('hidden');
-  
+
   const cfg=CONFIGS[difficulty];
-  const song=generatePattern(cfg);
+  const songData=SONGS[selectedSong];
+  const beatMap=songData.buildBeatMap(cfg.lanes);
+  const song={pattern:beatMap,duration:songData.duration,bpm:songData.bpm};
   notePattern=song;
-  
+
   notes=[];score=0;combo=0;maxCombo=0;perfects=0;goods=0;misses=0;
   particles=[];hitEffects=[];laneFlash=new Array(cfg.lanes).fill(0);
-  songTime=0;gameActive=true;bgPulse=0;
+  songTime=0;gameActive=true;bgPulse=0;comboGlowIntensity=0;screenFlashAlpha=0;
   
   let patIdx=0;
   const hitLineY=H*HIT_LINE_Y_PCT;
-  const noteSpeed=H*0.0008; // pixels per ms
+  const noteSpeed=H*0.0008;
   const travelTime=hitLineY/noteSpeed;
-  
+
   let lastFrame=performance.now();
   let beatTimer=0;
-  const beatMs=60000/cfg.bpm;
+  const beatMs=60000/(song.bpm||cfg.bpm);
   let halfBeatTimer=0;
-  
+  let melodyIdx=0;
+  const melody=SONG_MELODIES[selectedSong]||[];
+
   function gameLoop(now){
     if(!gameActive)return;
     const dt=Math.min(now-lastFrame,50);lastFrame=now;
     songTime+=dt;
     beatTimer+=dt;
     halfBeatTimer+=dt;
-    
-    if(beatTimer>=beatMs){beatTimer-=beatMs;playBeat();bgPulse=1}
+
+    if(beatTimer>=beatMs){
+      beatTimer-=beatMs;playBeat();bgPulse=1;
+      // Play melody note
+      if(melody.length>0){
+        playNote(melody[melodyIdx%melody.length],0.2,'sine',0.06);
+        melodyIdx++;
+      }
+    }
     if(halfBeatTimer>=beatMs/2){halfBeatTimer-=beatMs/2;if(Math.random()<0.3)playHihat()}
     
     while(patIdx<song.pattern.length){
@@ -221,7 +375,7 @@ function startGame(){
       n.y=progress*hitY;
       
       if(!n.hit&&n.y>hitY+60){
-        n.missed=true;combo=0;misses++;
+        n.missed=true;combo=0;misses++;comboGlowIntensity=0;
         notes.splice(i,1);
       }
       if(n.hit&&n.y>H+50)notes.splice(i,1);
@@ -262,11 +416,19 @@ function tryHit(laneIdx){
   
   closest.hit=true;
   let quality;
-  if(closestDist<18){quality='perfect';score+=100*(1+combo*0.1);perfects++;playHit('perfect')}
-  else if(closestDist<45){quality='good';score+=50*(1+combo*0.05);goods++;playHit('good')}
+  const comboMulti=1+Math.floor(combo/10)*0.5; // 1x, 1.5x, 2x...
+  if(closestDist<18){quality='perfect';score+=Math.round(100*comboMulti);perfects++;playHit('perfect')}
+  else if(closestDist<45){quality='good';score+=Math.round(50*comboMulti);goods++;playHit('good')}
   else{quality='good';score+=25;goods++;playHit('good')}
-  
+
   combo++;if(combo>maxCombo)maxCombo=combo;
+  comboGlowIntensity=Math.min(1,combo/20);
+
+  // Combo milestone effects
+  if(combo===10||combo===25||combo===50||combo===100){
+    screenFlashColor=combo>=50?'#ffd700':combo>=25?'#ff006e':'#8338ec';
+    screenFlashAlpha=0.3;
+  }
   
   const cfg=CONFIGS[difficulty];
   const laneW=W/cfg.lanes;
@@ -402,31 +564,84 @@ function draw(cfg,hitLineY,beatPhase){
     ctx.globalAlpha=1;
   }
 
+  // Screen flash effect
+  if(screenFlashAlpha>0){
+    ctx.save();
+    ctx.globalAlpha=screenFlashAlpha;
+    ctx.fillStyle=screenFlashColor;
+    ctx.fillRect(0,0,W,H);
+    ctx.restore();
+    screenFlashAlpha*=0.9;
+  }
+
+  // Combo glow border effect
+  if(comboGlowIntensity>0.2){
+    ctx.save();
+    const glowColor=combo>=50?'#ffd700':combo>=25?'#ff006e':'#8338ec';
+    const gw=8*comboGlowIntensity;
+    ctx.shadowBlur=20*comboGlowIntensity;
+    ctx.shadowColor=glowColor;
+    ctx.strokeStyle=glowColor;
+    ctx.lineWidth=gw;
+    ctx.globalAlpha=comboGlowIntensity*0.4;
+    ctx.strokeRect(-gw/2,-gw/2,W+gw,H+gw);
+    ctx.restore();
+    comboGlowIntensity*=0.995;
+  }
+
   // HUD
   ctx.fillStyle='#fff';ctx.font='bold 1.2rem sans-serif';ctx.textAlign='left';
   ctx.fillText(Math.round(score),16,32);
 
-  // Streak counter
-  if(combo>0){
-    const streakAlpha=Math.min(1,combo/5);
-    ctx.fillStyle=combo>=20?'#ff006e':combo>=10?'#ffd700':'rgba(255,255,255,0.7)';
-    ctx.font='bold 0.7rem sans-serif';ctx.textAlign='right';
-    ctx.fillText(`🔥 ${combo} streak`,W-16,28);
+  // Live grade indicator
+  const total=perfects+goods+misses;
+  if(total>0){
+    const acc=Math.round((perfects+goods*0.5)/total*100);
+    const liveGrade=acc>=95?'S':acc>=85?'A':acc>=70?'B':acc>=50?'C':'F';
+    const gc={S:'#ffd700',A:'#00f5d4',B:'#3a86ff',C:'#ff9500',F:'#e94560'};
+    ctx.fillStyle=gc[liveGrade];
+    ctx.font='bold 1rem sans-serif';ctx.textAlign='left';
+    ctx.fillText(liveGrade,16,52);
   }
 
-  // Combo with scaling effect
-  if(combo>1){
-    const comboScale=combo>10?1.3:combo>5?1.15:1;
-    ctx.fillStyle=combo>20?'#ff006e':combo>10?'#ffd700':'#fff';
-    ctx.font=`bold ${1*comboScale}rem sans-serif`;ctx.textAlign='center';
-    ctx.fillText(`${combo}x`,W/2,32);
+  // Combo display with multiplier
+  if(combo>0){
+    const comboMulti=1+Math.floor(combo/10)*0.5;
+    ctx.fillStyle=combo>=50?'#ffd700':combo>=20?'#ff006e':combo>=10?'#8338ec':'rgba(255,255,255,0.7)';
+    ctx.font=`bold ${combo>=20?'1.1rem':combo>=10?'0.95rem':'0.8rem'} sans-serif`;
+    ctx.textAlign='right';
+    ctx.fillText(`🔥 ${combo}`,W-16,28);
+    if(comboMulti>1){
+      ctx.fillStyle='#ffd700';
+      ctx.font='bold 0.7rem sans-serif';
+      ctx.fillText(`${comboMulti.toFixed(1)}x`,W-16,44);
+    }
   }
-  
+
+  // Song name
+  ctx.fillStyle='rgba(255,255,255,0.3)';
+  ctx.font='0.65rem sans-serif';ctx.textAlign='center';
+  ctx.fillText(SONGS[selectedSong].name,W/2,16);
+
+  // Combo center display with glow
+  if(combo>=10){
+    const comboScale=Math.min(2,1+combo/50);
+    ctx.save();
+    ctx.fillStyle=combo>=50?'#ffd700':combo>=25?'#ff006e':'#8338ec';
+    ctx.shadowColor=ctx.fillStyle;
+    ctx.shadowBlur=15;
+    ctx.font=`bold ${1.2*comboScale}rem sans-serif`;ctx.textAlign='center';
+    ctx.globalAlpha=0.6+Math.sin(Date.now()*0.008)*0.2;
+    ctx.fillText(`${combo}x`,W/2,60);
+    ctx.restore();
+  }
+
   // Progress bar
   const prog=Math.min(songTime/(notePattern.duration),1);
   ctx.fillStyle='rgba(255,255,255,0.08)';ctx.fillRect(0,H-4,W,4);
   const progGrad=ctx.createLinearGradient(0,0,W*prog,0);
-  progGrad.addColorStop(0,'#ff006e');progGrad.addColorStop(1,'#3a86ff');
+  const songColor=SONGS[selectedSong].color;
+  progGrad.addColorStop(0,songColor);progGrad.addColorStop(1,'#3a86ff');
   ctx.fillStyle=progGrad;ctx.fillRect(0,H-4,W*prog,4);
 }
 
@@ -434,21 +649,23 @@ function showResults(){
   score=Math.round(score);
   const total=perfects+goods+misses;
   const accuracy=total>0?Math.round((perfects+goods*0.5)/total*100):0;
-  const grade=accuracy>=95?'S':accuracy>=85?'A':accuracy>=70?'B':accuracy>=50?'C':'D';
-  const gradeColors={S:'#ffd700',A:'#00f5d4',B:'#3a86ff',C:'#ff9500',D:'#e94560'};
-  
+  const grade=accuracy>=95?'S':accuracy>=85?'A':accuracy>=70?'B':accuracy>=50?'C':'F';
+  const gradeColors={S:'#ffd700',A:'#00f5d4',B:'#3a86ff',C:'#ff9500',F:'#e94560'};
+  const gradeDescriptions={S:'★ PERFECT ★',A:'Excellent!',B:'Good job!',C:'Not bad...',F:'Keep practicing!'};
+
   document.getElementById('r-grade').textContent=grade;
   document.getElementById('r-grade').style.color=gradeColors[grade];
   document.getElementById('r-score').textContent=score;
-  document.getElementById('r-combo').textContent=`Max Combo: ${maxCombo}x • Accuracy: ${accuracy}%`;
+  document.getElementById('r-combo').textContent=`Max Combo: ${maxCombo}x • Accuracy: ${accuracy}% • ${gradeDescriptions[grade]}`;
   document.getElementById('r-acc').textContent=`Perfect: ${perfects} | Good: ${goods} | Miss: ${misses}`;
-  
-  const key=`rhythmtap_${difficulty}`;
+
+  const key=`rhythmtap_${SONGS[selectedSong].name}_${difficulty}`;
   const best=parseInt(localStorage.getItem(key))||0;
   if(score>best)localStorage.setItem(key,score);
   document.getElementById('r-best').textContent=score>best?'🎉 NEW HIGH SCORE!':`Best: ${Math.max(best,score)}`;
-  
+
   document.getElementById('results').classList.remove('hidden');
+  renderSongSelect(); // refresh best scores
 }
 
 ctx.fillStyle='#0a0014';ctx.fillRect(0,0,W,H);
