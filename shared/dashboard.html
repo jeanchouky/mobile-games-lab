@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GameLab Analytics Dashboard</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    font-family:'Segoe UI',system-ui,sans-serif;
+    background:#0a0a1a;
+    color:#e0e0f0;
+    min-height:100vh;
+    padding:1.5rem;
+  }
+  h1{
+    text-align:center;
+    font-size:1.6rem;
+    margin-bottom:.4rem;
+    background:linear-gradient(90deg,#00e5ff,#ff00e5);
+    -webkit-background-clip:text;
+    -webkit-text-fill-color:transparent;
+  }
+  .subtitle{
+    text-align:center;
+    color:#888;
+    font-size:.85rem;
+    margin-bottom:1.5rem;
+  }
+
+  /* Summary cards */
+  .summary{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+    gap:.75rem;
+    margin-bottom:1.5rem;
+  }
+  .stat-card{
+    background:#14142a;
+    border:1px solid #222;
+    border-radius:10px;
+    padding:1rem;
+    text-align:center;
+  }
+  .stat-card .value{
+    font-size:1.8rem;
+    font-weight:700;
+    background:linear-gradient(135deg,#00e5ff,#7c4dff);
+    -webkit-background-clip:text;
+    -webkit-text-fill-color:transparent;
+  }
+  .stat-card .label{
+    font-size:.75rem;
+    color:#888;
+    margin-top:.25rem;
+    text-transform:uppercase;
+    letter-spacing:.5px;
+  }
+
+  /* Table */
+  .table-wrap{
+    overflow-x:auto;
+    border-radius:10px;
+    border:1px solid #222;
+  }
+  table{
+    width:100%;
+    border-collapse:collapse;
+    background:#14142a;
+  }
+  th,td{
+    padding:.65rem .9rem;
+    text-align:left;
+    border-bottom:1px solid #1e1e3a;
+    font-size:.85rem;
+  }
+  th{
+    background:#1a1a35;
+    color:#aaa;
+    font-weight:600;
+    text-transform:uppercase;
+    font-size:.7rem;
+    letter-spacing:.5px;
+    cursor:pointer;
+    user-select:none;
+  }
+  th:hover{color:#00e5ff}
+  th .arrow{font-size:.6rem;margin-left:.3rem;opacity:.5}
+  th.active .arrow{opacity:1;color:#00e5ff}
+  tr:hover td{background:#1a1a35}
+  td.game-name{
+    font-weight:600;
+    color:#e0e0ff;
+  }
+  .bar-cell{position:relative}
+  .bar{
+    position:absolute;
+    left:0;top:50%;
+    transform:translateY(-50%);
+    height:60%;
+    border-radius:3px;
+    opacity:.18;
+  }
+  .bar.plays{background:#00e5ff}
+  .bar.score{background:#ff00e5}
+  .bar.time{background:#7c4dff}
+  .bar-value{position:relative;z-index:1}
+
+  .empty{
+    text-align:center;
+    padding:3rem 1rem;
+    color:#555;
+    font-size:.95rem;
+  }
+  .empty span{display:block;font-size:2rem;margin-bottom:.5rem}
+
+  .actions{
+    display:flex;
+    justify-content:center;
+    gap:.75rem;
+    margin-top:1.2rem;
+  }
+  button{
+    background:#1e1e3a;
+    color:#ccc;
+    border:1px solid #333;
+    border-radius:6px;
+    padding:.45rem 1rem;
+    font-size:.8rem;
+    cursor:pointer;
+    transition:all .2s;
+  }
+  button:hover{
+    background:#2a2a50;
+    border-color:#00e5ff;
+    color:#fff;
+  }
+</style>
+</head>
+<body>
+  <h1>GameLab Analytics</h1>
+  <p class="subtitle">All data stored locally in your browser</p>
+
+  <div class="summary" id="summary"></div>
+  <div class="table-wrap" id="tableWrap"></div>
+  <div class="actions">
+    <button onclick="location.reload()">Refresh</button>
+    <button onclick="exportCSV()">Export CSV</button>
+    <button onclick="clearData()">Clear All Data</button>
+  </div>
+
+<script>
+const STORAGE_KEY = 'gamelab_analytics';
+let sortCol = 'game';
+let sortAsc = true;
+
+function load(){
+  try{ return JSON.parse(localStorage.getItem(STORAGE_KEY))||{} }catch{ return {} }
+}
+
+function fmtTime(s){
+  if(s<60) return s+'s';
+  if(s<3600) return Math.floor(s/60)+'m '+s%60+'s';
+  const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);
+  return h+'h '+m+'m';
+}
+
+function render(){
+  const data=load();
+  const games=Object.keys(data);
+
+  // Summary
+  const totalPlays=games.reduce((a,g)=>a+data[g].plays,0);
+  const totalTime=games.reduce((a,g)=>a+data[g].totalPlayTime,0);
+  const topScore=games.reduce((a,g)=>Math.max(a,data[g].highScore),0);
+  document.getElementById('summary').innerHTML=`
+    <div class="stat-card"><div class="value">${games.length}</div><div class="label">Games Tracked</div></div>
+    <div class="stat-card"><div class="value">${totalPlays}</div><div class="label">Total Plays</div></div>
+    <div class="stat-card"><div class="value">${topScore.toLocaleString()}</div><div class="label">Top Score</div></div>
+    <div class="stat-card"><div class="value">${fmtTime(totalTime)}</div><div class="label">Total Play Time</div></div>
+  `;
+
+  // Table
+  if(!games.length){
+    document.getElementById('tableWrap').innerHTML='<div class="empty"><span>📊</span>No analytics data yet.<br>Play some games to see stats here!</div>';
+    return;
+  }
+
+  const maxPlays=Math.max(...games.map(g=>data[g].plays),1);
+  const maxScore=Math.max(...games.map(g=>data[g].highScore),1);
+  const maxTime=Math.max(...games.map(g=>data[g].totalPlayTime),1);
+
+  const sorted=[...games].sort((a,b)=>{
+    let va,vb;
+    if(sortCol==='game'){va=a;vb=b}
+    else if(sortCol==='plays'){va=data[a].plays;vb=data[b].plays}
+    else if(sortCol==='score'){va=data[a].highScore;vb=data[b].highScore}
+    else{va=data[a].totalPlayTime;vb=data[b].totalPlayTime}
+    if(typeof va==='string') return sortAsc?va.localeCompare(vb):vb.localeCompare(va);
+    return sortAsc?va-vb:vb-va;
+  });
+
+  const arrow=col=>col===sortCol?(sortAsc?'▲':'▼'):'';
+  const cls=col=>col===sortCol?'active':'';
+
+  let html=`<table>
+    <tr>
+      <th class="${cls('game')}" onclick="sort('game')">Game <span class="arrow">${arrow('game')}</span></th>
+      <th class="${cls('plays')}" onclick="sort('plays')">Plays <span class="arrow">${arrow('plays')}</span></th>
+      <th class="${cls('score')}" onclick="sort('score')">High Score <span class="arrow">${arrow('score')}</span></th>
+      <th class="${cls('time')}" onclick="sort('time')">Play Time <span class="arrow">${arrow('time')}</span></th>
+    </tr>`;
+
+  for(const g of sorted){
+    const s=data[g];
+    html+=`<tr>
+      <td class="game-name">${g}</td>
+      <td class="bar-cell"><div class="bar plays" style="width:${(s.plays/maxPlays)*100}%"></div><span class="bar-value">${s.plays}</span></td>
+      <td class="bar-cell"><div class="bar score" style="width:${(s.highScore/maxScore)*100}%"></div><span class="bar-value">${s.highScore.toLocaleString()}</span></td>
+      <td class="bar-cell"><div class="bar time" style="width:${(s.totalPlayTime/maxTime)*100}%"></div><span class="bar-value">${fmtTime(s.totalPlayTime)}</span></td>
+    </tr>`;
+  }
+  html+='</table>';
+  document.getElementById('tableWrap').innerHTML=html;
+}
+
+function sort(col){
+  if(sortCol===col) sortAsc=!sortAsc;
+  else{sortCol=col;sortAsc=col==='game'}
+  render();
+}
+
+function exportCSV(){
+  const data=load();
+  const games=Object.keys(data);
+  if(!games.length) return;
+  let csv='Game,Plays,High Score,Play Time (seconds)\n';
+  for(const g of games) csv+=`${g},${data[g].plays},${data[g].highScore},${data[g].totalPlayTime}\n`;
+  const a=document.createElement('a');
+  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+  a.download='gamelab-analytics.csv';
+  a.click();
+}
+
+function clearData(){
+  if(confirm('Clear all analytics data? This cannot be undone.')){
+    localStorage.removeItem(STORAGE_KEY);
+    render();
+  }
+}
+
+render();
+</script>
+</body>
+</html>
