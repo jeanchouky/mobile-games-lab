@@ -520,6 +520,26 @@ function renderScene() {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
   }
 
+  // Ground line
+  ctx.save();
+  ctx.shadowBlur = 10;
+  ctx.shadowColor = '#0ff';
+  ctx.strokeStyle = '#0ff';
+  ctx.lineWidth = 2;
+  ctx.globalAlpha = 0.5;
+  ctx.beginPath();
+  ctx.moveTo(0, H - 1);
+  ctx.lineTo(W, H - 1);
+  ctx.stroke();
+  const groundGrad = ctx.createLinearGradient(0, H - 30, 0, H);
+  groundGrad.addColorStop(0, 'rgba(0,255,255,0)');
+  groundGrad.addColorStop(1, 'rgba(0,255,255,0.06)');
+  ctx.fillStyle = groundGrad;
+  ctx.shadowBlur = 0;
+  ctx.globalAlpha = 1;
+  ctx.fillRect(0, H - 30, W, 30);
+  ctx.restore();
+
   // Trail particles
   trails.forEach((t, i) => {
     t.x += t.vx;
