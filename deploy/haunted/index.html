@@ -380,8 +380,8 @@ function spawnParticles(x, y, count, color = '#f44') {
 function updateParticles() {
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
-    p.x += p.vx; p.y += p.vy; p.vy += 0.08 * scale;
-    p.life -= p.decay;
+    const d60 = deltaTime * 60; p.x += p.vx * d60; p.y += p.vy * d60; p.vy += 0.08 * scale * d60;
+    p.life -= p.decay * d60;
     if (p.life <= 0) particles.splice(i, 1);
   }
 }

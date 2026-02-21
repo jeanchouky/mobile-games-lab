@@ -390,7 +390,7 @@ function loop(t){
 
   // Asteroids
   asteroids.forEach(a=>{
-    a.rot+=a.rotSpeed;
+    a.rot+=a.rotSpeed*dt*60;
     let bob=Math.sin(Date.now()*0.001+a.bobPhase)*3;
     let sx=a.shake>0?(Math.random()-0.5)*a.shake:0;
     a.shake*=0.85;
@@ -421,7 +421,7 @@ function loop(t){
   // Particles
   for(let i=particles.length-1;i>=0;i--){
     let p=particles[i];
-    p.x+=p.vx;p.y+=p.vy;p.vy+=0.05;p.life-=dt*2;
+    let d60=dt*60;p.x+=p.vx*d60;p.y+=p.vy*d60;p.vy+=0.05*d60;p.life-=dt*2;
     if(p.life<=0){particles.splice(i,1);continue}
     X.globalAlpha=p.life;X.fillStyle=p.color;
     X.beginPath();X.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);X.fill();

@@ -445,7 +445,7 @@ function floatText(str, x, y, col='#fff', size=7) {
 function updateEffects() {
   for (let i = particles.length-1; i >= 0; i--) {
     const p = particles[i];
-    p.x += p.vx; p.y += p.vy; p.vy += 0.05; p.life -= p.decay;
+    const d60 = deltaTime * 60; p.x += p.vx * d60; p.y += p.vy * d60; p.vy += 0.05 * d60; p.life -= p.decay * d60;
     if (p.life <= 0) particles.splice(i, 1);
   }
   if (particles.length > 300) particles.splice(0, particles.length - 300);

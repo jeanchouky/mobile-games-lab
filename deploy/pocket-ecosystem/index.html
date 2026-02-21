@@ -46,7 +46,7 @@ let daysSurvived = 0;
 let creatures = [];
 let plants = [];
 let particles = [];
-let weather = 'clear'; // clear, rain, storm, sunny
+let weather = 'clear'; // clear, rain, storm, sunny, drought, windy
 let timeOfDay = 'day'; // dawn, day, dusk, night
 let ecosystemHealth = 100;
 let lastSaveTime = 0;
@@ -66,6 +66,7 @@ let ambienceTimeoutIds = [];
 
 // UI state
 let showingJournal = false;
+let showingDashboard = false;
 let journalEntries = [];
 let muteButtonBounds = null;
 let lastMouseX = 0, lastMouseY = 0;
@@ -78,6 +79,261 @@ const SEASON_DURATION = 300; // 5 min per season
 // Time-lapse mode
 let timeLapseActive = false;
 let timeLapseSpeed = 1; // multiplier
+
+// ============================================================
+// ENHANCED DAY/NIGHT CYCLE
+// ============================================================
+let dayNightCycle = 0; // 0-1 continuous cycle: 0=midnight, 0.25=dawn, 0.5=noon, 0.75=dusk
+let dayNightSpeed = 0.004; // one full cycle in ~250 seconds (~4 minutes)
+let sunX = 0, sunY = 0, moonX = 0, moonY = 0;
+let starPositions = [];
+for (let i = 0; i < 40; i++) {
+  starPositions.push({ x: Math.random(), y: Math.random() * 0.4, size: 0.5 + Math.random() * 1.5, twinkle: Math.random() * Math.PI * 2 });
+}
+
+function getDayNightPhase() {
+  // Returns smooth interpolated phase info
+  const c = dayNightCycle;
+  // dawn: 0.2-0.3, day: 0.3-0.7, dusk: 0.7-0.8, night: 0.8-1.0 + 0.0-0.2
+  if (c >= 0.2 && c < 0.3) return 'dawn';
+  if (c >= 0.3 && c < 0.7) return 'day';
+  if (c >= 0.7 && c < 0.8) return 'dusk';
+  return 'night';
+}
+
+function getDayNightBrightness() {
+  const c = dayNightCycle;
+  if (c >= 0.3 && c <= 0.7) return 1.0; // full day
+  if (c >= 0.0 && c < 0.2) return 0.15; // deep night
+  if (c >= 0.8 && c <= 1.0) return 0.15; // deep night
+  if (c >= 0.2 && c < 0.3) return (c - 0.2) / 0.1; // dawn fade in
+  if (c >= 0.7 && c < 0.8) return 1.0 - (c - 0.7) / 0.1; // dusk fade out
+  return 0.5;
+}
+
+function lerpColor(c1, c2, t) {
+  // Parse hex colors and interpolate
+  const r1 = parseInt(c1.slice(1,3), 16), g1 = parseInt(c1.slice(3,5), 16), b1 = parseInt(c1.slice(5,7), 16);
+  const r2 = parseInt(c2.slice(1,3), 16), g2 = parseInt(c2.slice(3,5), 16), b2 = parseInt(c2.slice(5,7), 16);
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+  return `rgb(${r},${g},${b})`;
+}
+
+function getSmoothSkyColors() {
+  const c = dayNightCycle;
+  const colors = {
+    night: { top: '#0a0e2a', mid: '#1a1a3e', bottom: '#2c2c50' },
+    dawn:  { top: '#ff9e7a', mid: '#ffc97a', bottom: '#ffe5b4' },
+    day:   { top: '#5ba3d9', mid: '#87CEEB', bottom: '#b0deff' },
+    dusk:  { top: '#c24a2c', mid: '#ff7043', bottom: '#ffab91' }
+  };
+
+  let from, to, t;
+  if (c >= 0.2 && c < 0.3) { from = colors.night; to = colors.dawn; t = (c - 0.2) / 0.1; }
+  else if (c >= 0.3 && c < 0.4) { from = colors.dawn; to = colors.day; t = (c - 0.3) / 0.1; }
+  else if (c >= 0.4 && c < 0.6) { from = colors.day; to = colors.day; t = 0; }
+  else if (c >= 0.6 && c < 0.7) { from = colors.day; to = colors.dusk; t = (c - 0.6) / 0.1; }
+  else if (c >= 0.7 && c < 0.8) { from = colors.dusk; to = colors.night; t = (c - 0.7) / 0.1; }
+  else { from = colors.night; to = colors.night; t = 0; }
+
+  return {
+    top: lerpColor(from.top, to.top, t),
+    mid: lerpColor(from.mid, to.mid, t),
+    bottom: lerpColor(from.bottom, to.bottom, t)
+  };
+}
+
+// ============================================================
+// ENHANCED WEATHER SYSTEM
+// ============================================================
+let weatherTimer = 0;
+let weatherDuration = 30; // seconds per weather phase
+let weatherIntensity = 0; // 0-1 smooth transition
+let targetWeatherIntensity = 0;
+let windStrength = 0; // -1 to 1 (direction + force)
+let targetWindStrength = 0;
+let raindrops = []; // persistent rain particles
+let lightningTimer = 0;
+let lightningFlash = 0;
+let droughtLevel = 0; // 0-1, accumulates during drought
+let humidity = 0.5; // 0-1, affects plant growth and rain chance
+let temperature = 20; // affects creature behavior
+
+function getWeatherEffects() {
+  return {
+    growthMultiplier: weather === 'rain' ? 1.8 : weather === 'sunny' ? 1.3 : weather === 'drought' ? 0.3 : weather === 'storm' ? 0.7 : 1.0,
+    energyMultiplier: weather === 'sunny' ? 1.5 : weather === 'storm' ? 0.6 : weather === 'drought' ? 0.7 : 1.0,
+    damageChance: weather === 'storm' ? 0.002 : 0,
+    waterLevel: weather === 'rain' ? 1.5 : weather === 'storm' ? 1.8 : weather === 'drought' ? 0.2 : 1.0
+  };
+}
+
+function updateWeatherSystem() {
+  weatherTimer += deltaTime;
+
+  // Smooth weather intensity transitions
+  weatherIntensity += (targetWeatherIntensity - weatherIntensity) * deltaTime * 2;
+  windStrength += (targetWindStrength - windStrength) * deltaTime * 1.5;
+
+  // Update temperature based on time of day and season
+  const dayBrightness = getDayNightBrightness();
+  let baseTemp = 20;
+  if (currentSeason === 'summer') baseTemp = 30;
+  else if (currentSeason === 'winter') baseTemp = 5;
+  else if (currentSeason === 'autumn') baseTemp = 14;
+  else if (currentSeason === 'spring') baseTemp = 18;
+  temperature = baseTemp + (dayBrightness - 0.5) * 10;
+
+  // Update humidity
+  if (weather === 'rain' || weather === 'storm') humidity = Math.min(1, humidity + deltaTime * 0.05);
+  else if (weather === 'drought') humidity = Math.max(0, humidity - deltaTime * 0.03);
+  else if (weather === 'sunny') humidity = Math.max(0.2, humidity - deltaTime * 0.01);
+  else humidity += (0.5 - humidity) * deltaTime * 0.02;
+
+  // Update drought level
+  if (weather === 'drought') droughtLevel = Math.min(1, droughtLevel + deltaTime * 0.01);
+  else if (weather === 'rain' || weather === 'storm') droughtLevel = Math.max(0, droughtLevel - deltaTime * 0.03);
+  else droughtLevel = Math.max(0, droughtLevel - deltaTime * 0.005);
+
+  // Storm lightning
+  if (weather === 'storm') {
+    lightningTimer -= deltaTime;
+    if (lightningTimer <= 0) {
+      lightningFlash = 1.0;
+      lightningTimer = 3 + Math.random() * 8;
+      // Lightning can damage creatures
+      if (Math.random() < 0.15 && creatures.length > 0) {
+        const unlucky = creatures[Math.floor(Math.random() * creatures.length)];
+        unlucky.health -= 20;
+        spawnParticles(unlucky.x, unlucky.y, 12, '#ffeb3b', 3);
+        addJournalEntry(`Lightning struck near a ${unlucky.species}!`);
+      }
+    }
+  }
+  lightningFlash = Math.max(0, lightningFlash - deltaTime * 4);
+
+  // Wind affects creature movement
+  for (const c of creatures) {
+    if (weather === 'windy' || weather === 'storm') {
+      c.x += windStrength * scale * deltaTime * 15;
+      if (c.type === 'insect' || c.type === 'bird') {
+        c.x += windStrength * scale * deltaTime * 25; // flying creatures affected more
+      }
+    }
+  }
+
+  // Rain waters plants automatically
+  if (weather === 'rain' || weather === 'storm') {
+    for (const p of plants) {
+      p.watered = true;
+      p.lastWater = 0;
+    }
+  }
+
+  // Drought stress on plants
+  if (weather === 'drought' && droughtLevel > 0.5) {
+    for (const p of plants) {
+      if (Math.random() < 0.001 * droughtLevel) {
+        p.health -= 5;
+        if (p.health <= 0) {
+          spawnParticles(p.x, p.y, 4, '#8d6e63', 1);
+          addJournalEntry(`A ${p.species} withered from drought.`);
+        }
+      }
+    }
+  }
+
+  // Storm damage to plants
+  if (weather === 'storm' && Math.random() < 0.0005) {
+    if (plants.length > 3) {
+      const idx = Math.floor(Math.random() * plants.length);
+      const p = plants[idx];
+      p.size *= 0.7;
+      spawnParticles(p.x, p.y, 6, '#795548', 2);
+      addJournalEntry(`Storm damaged a ${p.species}.`);
+    }
+  }
+}
+
+// Persistent rain particle system
+function updateRainParticles() {
+  if (weather !== 'rain' && weather !== 'storm') {
+    raindrops = [];
+    return;
+  }
+  const targetCount = weather === 'storm' ? 150 : 60;
+  while (raindrops.length < targetCount) {
+    raindrops.push({
+      x: Math.random() * (W + 100) - 50,
+      y: Math.random() * -100,
+      speed: 400 + Math.random() * 300,
+      length: (8 + Math.random() * 12) * scale,
+      drift: windStrength * 50
+    });
+  }
+  for (let i = raindrops.length - 1; i >= 0; i--) {
+    const r = raindrops[i];
+    r.y += r.speed * deltaTime;
+    r.x += r.drift * deltaTime;
+    if (r.y > H + 20) {
+      // Splash at ground
+      if (r.y < H + 40 && Math.random() < 0.3) {
+        spawnParticles(r.x, H * 0.85, 1, 'rgba(180,200,220,0.5)', 0.5);
+      }
+      r.y = Math.random() * -50;
+      r.x = Math.random() * (W + 100) - 50;
+    }
+  }
+}
+
+// ============================================================
+// POPULATION HISTORY TRACKING (for dashboard graphs)
+// ============================================================
+const populationHistory = {
+  timestamps: [],
+  plants: [],
+  fish: [],
+  birds: [],
+  insects: [],
+  amphibians: [],
+  mollusks: [],
+  worms: [],
+  bees: [],
+  fungi: [],
+  health: [],
+  biodiversity: []
+};
+let lastHistoryRecord = 0;
+const HISTORY_INTERVAL = 5; // record every 5 seconds
+const MAX_HISTORY = 120; // keep last 120 data points (10 minutes)
+
+function recordPopulationHistory() {
+  if (gameTime - lastHistoryRecord < HISTORY_INTERVAL) return;
+  lastHistoryRecord = gameTime;
+
+  populationHistory.timestamps.push(simulationTime);
+  populationHistory.plants.push(plants.length);
+  populationHistory.fish.push(creatures.filter(c => c.type === 'fish').length);
+  populationHistory.birds.push(creatures.filter(c => c.type === 'bird').length);
+  populationHistory.insects.push(creatures.filter(c => c.type === 'insect').length);
+  populationHistory.amphibians.push(creatures.filter(c => c.type === 'amphibian').length);
+  populationHistory.mollusks.push(creatures.filter(c => c.type === 'mollusk').length);
+  populationHistory.worms.push(creatures.filter(c => c.type === 'worm').length);
+  populationHistory.bees.push(creatures.filter(c => c.species === 'bee').length);
+  populationHistory.fungi.push(plants.filter(p => p.species === 'mushroom' || p.species === 'toadstool').length);
+  populationHistory.health.push(ecosystemHealth);
+  populationHistory.biodiversity.push(getBiodiversityIndex());
+
+  // Trim to max size
+  const keys = Object.keys(populationHistory);
+  for (const key of keys) {
+    while (populationHistory[key].length > MAX_HISTORY) {
+      populationHistory[key].shift();
+    }
+  }
+}
 
 // Phone usage simulation (since we can't access real data in web)
 let simulatedUsage = {
@@ -435,12 +691,13 @@ function spawnParticles(x, y, count, color, spread = 2) {
 }
 
 function updateParticles() {
+  const d60 = deltaTime * 60;
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
-    p.x += p.vx;
-    p.y += p.vy;
-    p.vy += 0.1 * scale;
-    p.life -= p.decay;
+    p.x += p.vx * d60;
+    p.y += p.vy * d60;
+    p.vy += 0.1 * scale * d60;
+    p.life -= p.decay * d60;
     if (p.life <= 0) particles.splice(i, 1);
   }
 }
@@ -461,34 +718,74 @@ function drawParticles() {
 // TIME & WEATHER SYSTEM
 // ============================================================
 function updateTimeOfDay() {
-  const now = new Date();
-  const hour = now.getHours();
-  
-  if (hour >= 5 && hour < 7) timeOfDay = 'dawn';
-  else if (hour >= 7 && hour < 17) timeOfDay = 'day';
-  else if (hour >= 17 && hour < 19) timeOfDay = 'dusk';
-  else timeOfDay = 'night';
+  // Advance the continuous day/night cycle
+  dayNightCycle += dayNightSpeed * deltaTime * timeLapseSpeed;
+  if (dayNightCycle >= 1.0) dayNightCycle -= 1.0;
+  timeOfDay = getDayNightPhase();
+
+  // Update sun/moon positions
+  const angle = dayNightCycle * Math.PI * 2 - Math.PI / 2;
+  sunX = centerX + Math.cos(angle) * W * 0.4;
+  sunY = centerY * 0.5 - Math.sin(angle) * H * 0.3;
+  moonX = centerX + Math.cos(angle + Math.PI) * W * 0.4;
+  moonY = centerY * 0.5 - Math.sin(angle + Math.PI) * H * 0.3;
 }
 
 function updateWeather() {
-  // Simple weather simulation based on ecosystem health and randomness
+  // Enhanced weather with more variety and seasonal influence
   const rand = Math.random();
-  
-  if (ecosystemHealth > 80) {
-    weather = rand < 0.7 ? 'sunny' : 'clear';
-  } else if (ecosystemHealth > 50) {
-    weather = rand < 0.5 ? 'clear' : (rand < 0.8 ? 'rain' : 'sunny');
-  } else {
-    weather = rand < 0.4 ? 'storm' : (rand < 0.7 ? 'rain' : 'clear');
+  let choices;
+
+  if (currentSeason === 'summer') {
+    choices = [
+      { w: 'sunny', p: 0.4 }, { w: 'clear', p: 0.2 }, { w: 'drought', p: 0.2 },
+      { w: 'storm', p: 0.1 }, { w: 'windy', p: 0.1 }
+    ];
+  } else if (currentSeason === 'winter') {
+    choices = [
+      { w: 'clear', p: 0.3 }, { w: 'windy', p: 0.25 }, { w: 'storm', p: 0.2 },
+      { w: 'rain', p: 0.15 }, { w: 'sunny', p: 0.1 }
+    ];
+  } else if (currentSeason === 'spring') {
+    choices = [
+      { w: 'rain', p: 0.3 }, { w: 'sunny', p: 0.3 }, { w: 'clear', p: 0.25 },
+      { w: 'windy', p: 0.1 }, { w: 'storm', p: 0.05 }
+    ];
+  } else { // autumn
+    choices = [
+      { w: 'windy', p: 0.25 }, { w: 'rain', p: 0.25 }, { w: 'clear', p: 0.2 },
+      { w: 'storm', p: 0.15 }, { w: 'sunny', p: 0.15 }
+    ];
   }
+
+  // Ecosystem health influence
+  if (ecosystemHealth < 30) {
+    choices = [{ w: 'storm', p: 0.4 }, { w: 'drought', p: 0.3 }, { w: 'windy', p: 0.2 }, { w: 'clear', p: 0.1 }];
+  }
+
+  let cumulative = 0;
+  for (const c of choices) {
+    cumulative += c.p;
+    if (rand < cumulative) {
+      weather = c.w;
+      break;
+    }
+  }
+
+  // Set intensity targets
+  targetWeatherIntensity = (weather === 'storm') ? 1.0 : (weather === 'rain') ? 0.6 : (weather === 'drought') ? 0.8 : 0.3;
+  targetWindStrength = (weather === 'windy' || weather === 'storm') ? (Math.random() - 0.3) * 2 : (Math.random() - 0.5) * 0.3;
+  weatherDuration = 20 + Math.random() * 40;
 }
 
 function getTimeColor() {
-  switch(timeOfDay) {
-    case 'dawn': return { sky: '#ffd89b', tint: 'rgba(255, 216, 155, 0.2)' };
-    case 'day': return { sky: '#87CEEB', tint: 'rgba(135, 206, 235, 0.1)' };
-    case 'dusk': return { sky: '#ff8c69', tint: 'rgba(255, 140, 105, 0.2)' };
-    case 'night': return { sky: '#2c3e50', tint: 'rgba(44, 62, 80, 0.4)' };
+  const brightness = getDayNightBrightness();
+  const phase = getDayNightPhase();
+  switch(phase) {
+    case 'dawn': return { sky: '#ffd89b', tint: `rgba(255, 216, 155, ${0.2 * (1 - brightness + 0.3)})` };
+    case 'day': return { sky: '#87CEEB', tint: 'rgba(135, 206, 235, 0.05)' };
+    case 'dusk': return { sky: '#ff8c69', tint: `rgba(255, 140, 105, ${0.15 + 0.1 * (1 - brightness)})` };
+    case 'night': return { sky: '#1a1a3e', tint: `rgba(10, 14, 42, ${0.3 + 0.15 * (1 - brightness)})` };
   }
 }
 
@@ -502,42 +799,72 @@ const SPECIES = {
   grass: { type: 'plant', color: '#7cb342', growthRate: 0.8, maxSize: 25, shape: 'stem' },
   bush: { type: 'plant', color: '#558b2f', growthRate: 0.5, maxSize: 35, shape: 'bushy' },
   reed: { type: 'plant', color: '#9ccc65', growthRate: 0.6, maxSize: 45, shape: 'tall' },
-  
+  flower: { type: 'plant', color: '#e91e63', growthRate: 0.7, maxSize: 22, shape: 'flower' },
+  sunflower: { type: 'plant', color: '#ffc107', growthRate: 0.6, maxSize: 50, shape: 'sunflower' },
+
+  // FUNGI (decomposer plants)
+  mushroom: { type: 'plant', color: '#8d6e63', growthRate: 0.3, maxSize: 18, shape: 'mushroom', decomposer: true, nocturnal: true },
+  toadstool: { type: 'plant', color: '#c62828', growthRate: 0.2, maxSize: 22, shape: 'toadstool', decomposer: true, nocturnal: true },
+
   // FISH
-  minnow: { type: 'fish', color: '#ff8a65', speed: 1.5, size: 8, diet: 'plant', predator: false },
-  carp: { type: 'fish', color: '#ffb74d', speed: 1.0, size: 12, diet: 'plant', predator: false },
-  pike: { type: 'fish', color: '#d84315', speed: 2.0, size: 16, diet: 'meat', predator: true },
-  
+  minnow: { type: 'fish', color: '#ff8a65', speed: 1.5, size: 8, diet: 'plant', predator: false, active: 'diurnal' },
+  carp: { type: 'fish', color: '#ffb74d', speed: 1.0, size: 12, diet: 'plant', predator: false, active: 'diurnal' },
+  pike: { type: 'fish', color: '#d84315', speed: 2.0, size: 16, diet: 'meat', predator: true, active: 'always' },
+
   // BIRDS
-  sparrow: { type: 'bird', color: '#8d6e63', speed: 2.5, size: 6, diet: 'seed', predator: false },
-  hawk: { type: 'bird', color: '#5d4037', speed: 3.0, size: 10, diet: 'meat', predator: true },
-  
+  sparrow: { type: 'bird', color: '#8d6e63', speed: 2.5, size: 6, diet: 'seed', predator: false, active: 'diurnal' },
+  hawk: { type: 'bird', color: '#5d4037', speed: 3.0, size: 10, diet: 'meat', predator: true, active: 'diurnal' },
+  owl: { type: 'bird', color: '#5c4033', speed: 2.0, size: 11, diet: 'meat', predator: true, active: 'nocturnal' },
+  hummingbird: { type: 'bird', color: '#00e676', speed: 3.5, size: 4, diet: 'nectar', predator: false, active: 'diurnal', pollinator: true },
+
   // INSECTS
-  butterfly: { type: 'insect', color: '#f48fb1', speed: 1.2, size: 4, diet: 'plant', predator: false },
-  dragonfly: { type: 'insect', color: '#64b5f6', speed: 2.0, size: 5, diet: 'insect', predator: true },
+  butterfly: { type: 'insect', color: '#f48fb1', speed: 1.2, size: 4, diet: 'plant', predator: false, active: 'diurnal', pollinator: true },
+  dragonfly: { type: 'insect', color: '#64b5f6', speed: 2.0, size: 5, diet: 'insect', predator: true, active: 'diurnal' },
+  bee: { type: 'insect', color: '#ffc107', speed: 1.8, size: 4, diet: 'nectar', predator: false, active: 'diurnal', pollinator: true },
+  firefly: { type: 'insect', color: '#ffeb3b', speed: 0.8, size: 3, diet: 'plant', predator: false, active: 'nocturnal', glow: true },
+  moth: { type: 'insect', color: '#b0bec5', speed: 1.0, size: 4, diet: 'plant', predator: false, active: 'nocturnal' },
 
   // AMPHIBIANS
-  frog: { type: 'amphibian', color: '#66bb6a', speed: 0.8, size: 10, diet: 'insect', predator: true },
+  frog: { type: 'amphibian', color: '#66bb6a', speed: 0.8, size: 10, diet: 'insect', predator: true, active: 'always' },
 
   // MOLLUSKS
-  snail: { type: 'mollusk', color: '#a1887f', speed: 0.2, size: 7, diet: 'plant', predator: false }
+  snail: { type: 'mollusk', color: '#a1887f', speed: 0.2, size: 7, diet: 'plant', predator: false, active: 'always' },
+
+  // WORMS (new type: underground burrowers, decomposers)
+  worm: { type: 'worm', color: '#d4a574', speed: 0.3, size: 5, diet: 'decompose', predator: false, active: 'always' },
+  earthworm: { type: 'worm', color: '#c49b6c', speed: 0.2, size: 7, diet: 'decompose', predator: false, active: 'nocturnal' },
+
+  // MAMMALS (new large creatures)
+  deer: { type: 'mammal', color: '#a1887f', speed: 2.2, size: 18, diet: 'plant', predator: false, active: 'diurnal' },
+  fox: { type: 'mammal', color: '#e65100', speed: 2.5, size: 14, diet: 'meat', predator: true, active: 'nocturnal' },
+  rabbit: { type: 'mammal', color: '#d7ccc8', speed: 2.8, size: 8, diet: 'plant', predator: false, active: 'always' }
 };
 
 function spawnCreature(speciesName, x, y) {
   const spec = SPECIES[speciesName];
   if (!spec) return null;
-  
+
+  // Default Y based on creature type
+  let defaultY;
+  if (spec.type === 'fish') defaultY = H * 0.4 + Math.random() * H * 0.25;
+  else if (spec.type === 'bird') defaultY = H * 0.1 + Math.random() * H * 0.25;
+  else if (spec.type === 'worm') defaultY = H * 0.8 + Math.random() * H * 0.15;
+  else if (spec.type === 'mammal') defaultY = H * 0.65 + Math.random() * H * 0.2;
+  else if (spec.type === 'amphibian') defaultY = H * 0.5 + Math.random() * H * 0.3;
+  else if (spec.type === 'mollusk') defaultY = H * 0.7 + Math.random() * H * 0.2;
+  else defaultY = Math.random() * H * 0.7 + H * 0.1;
+
   const creature = {
     id: Date.now() + Math.random(),
     species: speciesName,
     type: spec.type,
     x: x || Math.random() * W,
-    y: y || Math.random() * H * 0.7 + H * 0.1,
+    y: y || defaultY,
     vx: (Math.random() - 0.5) * spec.speed * scale,
     vy: (Math.random() - 0.5) * spec.speed * scale,
-    size: spec.size * scale * (0.8 + Math.random() * 0.4), // variation
+    size: spec.size * scale * (0.8 + Math.random() * 0.4),
     color: spec.color,
-    hue: Math.random() * 20 - 10, // color variation
+    hue: Math.random() * 20 - 10,
     speed: spec.speed,
     age: 0,
     maxAge: 120 + Math.random() * 180, // 2-5 minutes lifespan
@@ -548,9 +875,23 @@ function spawnCreature(speciesName, x, y) {
     predator: spec.predator || false,
     targetX: null,
     targetY: null,
-    phase: Math.random() * Math.PI * 2
+    phase: Math.random() * Math.PI * 2,
+    // New properties
+    active: spec.active || 'always', // diurnal, nocturnal, always
+    sleeping: false,
+    sleepZ: 0,
+    pollinator: spec.pollinator || false,
+    glow: spec.glow || false,
+    glowPhase: Math.random() * Math.PI * 2,
+    burrowDepth: 0, // for worms
+    burrowTarget: 0,
+    pollinationCooldown: 0,
+    hibernating: false, // for winter
+    heatStress: 0, // summer heat
+    seasonalEnergy: 100, // energy affected by seasons
+    decomposing: false // for worms eating dead matter
   };
-  
+
   creatures.push(creature);
   sfxBirth();
   addJournalEntry(`${capitalize(speciesName)} arrived!`);
@@ -560,14 +901,14 @@ function spawnCreature(speciesName, x, y) {
 function spawnPlant(speciesName, x, y) {
   const spec = SPECIES[speciesName];
   if (!spec || spec.type !== 'plant') return null;
-  
+
   const plant = {
     id: Date.now() + Math.random(),
     species: speciesName,
     type: 'plant',
     x: x || Math.random() * W,
     y: y || H * 0.75 + Math.random() * H * 0.2,
-    size: 5 * scale, // starts small
+    size: 5 * scale,
     maxSize: spec.maxSize * scale * (0.8 + Math.random() * 0.4),
     growthRate: spec.growthRate,
     color: spec.color,
@@ -577,85 +918,287 @@ function spawnPlant(speciesName, x, y) {
     health: 100,
     shape: spec.shape,
     watered: false,
-    lastWater: 0
+    lastWater: 0,
+    // New properties
+    pollinated: false,
+    pollinationTimer: 0,
+    decomposer: spec.decomposer || false,
+    nocturnal: spec.nocturnal || false,
+    glowAmount: 0, // for bioluminescent mushrooms at night
+    seedTimer: 0, // countdown to spreading seeds
+    seasonalGrowthMod: 1.0,
+    frostDamage: 0 // winter damage accumulation
   };
-  
+
   plants.push(plant);
   sfxPlant();
   return plant;
 }
 
+// Dead matter pool for decomposers
+let deadMatter = [];
+
+function spawnDeadMatter(x, y, amount) {
+  deadMatter.push({ x, y, amount, age: 0, maxAge: 60 });
+}
+
+function updateDeadMatter() {
+  for (let i = deadMatter.length - 1; i >= 0; i--) {
+    deadMatter[i].age += deltaTime;
+    if (deadMatter[i].age > deadMatter[i].maxAge || deadMatter[i].amount <= 0) {
+      deadMatter.splice(i, 1);
+    }
+  }
+}
+
 function updateCreatures() {
+  const phase = getDayNightPhase();
+  const brightness = getDayNightBrightness();
+  const wfx = getWeatherEffects();
+  const isNight = phase === 'night';
+  const isDay = phase === 'day';
+
   for (let i = creatures.length - 1; i >= 0; i--) {
     const c = creatures[i];
-    
+
     // Age and hunger
     c.age += deltaTime;
-    c.hunger += deltaTime * 0.5;
     c.phase += deltaTime * 2;
     c.reproductionCooldown -= deltaTime;
-    
-    // Death from old age or starvation
-    if (c.age > c.maxAge || c.hunger > 60) {
+    c.pollinationCooldown -= deltaTime;
+    if (c.pollinationCooldown < 0) c.pollinationCooldown = 0;
+
+    // Glow phase for fireflies
+    if (c.glow) c.glowPhase += deltaTime * 3;
+
+    // ---- DAY/NIGHT SLEEP BEHAVIOR ----
+    const shouldSleep = (c.active === 'diurnal' && isNight) || (c.active === 'nocturnal' && isDay);
+
+    if (shouldSleep && !c.sleeping && !c.hibernating) {
+      c.sleeping = true;
+      c.sleepZ = 0;
+    } else if (!shouldSleep && c.sleeping && !c.hibernating) {
+      c.sleeping = false;
+    }
+
+    if (c.sleeping) {
+      c.sleepZ += deltaTime;
+      c.hunger += deltaTime * 0.15; // slower hunger when sleeping
+      // Sleeping creatures barely move — gentle drift only
+      c.x += Math.sin(gameTime + c.id) * 0.1 * scale;
+      c.y += Math.cos(gameTime + c.id) * 0.05 * scale;
+      // Keep in bounds
+      c.x = Math.max(5, Math.min(W - 5, c.x));
+      c.y = Math.max(H * 0.05, Math.min(H * 0.95, c.y));
+      // Skip rest of movement/feeding but still check death
+      if (c.age > c.maxAge || c.hunger > 60 || c.health <= 0) {
+        spawnDeadMatter(c.x, c.y, 5);
+        creatures.splice(i, 1);
+        spawnParticles(c.x, c.y, 5, '#666', 1);
+        sfxDeath();
+        ecosystemHealth = Math.max(0, ecosystemHealth - 2);
+      }
+      continue;
+    }
+
+    // ---- HIBERNATION (winter) ----
+    if (currentSeason === 'winter' && !c.hibernating) {
+      // Mammals, amphibians, and some insects hibernate
+      if ((c.type === 'amphibian' || c.type === 'mollusk' || c.species === 'butterfly' || c.species === 'bee') && Math.random() < 0.001) {
+        c.hibernating = true;
+        c.sleeping = true;
+        addJournalEntry(`${capitalize(c.species)} went into hibernation.`);
+        continue;
+      }
+    }
+    if (c.hibernating && currentSeason !== 'winter') {
+      c.hibernating = false;
+      c.sleeping = false;
+      addJournalEntry(`${capitalize(c.species)} woke from hibernation!`);
+    }
+
+    // ---- SEASONAL EFFECTS ----
+    let hungerRate = 0.5;
+    let speedMod = 1.0;
+
+    if (currentSeason === 'summer') {
+      // Heat stress for non-fish, non-amphibian
+      if (c.type !== 'fish' && c.type !== 'amphibian' && temperature > 30) {
+        c.heatStress += deltaTime * 0.5;
+        if (c.heatStress > 30) {
+          c.health -= deltaTime * 2;
+          speedMod *= 0.6;
+        }
+      }
+      hungerRate *= 1.3; // faster metabolism in heat
+    } else if (currentSeason === 'winter') {
+      hungerRate *= 0.7; // slower metabolism
+      speedMod *= 0.7; // move slower
+      // Cold damage to tropical creatures
+      if (temperature < 5 && (c.type === 'insect') && Math.random() < 0.001) {
+        c.health -= 5;
+      }
+    } else if (currentSeason === 'spring') {
+      hungerRate *= 0.9;
+      speedMod *= 1.1;
+      c.heatStress = Math.max(0, c.heatStress - deltaTime);
+    } else if (currentSeason === 'autumn') {
+      // Creatures eat more to prepare for winter
+      hungerRate *= 1.2;
+      if (c.hunger < 10) c.seasonalEnergy = Math.min(100, c.seasonalEnergy + deltaTime * 2);
+    }
+
+    // Weather energy effects
+    c.hunger += deltaTime * hungerRate;
+    if (weather === 'sunny' && c.type === 'insect') c.hunger *= 0.99; // insects love sun
+
+    // Death from old age, starvation, or health
+    if (c.age > c.maxAge || c.hunger > 60 || c.health <= 0) {
+      spawnDeadMatter(c.x, c.y, 5 + c.size / scale);
       creatures.splice(i, 1);
       spawnParticles(c.x, c.y, 5, '#666', 1);
       sfxDeath();
       ecosystemHealth = Math.max(0, ecosystemHealth - 2);
       continue;
     }
-    
-    // Movement behavior
-    if (!c.targetX || Math.hypot(c.x - c.targetX, c.y - c.targetY) < 20 * scale) {
-      // Pick new random target
-      c.targetX = Math.random() * W;
-      if (c.type === 'fish') {
-        c.targetY = H * 0.4 + Math.random() * H * 0.3; // water zone
-      } else if (c.type === 'bird') {
-        c.targetY = H * 0.1 + Math.random() * H * 0.3; // sky zone
-      } else if (c.type === 'amphibian') {
-        c.targetY = H * 0.5 + Math.random() * H * 0.3; // water/ground edge
-      } else if (c.type === 'mollusk') {
-        c.targetY = H * 0.7 + Math.random() * H * 0.2; // ground zone
-      } else {
-        c.targetY = H * 0.3 + Math.random() * H * 0.5; // mid zone
+
+    // ---- WORM BURROWING BEHAVIOR ----
+    if (c.type === 'worm') {
+      c.burrowTarget = H * 0.82 + Math.sin(gameTime * 0.5 + c.id) * H * 0.08;
+      c.burrowDepth += (c.burrowTarget - c.y) * deltaTime * 0.5;
+      c.y += (c.burrowTarget - c.y) * deltaTime * 2;
+
+      // Worms eat dead matter (decompose)
+      for (const dm of deadMatter) {
+        if (Math.hypot(dm.x - c.x, dm.y - c.y) < 30 * scale) {
+          dm.amount -= deltaTime * 2;
+          c.hunger -= deltaTime * 3;
+          c.decomposing = true;
+          // Decomposition enriches soil — boosts nearby plant growth
+          for (const p of plants) {
+            if (Math.hypot(p.x - c.x, p.y - c.y) < 60 * scale) {
+              p.growthRate *= 1.001;
+            }
+          }
+          spawnParticles(c.x, c.y, 1, '#8d6e63', 0.3);
+          break;
+        }
+      }
+      if (!c.decomposing && c.hunger > 30) {
+        // Worms also eat plant roots
+        const nearP = plants.find(p => Math.hypot(p.x - c.x, p.y - c.y) < 25 * scale);
+        if (nearP) { c.hunger -= 3; nearP.size *= 0.995; }
+      }
+      c.decomposing = false;
+    }
+
+    // ---- BEE/POLLINATOR BEHAVIOR ----
+    if (c.pollinator && c.pollinationCooldown <= 0) {
+      // Seek flowers/plants to pollinate
+      const nearFlower = plants.find(p =>
+        (p.shape === 'flower' || p.shape === 'sunflower' || p.shape === 'stem') &&
+        !p.pollinated &&
+        Math.hypot(p.x - c.x, p.y - c.y) < 35 * scale
+      );
+      if (nearFlower) {
+        nearFlower.pollinated = true;
+        nearFlower.pollinationTimer = 30; // seconds until seed spread
+        c.hunger -= 8;
+        c.pollinationCooldown = 15;
+        spawnParticles(nearFlower.x, nearFlower.y - nearFlower.size, 6, '#ffeb3b', 1.5);
+        // Bees head toward the flower
+        c.targetX = nearFlower.x;
+        c.targetY = nearFlower.y - nearFlower.size;
+        ecosystemHealth = Math.min(100, ecosystemHealth + 0.3);
       }
     }
-    
+
+    // ---- MOVEMENT BEHAVIOR ----
+    if (!c.targetX || Math.hypot(c.x - c.targetX, c.y - c.targetY) < 20 * scale) {
+      c.targetX = Math.random() * W;
+      if (c.type === 'fish') {
+        c.targetY = H * 0.4 + Math.random() * H * 0.25;
+      } else if (c.type === 'bird') {
+        c.targetY = H * 0.05 + Math.random() * H * 0.35;
+      } else if (c.type === 'amphibian') {
+        c.targetY = H * 0.5 + Math.random() * H * 0.3;
+      } else if (c.type === 'mollusk') {
+        c.targetY = H * 0.7 + Math.random() * H * 0.2;
+      } else if (c.type === 'worm') {
+        c.targetY = H * 0.78 + Math.random() * H * 0.15;
+        c.targetX = c.x + (Math.random() - 0.5) * 80 * scale;
+      } else if (c.type === 'mammal') {
+        c.targetY = H * 0.6 + Math.random() * H * 0.25;
+      } else {
+        c.targetY = H * 0.3 + Math.random() * H * 0.5;
+      }
+    }
+
     // Move toward target
     const dx = c.targetX - c.x;
     const dy = c.targetY - c.y;
     const dist = Math.hypot(dx, dy);
     if (dist > 1) {
-      c.vx = (dx / dist) * c.speed * scale;
-      c.vy = (dy / dist) * c.speed * scale;
+      c.vx = (dx / dist) * c.speed * scale * speedMod;
+      c.vy = (dy / dist) * c.speed * scale * speedMod;
     }
-    
+
     c.x += c.vx * deltaTime * 10;
     c.y += c.vy * deltaTime * 10;
-    
+
     // Bounds wrap
     if (c.x < 0) c.x = W;
     if (c.x > W) c.x = 0;
     c.y = Math.max(H * 0.05, Math.min(H * 0.95, c.y));
-    
-    // Feeding behavior
+
+    // ---- FEEDING BEHAVIOR ----
     if (c.hunger > 20 && Math.random() < 0.01) {
-      if (c.diet === 'plant') {
-        // Look for plants
-        const nearbyPlant = plants.find(p => Math.hypot(p.x - c.x, p.y - c.y) < 40 * scale && p.size > 10 * scale);
+      if (c.diet === 'plant' || c.diet === 'seed') {
+        const nearbyPlant = plants.find(p => Math.hypot(p.x - c.x, p.y - c.y) < 40 * scale && p.size > 10 * scale && !p.decomposer);
         if (nearbyPlant) {
-          nearbyPlant.size *= 0.9; // nibble
+          nearbyPlant.size *= 0.9;
           c.hunger -= 5;
           spawnParticles(c.x, c.y, 2, '#9ccc65', 0.5);
         }
-      } else if (c.diet === 'meat' && c.predator) {
-        // Hunt prey
-        const prey = creatures.find(other => 
-          other.id !== c.id && 
-          !other.predator && 
+      } else if (c.diet === 'nectar') {
+        // Nectar feeders look for flowers
+        const nearFlower = plants.find(p =>
+          (p.shape === 'flower' || p.shape === 'sunflower' || p.shape === 'stem') &&
+          Math.hypot(p.x - c.x, p.y - c.y) < 35 * scale && p.size > 8 * scale
+        );
+        if (nearFlower) {
+          c.hunger -= 6;
+          spawnParticles(c.x, c.y, 3, '#fff176', 0.5);
+        }
+      } else if (c.diet === 'insect') {
+        // Eat insects
+        const prey = creatures.find(other =>
+          other.id !== c.id &&
+          other.type === 'insect' &&
+          !other.sleeping &&
           Math.hypot(other.x - c.x, other.y - c.y) < 50 * scale
         );
         if (prey) {
+          spawnDeadMatter(prey.x, prey.y, 2);
+          creatures.splice(creatures.indexOf(prey), 1);
+          c.hunger -= 15;
+          spawnParticles(prey.x, prey.y, 5, prey.color, 1.5);
+          sfxDeath();
+          ecosystemHealth = Math.max(0, ecosystemHealth - 0.5);
+        }
+      } else if (c.diet === 'meat' && c.predator) {
+        // Hunt prey — predators prefer non-predators, but owls/foxes hunt at night
+        const huntRange = (c.active === 'nocturnal' && isNight) ? 70 * scale : 50 * scale;
+        const prey = creatures.find(other =>
+          other.id !== c.id &&
+          !other.predator &&
+          other.type !== 'worm' && // worms are underground
+          Math.hypot(other.x - c.x, other.y - c.y) < huntRange &&
+          !other.sleeping // can't catch sleeping prey... unless nocturnal predator
+          || (c.active === 'nocturnal' && isNight && other.sleeping && Math.hypot(other.x - c.x, other.y - c.y) < huntRange * 0.8)
+        );
+        if (prey) {
+          spawnDeadMatter(prey.x, prey.y, prey.size / scale);
           creatures.splice(creatures.indexOf(prey), 1);
           c.hunger -= 20;
           spawnParticles(prey.x, prey.y, 8, '#d84315', 2);
@@ -664,86 +1207,261 @@ function updateCreatures() {
         }
       }
     }
-    
-    // Reproduction
-    if (c.age > 20 && c.hunger < 30 && c.reproductionCooldown <= 0 && creatures.length < 50) {
-      const mate = creatures.find(other => 
-        other.species === c.species && 
-        other.id !== c.id && 
+
+    // ---- REPRODUCTION ----
+    const repAge = c.type === 'mammal' ? 35 : 20;
+    const maxPop = c.type === 'mammal' ? 60 : 65;
+    if (c.age > repAge && c.hunger < 30 && c.reproductionCooldown <= 0 && creatures.length < maxPop && !c.sleeping) {
+      const mate = creatures.find(other =>
+        other.species === c.species &&
+        other.id !== c.id &&
+        !other.sleeping &&
         Math.hypot(other.x - c.x, other.y - c.y) < 60 * scale &&
         other.reproductionCooldown <= 0
       );
       if (mate) {
-        spawnCreature(c.species, (c.x + mate.x) / 2, (c.y + mate.y) / 2);
-        c.reproductionCooldown = 60;
-        mate.reproductionCooldown = 60;
-        ecosystemHealth = Math.min(100, ecosystemHealth + 1);
+        // Spring breeding boost
+        const springBonus = currentSeason === 'spring' ? 0.5 : 1.0;
+        if (Math.random() < springBonus) {
+          spawnCreature(c.species, (c.x + mate.x) / 2, (c.y + mate.y) / 2);
+          c.reproductionCooldown = c.type === 'mammal' ? 90 : 60;
+          mate.reproductionCooldown = c.type === 'mammal' ? 90 : 60;
+          ecosystemHealth = Math.min(100, ecosystemHealth + 1);
+        }
       }
     }
   }
 }
 
 function updatePlants() {
+  const wfx = getWeatherEffects();
+  const brightness = getDayNightBrightness();
+  const phase = getDayNightPhase();
+
   for (let i = plants.length - 1; i >= 0; i--) {
     const p = plants[i];
-    
+
     p.age += deltaTime;
     p.lastWater += deltaTime;
-    
+
+    // ---- SEASONAL GROWTH MODIFIERS ----
+    let seasonMod = 1.0;
+    if (currentSeason === 'spring') seasonMod = 1.6; // spring growth boom
+    else if (currentSeason === 'summer') seasonMod = 1.2;
+    else if (currentSeason === 'autumn') seasonMod = 0.6;
+    else if (currentSeason === 'winter') seasonMod = 0.15; // almost no growth
+
+    // Mushrooms grow better at night and in autumn
+    if (p.decomposer) {
+      if (phase === 'night') seasonMod *= 1.5;
+      if (currentSeason === 'autumn') seasonMod *= 2.0;
+      // Mushrooms glow faintly at night
+      p.glowAmount = phase === 'night' ? Math.min(1, p.glowAmount + deltaTime * 0.5) : Math.max(0, p.glowAmount - deltaTime);
+    }
+
     // Growth
     if (p.size < p.maxSize) {
-      let growth = p.growthRate * deltaTime * scale * 0.5;
-      if (p.watered && p.lastWater < 30) growth *= 2; // watered boost
+      let growth = p.growthRate * deltaTime * scale * 0.5 * wfx.growthMultiplier * seasonMod;
+      if (p.watered && p.lastWater < 30) growth *= 2;
+      // Sunlight bonus during day
+      if (brightness > 0.5 && !p.decomposer) growth *= 1.0 + (brightness - 0.5);
       p.size += growth;
     }
-    
-    // Death from age
-    if (p.age > p.maxAge) {
+
+    // Frost damage in winter
+    if (currentSeason === 'winter' && temperature < 3 && Math.random() < 0.0005) {
+      p.frostDamage += 5;
+      p.health -= 5;
+      if (p.species !== 'mushroom' && p.species !== 'toadstool') {
+        spawnParticles(p.x, p.y - p.size * 0.5, 2, '#b3e5fc', 0.5);
+      }
+    }
+
+    // Drought damage
+    if (weather === 'drought' && p.lastWater > 20 && !p.decomposer) {
+      p.health -= deltaTime * 0.5 * droughtLevel;
+    }
+
+    // ---- POLLINATION & SEED SPREADING ----
+    if (p.pollinated) {
+      p.pollinationTimer -= deltaTime;
+      if (p.pollinationTimer <= 0 && plants.length < 50) {
+        // Spread a new seed nearby
+        const offsetX = (Math.random() - 0.5) * 120 * scale;
+        const seedY = H * 0.75 + Math.random() * H * 0.15;
+        const newPlant = spawnPlant(p.species, p.x + offsetX, seedY);
+        if (newPlant) {
+          spawnParticles(p.x, p.y - p.size, 5, '#ffeb3b', 2);
+          addJournalEntry(`A ${p.species} spread its seeds!`);
+        }
+        p.pollinated = false;
+      }
+    }
+
+    // Natural seed timer (slow without pollination)
+    p.seedTimer += deltaTime;
+    if (p.seedTimer > 120 && !p.pollinated && plants.length < 45 && Math.random() < 0.0001 && p.size > p.maxSize * 0.7) {
+      const offsetX = (Math.random() - 0.5) * 60 * scale;
+      spawnPlant(p.species, p.x + offsetX, H * 0.75 + Math.random() * H * 0.15);
+      p.seedTimer = 0;
+    }
+
+    // Decomposer mushrooms grow near dead matter
+    if (p.decomposer) {
+      for (const dm of deadMatter) {
+        if (Math.hypot(dm.x - p.x, dm.y - p.y) < 50 * scale) {
+          p.size = Math.min(p.maxSize, p.size + deltaTime * scale * 0.3);
+          dm.amount -= deltaTime * 0.5;
+          // Mushrooms recycle nutrients to ecosystem
+          ecosystemHealth = Math.min(100, ecosystemHealth + deltaTime * 0.02);
+        }
+      }
+    }
+
+    // Death from age or health
+    if (p.age > p.maxAge || p.health <= 0) {
+      spawnDeadMatter(p.x, p.y, p.size / scale);
       plants.splice(i, 1);
-      spawnParticles(p.x, p.y, 4, '#7cb342', 1);
+      spawnParticles(p.x, p.y, 4, p.decomposer ? '#8d6e63' : '#7cb342', 1);
       continue;
     }
   }
 }
 
 function updateEcosystem() {
-  // Natural spawning based on ecosystem balance
-  if (Math.random() < 0.001 && plants.length < 30) {
-    const plantTypes = ['grass', 'bush', 'reed'];
+  const phase = getDayNightPhase();
+
+  // Natural plant spawning
+  if (Math.random() < 0.001 && plants.length < 35) {
+    const plantTypes = ['grass', 'bush', 'reed', 'flower'];
+    if (currentSeason === 'spring') plantTypes.push('sunflower', 'flower');
     spawnPlant(plantTypes[Math.floor(Math.random() * plantTypes.length)]);
   }
-  
-  // Calculate ecosystem health
+
+  // Mushroom spawning: near dead matter or at night in autumn
+  if (deadMatter.length > 0 && Math.random() < 0.0008) {
+    const dm = deadMatter[Math.floor(Math.random() * deadMatter.length)];
+    const fungiCount = plants.filter(p => p.decomposer).length;
+    if (fungiCount < 6) {
+      const fungiType = Math.random() < 0.6 ? 'mushroom' : 'toadstool';
+      spawnPlant(fungiType, dm.x + (Math.random() - 0.5) * 30 * scale, dm.y);
+      addJournalEntry(`A ${fungiType} sprouted from decomposing matter.`);
+    }
+  }
+
+  // Calculate ecosystem stats
   const plantCount = plants.length;
   const herbivoreCount = creatures.filter(c => !c.predator && c.diet !== 'meat').length;
   const predatorCount = creatures.filter(c => c.predator).length;
-  
-  // Frog spawning: attracted by insects
   const insectCount = creatures.filter(c => c.type === 'insect').length;
   const frogCount = creatures.filter(c => c.type === 'amphibian').length;
+  const snailCount = creatures.filter(c => c.type === 'mollusk').length;
+  const wormCount = creatures.filter(c => c.type === 'worm').length;
+  const beeCount = creatures.filter(c => c.species === 'bee').length;
+  const mammalCount = creatures.filter(c => c.type === 'mammal').length;
+  const birdCount = creatures.filter(c => c.type === 'bird').length;
+
+  // ---- NEW SPECIES SPAWNING LOGIC ----
+
+  // Frog spawning: attracted by insects
   if (insectCount >= 3 && frogCount < 3 && Math.random() < 0.0005) {
     spawnCreature('frog');
     addJournalEntry('Insects attracted a frog!');
   }
 
   // Snail spawning: attracted by plants
-  const snailCount = creatures.filter(c => c.type === 'mollusk').length;
   if (plantCount > 8 && snailCount < 4 && Math.random() < 0.0004) {
     spawnCreature('snail');
     addJournalEntry('Plants attracted a snail!');
   }
 
-  // Ideal ratios: plants > herbivores > predators
+  // Worm spawning: attracted by dead matter and healthy soil
+  if ((deadMatter.length > 2 || plantCount > 12) && wormCount < 5 && Math.random() < 0.0004) {
+    const wormType = Math.random() < 0.6 ? 'worm' : 'earthworm';
+    spawnCreature(wormType);
+    addJournalEntry(`A ${wormType} burrowed into the soil!`);
+  }
+
+  // Bee spawning: attracted by flowers
+  const flowerCount = plants.filter(p => p.shape === 'flower' || p.shape === 'sunflower').length;
+  if (flowerCount >= 2 && beeCount < 4 && Math.random() < 0.0005 && phase !== 'night') {
+    spawnCreature('bee');
+    addJournalEntry('Flowers attracted a bee!');
+  }
+
+  // Firefly spawning: appear at night when ecosystem is healthy
+  const fireflyCount = creatures.filter(c => c.species === 'firefly').length;
+  if (phase === 'night' && ecosystemHealth > 50 && fireflyCount < 5 && Math.random() < 0.0004) {
+    spawnCreature('firefly');
+    addJournalEntry('Fireflies appeared in the night!');
+  }
+
+  // Moth spawning: night insects
+  const mothCount = creatures.filter(c => c.species === 'moth').length;
+  if (phase === 'night' && plantCount > 5 && mothCount < 3 && Math.random() < 0.0003) {
+    spawnCreature('moth');
+    addJournalEntry('A moth emerged at nightfall.');
+  }
+
+  // Owl spawning: attracted by mice/small creatures at night
+  const owlCount = creatures.filter(c => c.species === 'owl').length;
+  if ((insectCount + snailCount) > 4 && owlCount < 2 && Math.random() < 0.0003) {
+    spawnCreature('owl');
+    addJournalEntry('An owl arrived to hunt!');
+  }
+
+  // Hummingbird spawning: attracted by flowers
+  const hummingCount = creatures.filter(c => c.species === 'hummingbird').length;
+  if (flowerCount >= 3 && hummingCount < 2 && Math.random() < 0.0003) {
+    spawnCreature('hummingbird');
+    addJournalEntry('A hummingbird was attracted by flowers!');
+  }
+
+  // Rabbit spawning: attracted by grass/plants
+  const rabbitCount = creatures.filter(c => c.species === 'rabbit').length;
+  if (plantCount > 15 && rabbitCount < 3 && Math.random() < 0.0003) {
+    spawnCreature('rabbit');
+    addJournalEntry('A rabbit appeared!');
+  }
+
+  // Deer spawning: rare, needs large healthy ecosystem
+  const deerCount = creatures.filter(c => c.species === 'deer').length;
+  if (plantCount > 20 && ecosystemHealth > 70 && deerCount < 2 && Math.random() < 0.0002) {
+    spawnCreature('deer');
+    addJournalEntry('A deer wandered into the ecosystem!');
+  }
+
+  // Fox spawning: nocturnal predator, attracted by rabbits/small creatures
+  const foxCount = creatures.filter(c => c.species === 'fox').length;
+  if (rabbitCount >= 2 && foxCount < 2 && Math.random() < 0.0002) {
+    spawnCreature('fox');
+    addJournalEntry('A fox arrived to hunt!');
+  }
+
+  // ---- ECOSYSTEM HEALTH ----
   let healthDelta = 0;
   if (plantCount > 10) healthDelta += 0.1;
-  if (herbivoreCount > 5 && herbivoreCount < 20) healthDelta += 0.1;
+  if (herbivoreCount > 5 && herbivoreCount < 25) healthDelta += 0.1;
   if (predatorCount < herbivoreCount * 0.3) healthDelta += 0.05;
   if (predatorCount > herbivoreCount) healthDelta -= 0.3;
-  
+  // Worms and mushrooms improve health
+  if (wormCount > 0) healthDelta += 0.05 * wormCount;
+  const fungiCount = plants.filter(p => p.decomposer).length;
+  if (fungiCount > 0) healthDelta += 0.03 * fungiCount;
+  // Pollinators improve health
+  if (beeCount > 0) healthDelta += 0.04 * beeCount;
+  // Biodiversity bonus
+  const speciesSet = new Set([...creatures.map(c => c.species), ...plants.map(p => p.species)]);
+  if (speciesSet.size > 8) healthDelta += 0.1;
+  if (speciesSet.size > 12) healthDelta += 0.15;
+  // Weather effects
+  if (weather === 'drought') healthDelta -= 0.15;
+  if (weather === 'storm') healthDelta -= 0.05;
+
   ecosystemHealth = Math.max(0, Math.min(100, ecosystemHealth + healthDelta * deltaTime));
-  
+
   // Days survived
-  daysSurvived = Math.floor(simulationTime / 60); // 1 day = 1 minute
+  daysSurvived = Math.floor(simulationTime / 60);
 }
 
 // ============================================================
@@ -851,42 +1569,104 @@ function getBiodiversityIndex() {
 // DRAWING
 // ============================================================
 function drawBackground() {
-  // Paper texture
-  ctx.fillStyle = '#f5f0e6';
-  ctx.fillRect(0, 0, W, H);
-  
+  const brightness = getDayNightBrightness();
+  const skyColors = getSmoothSkyColors();
   const timeColor = getTimeColor();
-  
-  // Sky layer (top 40%)
-  const skyGrad = ctx.createLinearGradient(0, 0, 0, H * 0.4);
-  skyGrad.addColorStop(0, timeColor.sky);
-  skyGrad.addColorStop(1, 'rgba(245, 240, 230, 0.3)');
-  ctx.fillStyle = skyGrad;
-  ctx.fillRect(0, 0, W, H * 0.4);
-  
-  // Sky blobs
-  for (let i = 0; i < 12; i++) {
-    const x = (i / 12) * W + (Math.sin(gameTime * 0.3 + i) * 30 * scale);
-    const y = H * 0.15 + Math.sin(i * 2) * H * 0.1;
-    const r = (30 + Math.random() * 40) * scale;
-    organicBlob(x, y, r, '#d4e9f7', 0.3);
-  }
-  
-  // Water layer (middle 30%)
-  for (let i = 0; i < 15; i++) {
-    const x = (i / 15) * W * 1.2 - W * 0.1;
-    const y = H * 0.45 + Math.sin(gameTime * 0.5 + i * 0.5) * 10 * scale;
-    const r = (40 + Math.random() * 60) * scale;
-    organicBlob(x, y, r, '#b3d9d9', 0.25);
-  }
-  
-  // Ground layer (bottom 30%) - season-tinted
   const seasonStyle = getSeasonTint();
+
+  // Sky gradient (smooth day/night)
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, H * 0.45);
+  skyGrad.addColorStop(0, skyColors.top);
+  skyGrad.addColorStop(0.5, skyColors.mid);
+  skyGrad.addColorStop(1, skyColors.bottom);
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, H * 0.45);
+
+  // Paper texture for lower portion
+  ctx.fillStyle = `rgba(245, 240, 230, ${0.5 + brightness * 0.3})`;
+  ctx.fillRect(0, H * 0.4, W, H * 0.6);
+
+  // Stars (visible at night)
+  if (brightness < 0.5) {
+    const starAlpha = (0.5 - brightness) * 2;
+    for (const star of starPositions) {
+      const twinkle = Math.sin(gameTime * 2 + star.twinkle) * 0.3 + 0.7;
+      ctx.save();
+      ctx.globalAlpha = starAlpha * twinkle * 0.8;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(star.x * W, star.y * H, star.size * scale, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // Sun
+  if (brightness > 0.2 && sunY < H * 0.6) {
+    const sunAlpha = Math.min(1, brightness);
+    ctx.save();
+    const sunGrad = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 50 * scale);
+    sunGrad.addColorStop(0, `rgba(255, 230, 80, ${0.6 * sunAlpha})`);
+    sunGrad.addColorStop(0.5, `rgba(255, 200, 50, ${0.2 * sunAlpha})`);
+    sunGrad.addColorStop(1, 'rgba(255, 200, 50, 0)');
+    ctx.fillStyle = sunGrad;
+    ctx.fillRect(sunX - 60 * scale, sunY - 60 * scale, 120 * scale, 120 * scale);
+    ctx.globalAlpha = sunAlpha * 0.9;
+    ctx.fillStyle = '#ffe066';
+    ctx.beginPath();
+    ctx.arc(sunX, sunY, 15 * scale, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Moon
+  if (brightness < 0.5 && moonY < H * 0.6 && moonY > -20) {
+    const moonAlpha = (0.5 - brightness) * 2;
+    ctx.save();
+    const moonGrad = ctx.createRadialGradient(moonX, moonY, 0, moonX, moonY, 40 * scale);
+    moonGrad.addColorStop(0, `rgba(200, 210, 240, ${0.4 * moonAlpha})`);
+    moonGrad.addColorStop(1, 'rgba(200, 210, 240, 0)');
+    ctx.fillStyle = moonGrad;
+    ctx.fillRect(moonX - 50 * scale, moonY - 50 * scale, 100 * scale, 100 * scale);
+    ctx.globalAlpha = moonAlpha * 0.85;
+    ctx.fillStyle = '#e8eaf6';
+    ctx.beginPath();
+    ctx.arc(moonX, moonY, 12 * scale, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = moonAlpha * 0.6;
+    ctx.fillStyle = skyColors.top;
+    ctx.beginPath();
+    ctx.arc(moonX + 4 * scale, moonY - 2 * scale, 10 * scale, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Clouds
+  const cloudAlpha = brightness > 0.3 ? 0.25 : 0.12;
+  for (let i = 0; i < 8; i++) {
+    const cx = ((gameTime * (5 + i * 2) + i * 120 + windStrength * gameTime * 20) % (W + 200)) - 100;
+    const cy = H * 0.08 + Math.sin(i * 2.3) * H * 0.08;
+    const cr = (30 + (i % 3) * 15) * scale;
+    organicBlob(cx, cy, cr, weather === 'storm' ? '#546e7a' : '#d4e9f7', cloudAlpha);
+    organicBlob(cx + cr * 0.5, cy - cr * 0.2, cr * 0.7, weather === 'storm' ? '#607d8b' : '#e1f0fa', cloudAlpha * 0.8);
+  }
+
+  // Water layer
+  const waterTint = brightness > 0.5 ? '#b3d9d9' : lerpColor('#4a6a8a', '#b3d9d9', Math.min(1, brightness + 0.3));
+  for (let i = 0; i < 15; i++) {
+    const wx = (i / 15) * W * 1.2 - W * 0.1;
+    const wy = H * 0.45 + Math.sin(gameTime * 0.5 + i * 0.5) * 10 * scale;
+    const wr = (40 + Math.random() * 60) * scale;
+    organicBlob(wx, wy, wr, waterTint, 0.22);
+  }
+
+  // Ground layer
   for (let i = 0; i < 20; i++) {
-    const x = (i / 20) * W * 1.3 - W * 0.15;
-    const y = H * 0.75 + Math.sin(i * 1.5) * 20 * scale;
-    const r = (35 + Math.random() * 50) * scale;
-    organicBlob(x, y, r, seasonStyle.groundHue, 0.28);
+    const gx = (i / 20) * W * 1.3 - W * 0.15;
+    const gy = H * 0.75 + Math.sin(i * 1.5) * 20 * scale;
+    const gr = (35 + Math.random() * 50) * scale;
+    const groundColor = brightness > 0.5 ? seasonStyle.groundHue : lerpColor('#3a3a30', seasonStyle.groundHue, Math.min(1, brightness + 0.3));
+    organicBlob(gx, gy, gr, groundColor, 0.28);
   }
 
   // Time of day tint
@@ -901,26 +1681,58 @@ function drawBackground() {
   ctx.fillRect(0, 0, W, H);
   ctx.restore();
 
+  // Drought visual
+  if (weather === 'drought') {
+    ctx.save();
+    ctx.fillStyle = `rgba(200, 150, 50, ${0.06 + droughtLevel * 0.08})`;
+    ctx.fillRect(0, 0, W, H);
+    for (let i = 0; i < 4; i++) {
+      const hx = Math.sin(gameTime * 0.8 + i * 1.5) * W * 0.3 + centerX;
+      const hy = H * 0.6 + Math.sin(gameTime + i) * 20 * scale;
+      ctx.globalAlpha = 0.04 + droughtLevel * 0.04;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.ellipse(hx, hy, 60 * scale, 4 * scale, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Wind visual
+  if ((weather === 'windy' || weather === 'storm') && Math.abs(windStrength) > 0.3) {
+    ctx.save();
+    ctx.globalAlpha = Math.abs(windStrength) * 0.06;
+    ctx.strokeStyle = '#ccc';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 6; i++) {
+      const wy = H * 0.2 + i * H * 0.1;
+      const wx = ((gameTime * 80 * Math.sign(windStrength) + i * 100) % (W + 200)) - 100;
+      ctx.beginPath();
+      ctx.moveTo(wx, wy);
+      ctx.bezierCurveTo(wx + 40 * scale, wy - 4 * scale, wx + 80 * scale, wy + 4 * scale, wx + 120 * scale, wy);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   // Seasonal particles
   if (currentSeason === 'spring') {
-    // Floating blossom petals
-    for (let i = 0; i < 6; i++) {
-      const px = ((gameTime * 20 + i * 70) % (W + 40)) - 20;
+    for (let i = 0; i < 8; i++) {
+      const px = ((gameTime * 20 + i * 70 + windStrength * gameTime * 30) % (W + 40)) - 20;
       const py = ((gameTime * 15 + i * 90 + Math.sin(gameTime + i) * 30) % (H * 0.7));
       ctx.save();
-      ctx.globalAlpha = 0.3;
-      ctx.fillStyle = '#ffb7c5';
+      ctx.globalAlpha = 0.3 * Math.max(0.3, brightness);
+      ctx.fillStyle = i % 2 === 0 ? '#ffb7c5' : '#fff0f5';
       ctx.beginPath();
       ctx.ellipse(px, py, 3 * scale, 2 * scale, gameTime + i, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
   } else if (currentSeason === 'autumn') {
-    // Falling leaves
-    for (let i = 0; i < 8; i++) {
-      const px = ((gameTime * 12 + i * 55) % (W + 40)) - 20;
+    for (let i = 0; i < 10; i++) {
+      const px = ((gameTime * 12 + i * 55 + windStrength * gameTime * 40) % (W + 40)) - 20;
       const py = ((gameTime * 25 + i * 80) % (H * 0.8));
-      const leafColors = ['#ff8a65', '#ffb74d', '#d84315', '#c62828'];
+      const leafColors = ['#ff8a65', '#ffb74d', '#d84315', '#c62828', '#ff6f00'];
       ctx.save();
       ctx.globalAlpha = 0.35;
       ctx.fillStyle = leafColors[i % leafColors.length];
@@ -930,56 +1742,72 @@ function drawBackground() {
       ctx.restore();
     }
   } else if (currentSeason === 'winter') {
-    // Snowflakes
-    for (let i = 0; i < 12; i++) {
-      const px = ((gameTime * 8 + i * 40 + Math.sin(gameTime * 0.5 + i) * 20) % (W + 20)) - 10;
+    for (let i = 0; i < 15; i++) {
+      const px = ((gameTime * 8 + i * 40 + Math.sin(gameTime * 0.5 + i) * 20 + windStrength * gameTime * 15) % (W + 20)) - 10;
       const py = ((gameTime * 18 + i * 60) % (H + 20)) - 10;
       ctx.save();
-      ctx.globalAlpha = 0.4;
+      ctx.globalAlpha = 0.5;
       ctx.fillStyle = '#fff';
       ctx.beginPath();
-      ctx.arc(px, py, (1.5 + Math.sin(i) * 0.5) * scale, 0, Math.PI * 2);
+      ctx.arc(px, py, (1.5 + Math.sin(i) * 0.8) * scale, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
   }
 
-  // Weather effects
-  if (weather === 'rain' || weather === 'storm') {
-    drawRain(weather === 'storm' ? 80 : 40);
+  // Rain (persistent particle system)
+  drawEnhancedRain();
+
+  // Lightning flash
+  if (lightningFlash > 0) {
+    ctx.save();
+    ctx.fillStyle = `rgba(255, 255, 255, ${lightningFlash * 0.4})`;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  // Dead matter visuals
+  for (const dm of deadMatter) {
+    const alpha = 0.25 * (1 - dm.age / dm.maxAge);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#5d4037';
+    ctx.beginPath();
+    ctx.ellipse(dm.x, dm.y, (3 + dm.amount * 0.5) * scale, (2 + dm.amount * 0.3) * scale, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 }
 
-function drawRain(drops) {
+function drawEnhancedRain() {
+  if (raindrops.length === 0) return;
   ctx.save();
-  ctx.strokeStyle = 'rgba(200, 220, 240, 0.4)';
-  ctx.lineWidth = 1;
-  for (let i = 0; i < drops; i++) {
-    const x = ((gameTime * 100 + i * 50) % (W + 100)) - 50;
-    const y = ((gameTime * 200 + i * 30) % (H + 50)) - 25;
+  ctx.strokeStyle = weather === 'storm' ? 'rgba(180, 200, 220, 0.5)' : 'rgba(200, 220, 240, 0.3)';
+  ctx.lineWidth = weather === 'storm' ? 1.5 : 1;
+  for (const r of raindrops) {
     ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + 3 * scale, y + 15 * scale);
+    ctx.moveTo(r.x, r.y);
+    ctx.lineTo(r.x + r.drift * 0.02, r.y + r.length);
     ctx.stroke();
   }
   ctx.restore();
 }
 
 function drawPlants() {
+  const brightness = getDayNightBrightness();
   for (const p of plants) {
     ctx.save();
-    
-    // Color with hue shift
-    const baseHue = p.color;
-    
+
+    // Dim plants slightly at night
+    if (brightness < 0.5 && !p.decomposer) {
+      ctx.globalAlpha = 0.5 + brightness;
+    }
+
+    const sway = Math.sin(gameTime * 1.5 + p.x * 0.01 + windStrength * 2) * (3 + Math.abs(windStrength) * 4) * scale;
+
     if (p.shape === 'stem') {
-      // Simple grass stem
       const stemH = p.size * 1.5;
-      // Gentle sway
-      const sway = Math.sin(gameTime * 1.5 + p.x * 0.01) * 3 * scale;
       softLine(p.x, p.y, p.x + sway, p.y - stemH, p.color, 1.5, 0.7);
-      
-      // Leaves
       const leafCount = Math.floor(p.size / (8 * scale));
       for (let i = 0; i < leafCount; i++) {
         const leafY = p.y - (i / leafCount) * stemH;
@@ -988,44 +1816,201 @@ function drawPlants() {
         watercolorCircle(p.x + leafSway - leafR * 0.5, leafY, leafR, p.color, 0.5);
         watercolorCircle(p.x + leafSway + leafR * 0.5, leafY, leafR, p.color, 0.5);
       }
-      // Flower on tall plants
       if (p.size > 20 * scale) {
         const flowerColors = ['#ff8a9b', '#ffb347', '#ff6b8a', '#e88aff', '#ffda6b'];
         const fc = flowerColors[Math.floor(p.x * 7) % flowerColors.length];
         const fTop = p.y - stemH;
         watercolorCircle(p.x + sway, fTop - 2*scale, p.size * 0.25, fc, 0.6);
-        // Petals
         for (let j = 0; j < 4; j++) {
           const pa = j * Math.PI / 2 + gameTime * 0.2;
-          watercolorCircle(
-            p.x + sway + Math.cos(pa) * p.size * 0.18,
-            fTop - 2*scale + Math.sin(pa) * p.size * 0.18,
-            p.size * 0.15, fc, 0.4);
+          watercolorCircle(p.x + sway + Math.cos(pa) * p.size * 0.18, fTop - 2*scale + Math.sin(pa) * p.size * 0.18, p.size * 0.15, fc, 0.4);
         }
       }
+      // Pollination indicator
+      if (p.pollinated) {
+        ctx.globalAlpha = 0.3 + Math.sin(gameTime * 3) * 0.15;
+        ctx.fillStyle = '#ffeb3b';
+        ctx.beginPath();
+        ctx.arc(p.x + sway, p.y - stemH - 5 * scale, 3 * scale, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
     } else if (p.shape === 'bushy') {
-      // Clustered circles
       const clusters = Math.floor(p.size / (10 * scale));
       for (let i = 0; i < clusters; i++) {
         const angle = (i / clusters) * Math.PI * 2;
-        const offsetX = Math.cos(angle) * p.size * 0.3;
+        const offsetX = Math.cos(angle) * p.size * 0.3 + sway * 0.3;
         const offsetY = Math.sin(angle) * p.size * 0.3;
         watercolorCircle(p.x + offsetX, p.y - p.size * 0.5 + offsetY, p.size * 0.4, p.color, 0.4);
       }
+
     } else if (p.shape === 'tall') {
-      // Tall reed
       const stemH = p.size * 2;
-      softLine(p.x, p.y, p.x + wobble(3), p.y - stemH, p.color, 2, 0.6);
-      
-      // Top tuft
+      softLine(p.x, p.y, p.x + sway * 0.5, p.y - stemH, p.color, 2, 0.6);
       for (let i = 0; i < 5; i++) {
         const angle = (i / 5) * Math.PI - Math.PI / 2;
-        const tX = p.x + Math.cos(angle) * p.size * 0.4;
+        const tX = p.x + sway * 0.5 + Math.cos(angle) * p.size * 0.4;
         const tY = p.y - stemH + Math.sin(angle) * p.size * 0.2;
-        softLine(p.x, p.y - stemH, tX, tY, p.color, 1, 0.5);
+        softLine(p.x + sway * 0.5, p.y - stemH, tX, tY, p.color, 1, 0.5);
+      }
+
+    } else if (p.shape === 'flower') {
+      // Dedicated flower shape
+      const stemH = p.size * 1.2;
+      softLine(p.x, p.y, p.x + sway, p.y - stemH, '#558b2f', 1.5, 0.6);
+      // Flower head with multiple petals
+      const fTop = p.y - stemH;
+      const petalCount = 6;
+      for (let j = 0; j < petalCount; j++) {
+        const pa = (j / petalCount) * Math.PI * 2 + gameTime * 0.15;
+        const petalR = p.size * 0.35;
+        ctx.beginPath();
+        ctx.ellipse(
+          p.x + sway + Math.cos(pa) * petalR * 0.6,
+          fTop + Math.sin(pa) * petalR * 0.6,
+          petalR * 0.5, petalR * 0.3, pa, 0, Math.PI * 2
+        );
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = 0.55;
+        ctx.fill();
+      }
+      // Center
+      watercolorCircle(p.x + sway, fTop, p.size * 0.15, '#ffc107', 0.7);
+      // Leaves on stem
+      watercolorCircle(p.x + sway * 0.3 + p.size * 0.2, p.y - stemH * 0.4, p.size * 0.2, '#66bb6a', 0.5);
+      watercolorCircle(p.x + sway * 0.3 - p.size * 0.2, p.y - stemH * 0.6, p.size * 0.18, '#66bb6a', 0.5);
+
+    } else if (p.shape === 'sunflower') {
+      // Tall sunflower
+      const stemH = p.size * 2.5;
+      softLine(p.x, p.y, p.x + sway * 0.4, p.y - stemH, '#558b2f', 2.5, 0.7);
+      // Big leaves
+      for (let i = 0; i < 3; i++) {
+        const ly = p.y - stemH * (0.3 + i * 0.2);
+        const ldir = i % 2 === 0 ? 1 : -1;
+        ctx.beginPath();
+        ctx.ellipse(p.x + sway * 0.2 + ldir * p.size * 0.5, ly, p.size * 0.4, p.size * 0.15, ldir * 0.3, 0, Math.PI * 2);
+        ctx.fillStyle = '#43a047';
+        ctx.globalAlpha = 0.5;
+        ctx.fill();
+      }
+      // Sunflower head
+      const fTop = p.y - stemH;
+      const headR = p.size * 0.6;
+      // Outer petals (yellow)
+      for (let j = 0; j < 12; j++) {
+        const pa = (j / 12) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.ellipse(
+          p.x + sway * 0.4 + Math.cos(pa) * headR * 0.7,
+          fTop + Math.sin(pa) * headR * 0.7,
+          headR * 0.35, headR * 0.15, pa, 0, Math.PI * 2
+        );
+        ctx.fillStyle = '#ffc107';
+        ctx.globalAlpha = 0.6;
+        ctx.fill();
+      }
+      // Center (brown seeds)
+      watercolorCircle(p.x + sway * 0.4, fTop, headR * 0.4, '#5d4037', 0.7);
+      watercolorCircle(p.x + sway * 0.4, fTop, headR * 0.25, '#4e342e', 0.5);
+
+    } else if (p.shape === 'mushroom') {
+      // Mushroom cap on stem
+      const stemH = p.size * 0.8;
+      const capR = p.size * 0.6;
+      // Stem
+      ctx.beginPath();
+      ctx.moveTo(p.x - capR * 0.2, p.y);
+      ctx.lineTo(p.x - capR * 0.15, p.y - stemH);
+      ctx.lineTo(p.x + capR * 0.15, p.y - stemH);
+      ctx.lineTo(p.x + capR * 0.2, p.y);
+      ctx.closePath();
+      ctx.fillStyle = '#d7ccc8';
+      ctx.globalAlpha = 0.6;
+      ctx.fill();
+      // Cap
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y - stemH, capR, capR * 0.5, 0, Math.PI, 0);
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = 0.7;
+      ctx.fill();
+      // Spots
+      for (let j = 0; j < 3; j++) {
+        const sx = p.x + (j - 1) * capR * 0.35;
+        const sy = p.y - stemH - capR * 0.15;
+        ctx.fillStyle = '#efebe9';
+        ctx.globalAlpha = 0.5;
+        ctx.beginPath();
+        ctx.arc(sx, sy, capR * 0.1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Night glow
+      if (p.glowAmount > 0) {
+        const glowGrad = ctx.createRadialGradient(p.x, p.y - stemH, 0, p.x, p.y - stemH, capR * 2);
+        glowGrad.addColorStop(0, `rgba(100, 200, 150, ${p.glowAmount * 0.3})`);
+        glowGrad.addColorStop(1, 'rgba(100, 200, 150, 0)');
+        ctx.fillStyle = glowGrad;
+        ctx.globalAlpha = 1;
+        ctx.fillRect(p.x - capR * 2, p.y - stemH - capR * 2, capR * 4, capR * 4);
+      }
+
+    } else if (p.shape === 'toadstool') {
+      // Similar to mushroom but red with white spots, taller
+      const stemH = p.size * 1.0;
+      const capR = p.size * 0.7;
+      // Stem
+      ctx.beginPath();
+      ctx.moveTo(p.x - capR * 0.18, p.y);
+      ctx.lineTo(p.x - capR * 0.12, p.y - stemH);
+      ctx.lineTo(p.x + capR * 0.12, p.y - stemH);
+      ctx.lineTo(p.x + capR * 0.18, p.y);
+      ctx.closePath();
+      ctx.fillStyle = '#efebe9';
+      ctx.globalAlpha = 0.65;
+      ctx.fill();
+      // Ring on stem
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y - stemH * 0.5, capR * 0.22, capR * 0.06, 0, 0, Math.PI * 2);
+      ctx.fillStyle = '#d7ccc8';
+      ctx.globalAlpha = 0.4;
+      ctx.fill();
+      // Cap
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y - stemH, capR, capR * 0.55, 0, Math.PI, 0);
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = 0.7;
+      ctx.fill();
+      // White spots
+      for (let j = 0; j < 5; j++) {
+        const sa = (j / 5) * Math.PI + 0.2;
+        const sx = p.x + Math.cos(sa) * capR * 0.5;
+        const sy = p.y - stemH - Math.sin(sa) * capR * 0.25;
+        ctx.fillStyle = '#fff';
+        ctx.globalAlpha = 0.6;
+        ctx.beginPath();
+        ctx.arc(sx, sy, capR * 0.08, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Night glow (red-ish)
+      if (p.glowAmount > 0) {
+        const glowGrad = ctx.createRadialGradient(p.x, p.y - stemH, 0, p.x, p.y - stemH, capR * 2);
+        glowGrad.addColorStop(0, `rgba(200, 80, 80, ${p.glowAmount * 0.2})`);
+        glowGrad.addColorStop(1, 'rgba(200, 80, 80, 0)');
+        ctx.fillStyle = glowGrad;
+        ctx.globalAlpha = 1;
+        ctx.fillRect(p.x - capR * 2, p.y - stemH - capR * 2, capR * 4, capR * 4);
       }
     }
-    
+
+    // Frost damage visual
+    if (p.frostDamage > 0 && currentSeason === 'winter') {
+      ctx.globalAlpha = Math.min(0.4, p.frostDamage * 0.02);
+      ctx.fillStyle = '#b3e5fc';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y - p.size * 0.5, p.size * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     ctx.restore();
   }
 }

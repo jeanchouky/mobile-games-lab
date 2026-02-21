@@ -986,7 +986,7 @@ function gameLoop(time) {
   if (gameState === 'playing') solveTime += deltaTime;
   if (gameState === 'solved') revealAnim += deltaTime;
   
-  camera.zoom += (camera.targetZoom - camera.zoom) * 0.1;
+  camera.zoom += (camera.targetZoom - camera.zoom) * (1 - Math.pow(0.9, deltaTime * 60));
   if (shakeAmount > 0.3) shakeAmount *= 0.9; else shakeAmount = 0;
   
   ctx.save();

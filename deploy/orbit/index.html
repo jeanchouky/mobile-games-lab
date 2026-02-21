@@ -453,7 +453,7 @@ function draw(timestamp){
   // Particles
   for(let i=particles.length-1;i>=0;i--){
     const p=particles[i];
-    p.x+=p.vx;p.y+=p.vy;p.vx*=0.98;p.vy*=0.98;p.life-=dt*1.2;
+    const d60=dt*60;p.x+=p.vx*d60;p.y+=p.vy*d60;p.vx*=Math.pow(0.98,d60);p.vy*=Math.pow(0.98,d60);p.life-=dt*1.2;
     if(p.life<=0){particles.splice(i,1);continue}
     ctx.globalAlpha=p.life;ctx.fillStyle=p.color;
     ctx.beginPath();ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);ctx.fill();

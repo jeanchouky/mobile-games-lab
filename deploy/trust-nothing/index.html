@@ -803,12 +803,13 @@ function spawnParticles(x, y, count, color = '#ff4444', spread = 3) {
 }
 
 function updateParticles() {
+  const d60 = deltaTime * 60;
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
-    p.x += p.vx;
-    p.y += p.vy;
-    p.vy += 0.15 * scale;
-    p.life -= p.decay;
+    p.x += p.vx * d60;
+    p.y += p.vy * d60;
+    p.vy += 0.15 * scale * d60;
+    p.life -= p.decay * d60;
     if (p.life <= 0) particles.splice(i, 1);
   }
 }
@@ -2700,7 +2701,7 @@ rooms[10] = {
       ctx.fillRect(0, 0, W, H);
       // Glitch lines
       for (const gl of roomState.glitchLines) {
-        gl.y += gl.speed;
+        gl.y += gl.speed * deltaTime * 60;
         if (gl.y > H) gl.y = -gl.h;
         ctx.save();
         ctx.fillStyle = `rgba(${100+Math.random()*155},${Math.random()*100},${Math.random()*255},${0.1 + Math.random() * 0.2})`;
@@ -2962,7 +2963,1010 @@ rooms[12] = {
 };
 
 // ============================================================
-// ACHIEVEMENTS
+// NEW GAME+ STATE
+// ============================================================
+let newGamePlus = false;
+let ngPlusLevel = 0;
+let secretEndingsFound = {};
+try { const se = localStorage.getItem('trustnothing_secrets'); if (se) secretEndingsFound = JSON.parse(se); } catch(e) {}
+function saveSecrets() { try { localStorage.setItem('trustnothing_secrets', JSON.stringify(secretEndingsFound)); } catch(e) {} }
+try { const ng = localStorage.getItem('trustnothing_ngplus'); if (ng) { ngPlusLevel = parseInt(ng) || 0; if (ngPlusLevel > 0) newGamePlus = true; } } catch(e) {}
+function saveNGPlus() { try { localStorage.setItem('trustnothing_ngplus', ngPlusLevel.toString()); } catch(e) {} }
+
+let konami = [];
+const KONAMI_CODE = [38,38,40,40,37,39,37,39,66,65];
+let playerTrustScore = 0;
+
+// ============================================================
+// ACT 2: ROOMS 13-16 — THE SYSTEM FIGHTS BACK
+// ============================================================
+
+// --- ROOM 13: The Fake Update Screen ---
+rooms[13] = {
+  init() {
+    roomState.phase = 'updating';
+    roomState.progress = 0;
+    roomState.fakeProgress = 0;
+    roomState.cancelClicks = 0;
+    roomState.bsodTimer = 0;
+    roomState.draggedBar = false;
+    stickFigure.visible = false;
+    document.title = 'Updating... Do not turn off your device';
+  },
+  update() {
+    if (roomState.phase === 'updating') {
+      roomState.fakeProgress += deltaTime * (newGamePlus ? 0.3 : 0.5);
+      roomState.progress = Math.min(99.9, roomState.fakeProgress + Math.sin(gameTime * 2) * 2);
+      if (roomState.fakeProgress > 33 && roomState.fakeProgress < 34) {
+        roomState.fakeProgress = 33.1;
+      }
+      for (const ev of inputEvents) {
+        if (showingDeath) continue;
+        if (ev.type === 'tap') {
+          const cancelY = centerY + 110 * scale;
+          if (hitTest(ev.x, ev.y, centerX, cancelY, 120 * scale, 40 * scale)) {
+            roomState.cancelClicks++;
+            sfxClick();
+            if (roomState.cancelClicks < 3) {
+              die(roomState.cancelClicks === 1 ? "You can't cancel destiny." : 'We said NO CANCELLING.');
+            } else {
+              roomState.phase = 'bluescreen';
+              roomState.bsodTimer = 0;
+              document.title = ':( Your game ran into a problem';
+              sfxExplosion();
+              shake(20);
+            }
+            return;
+          }
+          const barY = centerY + 65 * scale;
+          if (hitTest(ev.x, ev.y, centerX, barY, W - 80 * scale, 40 * scale)) {
+            roomState.draggedBar = true;
+          }
+        }
+        if (ev.type === 'drag' && roomState.draggedBar) {
+          if (ev.dx < -5) roomState.fakeProgress = Math.max(0, roomState.fakeProgress - 1);
+          if (roomState.fakeProgress <= 1) {
+            roomState.phase = 'bluescreen';
+            roomState.bsodTimer = 0;
+            sfxExplosion();
+          }
+        }
+        if (ev.type === 'release') roomState.draggedBar = false;
+      }
+      if (roomState.fakeProgress >= 99 && roomState.progress >= 99.5) {
+        roomState.phase = 'bluescreen';
+        roomState.bsodTimer = 0;
+        document.title = ':( Something went wrong';
+        sfxExplosion();
+        shake(15);
+      }
+    } else if (roomState.phase === 'bluescreen') {
+      roomState.bsodTimer += deltaTime;
+      for (const ev of inputEvents) {
+        if (showingDeath) continue;
+        if (ev.type === 'tap') {
+          const restartY = centerY + 140 * scale;
+          if (hitTest(ev.x, ev.y, centerX, restartY, 140 * scale, 40 * scale)) {
+            die('Restarting just makes it angrier.');
+            return;
+          }
+          const codeX = centerX + 90 * scale;
+          const codeY = centerY + 90 * scale;
+          if (hitTest(ev.x, ev.y, codeX, codeY, 50 * scale, 50 * scale)) {
+            sfxWin();
+            spawnParticles(ev.x, ev.y, 20, '#44ff44');
+            document.title = 'Trust Nothing';
+            fadeToRoom(14);
+            return;
+          }
+          if (hitTest(ev.x, ev.y, centerX, centerY - 80 * scale, 80 * scale, 80 * scale)) {
+            die('Even the sad face is betrayed by your touch.');
+            return;
+          }
+        }
+      }
+    }
+  },
+  draw() {
+    if (roomState.phase === 'updating') {
+      ctx.fillStyle = '#0078d4';
+      ctx.fillRect(0, 0, W, H);
+      const dots = 8;
+      const circleR = 25 * scale;
+      for (let i = 0; i < dots; i++) {
+        const angle = (gameTime * 2 + i * 0.3) % (Math.PI * 2);
+        const dotX = centerX + Math.cos(angle) * circleR;
+        const dotY = centerY - 60 * scale + Math.sin(angle) * circleR;
+        ctx.save();
+        ctx.globalAlpha = 0.2 + (i / dots) * 0.8;
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(dotX, dotY, 3 * scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      drawCleanText('Updating...', centerX, centerY - 10 * scale, 20, '#fff', 'center', '300');
+      drawCleanText(roomState.progress.toFixed(0) + '% complete', centerX, centerY + 20 * scale, 14, 'rgba(255,255,255,0.7)');
+      drawCleanText("Don't turn off your device", centerX, centerY + 45 * scale, 11, 'rgba(255,255,255,0.5)');
+      const barW = W - 100 * scale, barH = 6 * scale, barX = 50 * scale, barY = centerY + 65 * scale;
+      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      ctx.fillRect(barX, barY, barW, barH);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(barX, barY, barW * (roomState.progress / 100), barH);
+      ctx.save();
+      ctx.globalAlpha = 0.15 + hintLevel * 0.08;
+      drawCleanButton(centerX, centerY + 110 * scale, 120 * scale, 35 * scale, 'Cancel', 'rgba(255,255,255,0.3)', '#fff');
+      ctx.restore();
+    } else if (roomState.phase === 'bluescreen') {
+      ctx.fillStyle = '#0078d4';
+      ctx.fillRect(0, 0, W, H);
+      drawCleanText(':(', centerX, centerY - 80 * scale, 72, '#fff', 'center', '100');
+      drawCleanText('Your game ran into a problem', centerX, centerY - 20 * scale, 16, '#fff', 'center', '300');
+      drawCleanText("and needs to restart. We're just", centerX, centerY + 5 * scale, 12, '#fff', 'center', '300');
+      drawCleanText('collecting some error info, and then', centerX, centerY + 25 * scale, 12, '#fff', 'center', '300');
+      drawCleanText("we'll restart for you.", centerX, centerY + 45 * scale, 12, '#fff', 'center', '300');
+      const qrX = centerX + 90 * scale, qrY = centerY + 90 * scale, qrSize = 40 * scale;
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(qrX - qrSize/2, qrY - qrSize/2, qrSize, qrSize);
+      ctx.fillStyle = '#000';
+      for (let i = 0; i < 8; i++) for (let j = 0; j < 8; j++) {
+        if ((i + j * 3 + 7) % 3 === 0) ctx.fillRect(qrX - qrSize/2 + i * qrSize/8, qrY - qrSize/2 + j * qrSize/8, qrSize/8, qrSize/8);
+      }
+      drawCleanText('Stop code: TRUST_VIOLATION', centerX - 30 * scale, centerY + 130 * scale, 9, 'rgba(255,255,255,0.6)', 'center', '300');
+      drawCleanButton(centerX, centerY + 160 * scale, 140 * scale, 35 * scale, 'Restart', 'rgba(255,255,255,0.2)', '#fff');
+      if (roomState.bsodTimer > 10 && hintLevel >= 2) {
+        ctx.save();
+        ctx.globalAlpha = 0.3 + Math.sin(gameTime * 3) * 0.2;
+        ctx.strokeStyle = '#44ff44';
+        ctx.lineWidth = 2 * scale;
+        ctx.strokeRect(qrX - qrSize/2 - 5*scale, qrY - qrSize/2 - 5*scale, qrSize + 10*scale, qrSize + 10*scale);
+        ctx.restore();
+      }
+    }
+  }
+};
+
+// --- ROOM 14: The Invisible Maze ---
+rooms[14] = {
+  init() {
+    roomState.px = 0;
+    roomState.py = 0;
+    roomState.revealed = [];
+    roomState.moveCount = 0;
+    roomState.maze = newGamePlus ? [
+      [0,1,0,0,2,0],
+      [0,1,0,1,1,0],
+      [0,0,0,1,2,0],
+      [1,1,0,0,0,1],
+      [2,0,0,1,0,0],
+      [0,0,1,1,0,3],
+    ] : [
+      [0,0,1,0,0,0],
+      [0,1,0,0,1,0],
+      [0,0,0,1,0,0],
+      [1,0,1,0,0,1],
+      [0,0,0,0,1,0],
+      [0,1,0,0,0,3],
+    ];
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'confused';
+    document.title = 'Trust Nothing - Can you see?';
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 2;
+    for (const ev of inputEvents) {
+      if (showingDeath) continue;
+      if (ev.type === 'tap') {
+        const btnSize = 55 * scale;
+        const btnCX = centerX, btnCY = H - 100 * scale;
+        let dx = 0, dy = 0;
+        if (hitTest(ev.x, ev.y, btnCX, btnCY - btnSize, btnSize, btnSize)) dy = -1;
+        if (hitTest(ev.x, ev.y, btnCX, btnCY + btnSize, btnSize, btnSize)) dy = 1;
+        if (hitTest(ev.x, ev.y, btnCX - btnSize, btnCY, btnSize, btnSize)) dx = -1;
+        if (hitTest(ev.x, ev.y, btnCX + btnSize, btnCY, btnSize, btnSize)) dx = 1;
+        if (newGamePlus) { dx = -dx; dy = -dy; }
+        if (dx !== 0 || dy !== 0) {
+          sfxClick();
+          roomState.moveCount++;
+          const nx = roomState.px + dx, ny = roomState.py + dy;
+          if (nx < 0 || nx >= 6 || ny < 0 || ny >= 6) { shake(5); playTone(200, 0.1, 'square', 0.1); return; }
+          const cell = roomState.maze[ny][nx];
+          if (!roomState.revealed.find(r => r.x === nx && r.y === ny)) roomState.revealed.push({ x: nx, y: ny, type: cell });
+          if (cell === 1) { shake(8); playTone(150, 0.15, 'square', 0.15); return; }
+          if (cell === 2) { die('You found the trap. The trap also found you.'); return; }
+          if (cell === 3) { sfxWin(); spawnParticles(stickFigure.x, stickFigure.y, 20, '#44ff44'); document.title = 'Trust Nothing'; fadeToRoom(15); return; }
+          roomState.px = nx;
+          roomState.py = ny;
+        }
+      }
+    }
+  },
+  draw() {
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, W, H);
+    drawCleanText(newGamePlus ? 'Room 15: Invisible Maze NG+' : 'Room 15: Invisible Maze', centerX, 25 * scale, 12, '#555');
+    const cellSize = 40 * scale, mazeX = centerX - 3 * cellSize, mazeY = 60 * scale;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = 1;
+    for (let y = 0; y <= 6; y++) { ctx.beginPath(); ctx.moveTo(mazeX, mazeY + y * cellSize); ctx.lineTo(mazeX + 6 * cellSize, mazeY + y * cellSize); ctx.stroke(); }
+    for (let x = 0; x <= 6; x++) { ctx.beginPath(); ctx.moveTo(mazeX + x * cellSize, mazeY); ctx.lineTo(mazeX + x * cellSize, mazeY + 6 * cellSize); ctx.stroke(); }
+    ctx.restore();
+    for (const r of roomState.revealed) {
+      const cx = mazeX + r.x * cellSize, cy = mazeY + r.y * cellSize;
+      if (r.type === 1) { ctx.fillStyle = 'rgba(255,50,50,0.4)'; ctx.fillRect(cx, cy, cellSize, cellSize); drawCleanText('X', cx + cellSize/2, cy + cellSize/2, 12, '#ff4444'); }
+      else if (r.type === 2) { ctx.fillStyle = 'rgba(255,100,0,0.3)'; ctx.fillRect(cx, cy, cellSize, cellSize); drawCleanText('!', cx + cellSize/2, cy + cellSize/2, 14, '#ff8800'); }
+    }
+    const exitCX = mazeX + 5 * cellSize, exitCY = mazeY + 5 * cellSize;
+    ctx.save(); ctx.globalAlpha = 0.3 + Math.sin(gameTime * 2) * 0.15; ctx.fillStyle = '#44ff44'; ctx.fillRect(exitCX, exitCY, cellSize, cellSize); ctx.restore();
+    drawCleanText('EXIT', exitCX + cellSize/2, exitCY + cellSize/2, 8, '#44ff44');
+    const pCX = mazeX + roomState.px * cellSize + cellSize/2, pCY = mazeY + roomState.py * cellSize + cellSize/2;
+    stickFigure.x = pCX; stickFigure.y = pCY;
+    drawStickFigure(pCX, pCY, 0.35, stickFigure.eyeState);
+    const btnSize = 55 * scale, btnCX = centerX, btnCY = H - 100 * scale;
+    drawSketchButton(btnCX, btnCY - btnSize, btnSize, btnSize, newGamePlus ? '?' : '^', '#fff', '#333');
+    drawSketchButton(btnCX, btnCY + btnSize, btnSize, btnSize, newGamePlus ? '?' : 'v', '#fff', '#333');
+    drawSketchButton(btnCX - btnSize, btnCY, btnSize, btnSize, newGamePlus ? '?' : '<', '#fff', '#333');
+    drawSketchButton(btnCX + btnSize, btnCY, btnSize, btnSize, newGamePlus ? '?' : '>', '#fff', '#333');
+    drawCleanText('Moves: ' + roomState.moveCount, centerX, mazeY + 6.5 * cellSize, 10, '#555');
+  }
+};
+
+// --- ROOM 15: The Browser Title Puzzle ---
+rooms[15] = {
+  init() {
+    roomState.tapsOnTitle = 0;
+    roomState.titleDragY = 0;
+    roomState.draggingTitle = false;
+    roomState.solved = false;
+    roomState.shakeTimer = 0;
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'confused';
+    stickFigure.x = centerX;
+    stickFigure.y = centerY + 80 * scale;
+    document.title = 'DRAG ME DOWN -->';
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 2;
+    roomState.shakeTimer += deltaTime;
+    for (const ev of inputEvents) {
+      if (showingDeath) continue;
+      if (ev.type === 'tap') {
+        if (ev.y < 50 * scale) { roomState.tapsOnTitle++; roomState.draggingTitle = true; sfxClick(); if (roomState.tapsOnTitle >= 10) { die('The title bar has had enough of your poking.'); return; } }
+        const door1X = centerX - 80 * scale;
+        if (hitTest(ev.x, ev.y, door1X, centerY, 50 * scale, 70 * scale)) { die('That door leads to another death. Classic.'); return; }
+        const door2X = centerX + 80 * scale;
+        if (hitTest(ev.x, ev.y, door2X, centerY, 50 * scale, 70 * scale)) { die('This door was even worse than the first one.'); return; }
+      }
+      if (ev.type === 'drag' && roomState.draggingTitle) {
+        roomState.titleDragY += ev.dy;
+        if (roomState.titleDragY > H * 0.6) roomState.solved = true;
+      }
+      if (ev.type === 'release') {
+        if (roomState.draggingTitle && roomState.solved) { sfxWin(); spawnParticles(centerX, 40 * scale, 20, '#44ff44'); document.title = 'Trust Nothing'; fadeToRoom(16); return; }
+        roomState.draggingTitle = false;
+      }
+    }
+  },
+  draw() {
+    drawSketchBackground();
+    const titleOffset = Math.max(0, roomState.titleDragY || 0);
+    if (titleOffset > 20) {
+      ctx.save(); ctx.fillStyle = '#44ff44'; ctx.globalAlpha = Math.min(1, titleOffset / (H * 0.4));
+      ctx.fillRect(0, 0, W, Math.min(titleOffset, 50 * scale));
+      drawCleanText('EXIT', centerX, Math.min(titleOffset / 2, 25 * scale), 16, '#fff');
+      ctx.restore();
+    }
+    wobblyRect(centerX - 105 * scale, centerY - 35 * scale, 50 * scale, 70 * scale, '#8B4513', '#a0522d');
+    drawText('EXIT A', centerX - 80 * scale, centerY, 10, '#fff');
+    wobblyRect(centerX + 55 * scale, centerY - 35 * scale, 50 * scale, 70 * scale, '#8B4513', '#a0522d');
+    drawText('EXIT B', centerX + 80 * scale, centerY, 10, '#fff');
+    drawStickFigure(stickFigure.x, stickFigure.y, 0.7, stickFigure.eyeState);
+    ctx.save(); ctx.fillStyle = 'rgba(240,235,220,0.97)'; ctx.fillRect(0, titleOffset, W, 50 * scale);
+    ctx.strokeStyle = '#bbb'; ctx.lineWidth = 1; ctx.strokeRect(0, titleOffset, W, 50 * scale); ctx.restore();
+    const wobAmt = hintLevel >= 3 ? Math.sin(roomState.shakeTimer * 5) * 2 * scale : 0;
+    drawText('Room 16: Which Door?', centerX, titleOffset + 25 * scale + wobAmt, 14, '#444');
+    if (hintLevel >= 2 || roomState.tapsOnTitle >= 3) {
+      ctx.save(); ctx.globalAlpha = 0.4 + Math.sin(gameTime * 3) * 0.2;
+      drawText('v drag v', centerX, titleOffset + 42 * scale, 9, '#22aa22');
+      ctx.restore();
+    }
+    if (hintLevel >= 4) { ctx.save(); ctx.globalAlpha = 0.3; drawCleanText('(check your browser tab...)', centerX, centerY + 120 * scale, 9, '#888'); ctx.restore(); }
+  }
+};
+
+// --- ROOM 16: The Gravity Flip ---
+rooms[16] = {
+  init() {
+    roomState.gravity = 1;
+    roomState.playerY = centerY;
+    roomState.playerVY = 0;
+    roomState.platforms = [];
+    roomState.spikes = [];
+    roomState.exitY = 100 * scale;
+    roomState.exitX = W - 60 * scale;
+    roomState.flipCount = 0;
+    const platW = 80 * scale, platH = 10 * scale;
+    for (let i = 0; i < 5; i++) roomState.platforms.push({ x: 60 * scale + (i / 5) * (W - 120 * scale), y: 200 * scale + Math.sin(i * 1.5) * 100 * scale, w: platW, h: platH });
+    roomState.spikes.push({ x: centerX - 40 * scale, y: H - 20 * scale, w: 80 * scale, h: 20 * scale });
+    roomState.spikes.push({ x: centerX + 60 * scale, y: 0, w: 80 * scale, h: 20 * scale });
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'panic';
+    stickFigure.x = 60 * scale;
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 3;
+    roomState.playerVY += roomState.gravity * 300 * scale * deltaTime;
+    roomState.playerY += roomState.playerVY * deltaTime;
+    if (roomState.playerY > H - 40 * scale) { roomState.playerY = H - 40 * scale; roomState.playerVY = 0; }
+    if (roomState.playerY < 40 * scale) { roomState.playerY = 40 * scale; roomState.playerVY = 0; }
+    for (const p of roomState.platforms) {
+      if (stickFigure.x > p.x - 10 * scale && stickFigure.x < p.x + p.w + 10 * scale) {
+        if (roomState.gravity > 0 && roomState.playerVY > 0 && roomState.playerY > p.y - 20 * scale && roomState.playerY < p.y + p.h) { roomState.playerY = p.y - 20 * scale; roomState.playerVY = 0; }
+        if (roomState.gravity < 0 && roomState.playerVY < 0 && roomState.playerY < p.y + p.h + 20 * scale && roomState.playerY > p.y) { roomState.playerY = p.y + p.h + 20 * scale; roomState.playerVY = 0; }
+      }
+    }
+    for (const s of roomState.spikes) {
+      if (stickFigure.x > s.x && stickFigure.x < s.x + s.w && roomState.playerY > s.y && roomState.playerY < s.y + s.h + 20 * scale) {
+        die('Gravity is not your friend. Neither are spikes.');
+        return;
+      }
+    }
+    if (stickFigure.x > roomState.exitX - 30 * scale && Math.abs(roomState.playerY - roomState.exitY) < 40 * scale) {
+      sfxWin(); spawnParticles(stickFigure.x, roomState.playerY, 20, '#44ff44'); fadeToRoom(17); return;
+    }
+    for (const ev of inputEvents) {
+      if (showingDeath) continue;
+      if (ev.type === 'tap') {
+        if (ev.x < W / 2) stickFigure.x = Math.max(30 * scale, stickFigure.x - 40 * scale);
+        else stickFigure.x = Math.min(W - 30 * scale, stickFigure.x + 40 * scale);
+        sfxClick();
+      }
+      if (ev.type === 'release') {
+        const swipeY = ev.y - (ev.startY || ev.y);
+        if (Math.abs(swipeY) > 50 * scale) {
+          roomState.gravity *= -1;
+          roomState.flipCount++;
+          shake(5);
+          playTone(roomState.gravity > 0 ? 300 : 600, 0.1, 'sine', 0.1);
+          if (newGamePlus && roomState.flipCount % 3 === 0) {
+            roomState.spikes.push({ x: Math.random() * (W - 100 * scale) + 50 * scale, y: Math.random() * (H - 100 * scale) + 50 * scale, w: 40 * scale, h: 10 * scale });
+          }
+        }
+      }
+    }
+  },
+  draw() {
+    ctx.fillStyle = roomState.gravity > 0 ? '#1a1a2e' : '#2e1a1a';
+    ctx.fillRect(0, 0, W, H);
+    drawCleanText('Room 17: Gravity Flip', centerX, 25 * scale, 12, '#555');
+    drawCleanText('Tap sides to move. Swipe up/down to flip gravity.', centerX, 50 * scale, 9, '#444');
+    for (const p of roomState.platforms) { ctx.fillStyle = '#555'; ctx.fillRect(p.x, p.y, p.w, p.h); }
+    for (const s of roomState.spikes) {
+      ctx.fillStyle = '#cc3333'; ctx.fillRect(s.x, s.y, s.w, s.h);
+      const spikeCount = Math.floor(s.w / (15 * scale));
+      for (let i = 0; i < spikeCount; i++) {
+        ctx.beginPath();
+        const sx = s.x + i * (s.w / spikeCount);
+        if (s.y < H / 2) { ctx.moveTo(sx, s.y + s.h); ctx.lineTo(sx + s.w / spikeCount / 2, s.y + s.h + 10 * scale); ctx.lineTo(sx + s.w / spikeCount, s.y + s.h); }
+        else { ctx.moveTo(sx, s.y); ctx.lineTo(sx + s.w / spikeCount / 2, s.y - 10 * scale); ctx.lineTo(sx + s.w / spikeCount, s.y); }
+        ctx.fill();
+      }
+    }
+    ctx.save(); ctx.globalAlpha = 0.5 + Math.sin(gameTime * 3) * 0.3; ctx.fillStyle = '#44ff44';
+    ctx.fillRect(roomState.exitX - 20 * scale, roomState.exitY - 20 * scale, 40 * scale, 40 * scale);
+    drawCleanText('EXIT', roomState.exitX, roomState.exitY, 10, '#fff'); ctx.restore();
+    stickFigure.y = roomState.playerY;
+    ctx.save();
+    if (roomState.gravity < 0) { ctx.translate(0, roomState.playerY * 2); ctx.scale(1, -1); }
+    drawStickFigure(stickFigure.x, roomState.playerY, 0.6, stickFigure.eyeState);
+    ctx.restore();
+    drawCleanText(roomState.gravity > 0 ? 'Gravity: DOWN' : 'Gravity: UP', 60 * scale, H - 30 * scale, 10, '#888');
+  }
+};
+
+// ============================================================
+// ACT 3: ROOMS 17-20 — NOTHING IS REAL
+// ============================================================
+
+// --- ROOM 17: Fake Console Error ---
+rooms[17] = {
+  init() {
+    roomState.lines = [];
+    roomState.lineTimer = 0;
+    roomState.lineIndex = 0;
+    roomState.phase = 'errors';
+    roomState.tapSequence = [];
+    stickFigure.visible = false;
+    roomState.errorMessages = [
+      '> Loading game assets...',
+      '> ERROR: texture_player.png not found',
+      '> ERROR: Cannot read property "life" of undefined',
+      '> WARN: Memory usage at 98%',
+      '> ERROR: Uncaught ReferenceError: hope is not defined',
+      '> ERROR: Stack overflow in function: trust()',
+      '> FATAL: Game state corrupted',
+      '> Attempting recovery...',
+      '> Recovery failed.',
+      '> ...',
+      '> Actually, try typing "help"',
+    ];
+    document.title = 'ERROR - Trust Nothing has crashed';
+  },
+  update() {
+    roomState.lineTimer += deltaTime;
+    if (roomState.phase === 'errors') {
+      if (roomState.lineTimer > 0.8 && roomState.lineIndex < roomState.errorMessages.length) {
+        roomState.lines.push(roomState.errorMessages[roomState.lineIndex]);
+        roomState.lineIndex++;
+        roomState.lineTimer = 0;
+        playTone(100 + Math.random() * 50, 0.05, 'square', 0.05);
+      }
+      if (roomState.lineIndex >= roomState.errorMessages.length) {
+        roomState.phase = 'prompt';
+      }
+    }
+    if (roomState.phase === 'prompt') {
+      for (const ev of inputEvents) {
+        if (showingDeath) continue;
+        if (ev.type === 'tap') {
+          if (ev.y > H - 80 * scale) {
+            sfxClick();
+            if (roomState.tapSequence.length >= 4) {
+              roomState.lines.push('> help');
+              roomState.lines.push('> ...');
+              roomState.lines.push('> Just kidding. Tap the third error.');
+              roomState.phase = 'clickErrors';
+              roomState.tapSequence = [];
+            } else {
+              roomState.lines.push('> (not enough input)');
+              roomState.tapSequence = [];
+            }
+          } else {
+            roomState.tapSequence.push(ev.x);
+            playTone(200 + roomState.tapSequence.length * 100, 0.03, 'square', 0.05);
+          }
+        }
+      }
+    }
+    if (roomState.phase === 'clickErrors') {
+      for (const ev of inputEvents) {
+        if (showingDeath) continue;
+        if (ev.type === 'tap') {
+          const lineH = 18 * scale, startY = 30 * scale;
+          const thirdErrorY = startY + 2 * lineH;
+          if (ev.y > thirdErrorY - lineH/2 && ev.y < thirdErrorY + lineH/2) {
+            sfxWin(); spawnParticles(ev.x, ev.y, 20, '#44ff44'); document.title = 'Trust Nothing'; fadeToRoom(18); return;
+          }
+          for (let i = 0; i < roomState.lines.length; i++) {
+            const ly = startY + i * lineH;
+            if (ev.y > ly - lineH/2 && ev.y < ly + lineH/2 && i !== 2) { die('Wrong error line. The game is very specific about its bugs.'); return; }
+          }
+        }
+      }
+    }
+  },
+  draw() {
+    ctx.fillStyle = '#0c0c0c';
+    ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.globalAlpha = 0.03;
+    for (let y = 0; y < H; y += 3) { ctx.fillStyle = '#000'; ctx.fillRect(0, y, W, 1); }
+    ctx.restore();
+    const lineH = 18 * scale, startY = 30 * scale;
+    const maxVisible = Math.floor((H - 120 * scale) / lineH);
+    const startIdx = Math.max(0, roomState.lines.length - maxVisible);
+    for (let i = startIdx; i < roomState.lines.length; i++) {
+      const line = roomState.lines[i], ly = startY + (i - startIdx) * lineH;
+      let color = '#0f0';
+      if (line.includes('ERROR')) color = '#ff4444';
+      if (line.includes('FATAL')) color = '#ff0000';
+      if (line.includes('WARN')) color = '#ffaa00';
+      if (line.includes('...')) color = '#555';
+      if (roomState.phase === 'clickErrors' && i === 2) {
+        ctx.save(); ctx.globalAlpha = 0.2 + Math.sin(gameTime * 4) * 0.1; ctx.fillStyle = '#44ff44'; ctx.fillRect(0, ly - lineH/2, W, lineH); ctx.restore();
+      }
+      ctx.save(); ctx.font = (11 * scale) + 'px "Courier New", monospace'; ctx.fillStyle = color; ctx.textAlign = 'left'; ctx.fillText(line, 10 * scale, ly); ctx.restore();
+    }
+    if (roomState.phase === 'prompt' || roomState.phase === 'errors') {
+      const cursorY = startY + (roomState.lines.length - startIdx) * lineH;
+      if (Math.sin(gameTime * 4) > 0) { ctx.fillStyle = '#0f0'; ctx.fillRect(10 * scale, cursorY - 6 * scale, 8 * scale, 14 * scale); }
+    }
+    if (roomState.phase === 'prompt') {
+      ctx.save(); ctx.fillStyle = 'rgba(0,255,0,0.1)'; ctx.fillRect(0, H - 80 * scale, W, 80 * scale);
+      drawCleanText('[TAP HERE TO SUBMIT]', centerX, H - 40 * scale, 12, '#0a0');
+      drawCleanText('Input: ' + '*'.repeat(roomState.tapSequence.length), centerX, H - 60 * scale, 10, '#0f0');
+      ctx.restore();
+    }
+  }
+};
+
+// --- ROOM 18: The Lying Narrator ---
+rooms[18] = {
+  init() {
+    roomState.narratorText = "Welcome! I'm your friendly narrator.";
+    roomState.narratorTimer = 0;
+    roomState.phase = 0;
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'normal';
+    stickFigure.x = centerX;
+    stickFigure.y = centerY + 80 * scale;
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 2;
+    roomState.narratorTimer += deltaTime;
+    const dialogues = [
+      { t: 0, text: "Welcome! I'm your friendly narrator.", eye: 'normal' },
+      { t: 3, text: "See that door on the right? Go there!", eye: 'normal' },
+      { t: 6, text: "It's perfectly safe, I promise.", eye: 'normal' },
+      { t: 9, text: "Why are you hesitating?", eye: 'confused' },
+      { t: 13, text: "...OK fine, the door is a trap.", eye: 'confused' },
+      { t: 16, text: "The REAL exit is on the left.", eye: 'happy' },
+      { t: 19, text: "Wait, did I say left? I meant right.", eye: 'normal' },
+      { t: 22, text: "Actually, both are traps.", eye: 'panic' },
+      { t: 25, text: "The exit is... behind me?", eye: 'confused' },
+      { t: 30, text: "Just tap the narrator text. I give up.", eye: 'happy' },
+    ];
+    for (let di = 0; di < dialogues.length; di++) {
+      if (roomState.narratorTimer > dialogues[di].t && roomState.phase < di + 1) {
+        roomState.narratorText = dialogues[di].text;
+        roomState.phase = di + 1;
+        stickFigure.eyeState = dialogues[di].eye;
+      }
+    }
+    for (const ev of inputEvents) {
+      if (showingDeath) continue;
+      if (ev.type === 'tap') {
+        if (hitTest(ev.x, ev.y, W - 60 * scale, centerY + 10 * scale, 60 * scale, 80 * scale)) { die('The narrator lied. Or did he? (He did.)'); return; }
+        if (hitTest(ev.x, ev.y, 60 * scale, centerY + 10 * scale, 60 * scale, 80 * scale)) { die('The narrator lied about lying. Liar squared.'); return; }
+        if (ev.y < 140 * scale && ev.y > 60 * scale) {
+          if (roomState.phase >= 10) { sfxWin(); spawnParticles(ev.x, ev.y, 25, '#44ff44'); unlock('narrator'); fadeToRoom(19); return; }
+          else if (roomState.phase >= 5) { die("Not yet... I haven't finished talking!"); return; }
+        }
+      }
+    }
+  },
+  draw() {
+    drawSketchBackground();
+    const bubbleY = 100 * scale;
+    ctx.save(); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#222'; ctx.lineWidth = 2 * scale;
+    roundRect(30 * scale, bubbleY - 35 * scale, W - 60 * scale, 70 * scale, 12 * scale); ctx.fill();
+    roundRect(30 * scale, bubbleY - 35 * scale, W - 60 * scale, 70 * scale, 12 * scale); ctx.stroke(); ctx.restore();
+    drawText(roomState.narratorText, centerX, bubbleY, 13, '#222');
+    ctx.save(); ctx.globalAlpha = 0.5; drawText('~ The Narrator ~', centerX, bubbleY - 50 * scale, 9, '#999'); ctx.restore();
+    wobblyRect(35 * scale, centerY - 30 * scale, 50 * scale, 80 * scale, '#8B4513', '#a0522d');
+    drawText('LEFT', 60 * scale, centerY + 10 * scale, 10, '#fff');
+    wobblyRect(W - 85 * scale, centerY - 30 * scale, 50 * scale, 80 * scale, '#8B4513', '#a0522d');
+    drawText('RIGHT', W - 60 * scale, centerY + 10 * scale, 10, '#fff');
+    drawStickFigure(stickFigure.x, stickFigure.y, 0.7, stickFigure.eyeState);
+    if (roomState.phase >= 10) { ctx.save(); ctx.globalAlpha = 0.4 + Math.sin(gameTime * 4) * 0.2; drawText('^ tap me ^', centerX, bubbleY + 50 * scale, 10, '#22aa22'); ctx.restore(); }
+    drawText('Room 18: The Lying Narrator', centerX, H - 30 * scale, 10, '#999');
+  }
+};
+
+// --- ROOM 19: The Fake Game Over ---
+rooms[19] = {
+  init() {
+    roomState.phase = 'gameover';
+    roomState.scrollY = 0;
+    roomState.creditTimer = 0;
+    roomState.tapCount = 0;
+    roomState.restarted = false;
+    stickFigure.visible = false;
+    document.title = 'GAME OVER';
+  },
+  update() {
+    roomState.creditTimer += deltaTime;
+    if (roomState.phase === 'gameover') {
+      for (const ev of inputEvents) {
+        if (showingDeath) continue;
+        if (ev.type === 'tap') {
+          roomState.tapCount++;
+          const restartY = centerY + 60 * scale;
+          if (hitTest(ev.x, ev.y, centerX, restartY, 140 * scale, 45 * scale)) {
+            sfxClick();
+            if (!roomState.restarted) { roomState.restarted = true; roomState.phase = 'credits'; roomState.creditTimer = 0; roomState.scrollY = H; }
+            else die("You can't restart what was never real.");
+            return;
+          }
+          // Secret: tap the period after "GAME OVER."
+          if (ev.x > centerX + 80 * scale && ev.x < centerX + 130 * scale && ev.y > centerY - 70 * scale && ev.y < centerY - 30 * scale) {
+            sfxChime(); roomState.phase = 'credits'; roomState.creditTimer = 0; roomState.scrollY = H; return;
+          }
+        }
+      }
+    }
+    if (roomState.phase === 'credits') {
+      roomState.scrollY -= deltaTime * 40 * scale;
+      for (const ev of inputEvents) { if (ev.type === 'tap') roomState.scrollY -= 30 * scale; }
+      if (roomState.scrollY < -600 * scale) roomState.phase = 'escape';
+    }
+    if (roomState.phase === 'escape') {
+      for (const ev of inputEvents) {
+        if (showingDeath) continue;
+        if (ev.type === 'tap') { sfxWin(); spawnParticles(ev.x, ev.y, 25, '#44ff44'); document.title = 'Trust Nothing'; fadeToRoom(20); return; }
+      }
+    }
+  },
+  draw() {
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+    if (roomState.phase === 'gameover') {
+      ctx.save(); ctx.font = 'bold ' + (48 * scale) + "px 'Comic Sans MS', cursive"; ctx.textAlign = 'center'; ctx.fillStyle = '#cc3333';
+      ctx.fillText('GAME OVER.', centerX, centerY - 50 * scale); ctx.restore();
+      drawCleanText('You trusted too much.', centerX, centerY, 14, '#888');
+      drawCleanText('Final Deaths: ' + totalDeaths, centerX, centerY + 25 * scale, 12, '#666');
+      drawCleanButton(centerX, centerY + 60 * scale, 140 * scale, 45 * scale, 'Restart?', '#cc3333');
+      if (hintLevel >= 4) { ctx.save(); ctx.globalAlpha = 0.2 + Math.sin(gameTime * 5) * 0.1; ctx.beginPath(); ctx.arc(centerX + 105 * scale, centerY - 55 * scale, 10 * scale, 0, Math.PI * 2); ctx.strokeStyle = '#44ff44'; ctx.lineWidth = 1; ctx.stroke(); ctx.restore(); }
+    }
+    if (roomState.phase === 'credits') {
+      const creditLines = ['TRUST NOTHING','','A Game That Lied To You','','Lead Designer: Nobody','Lead Programmer: Also Nobody','QA Testing: The Player (sorry)','Sound Design: Beeps & Boops','Moral Support: None','','Special Thanks:','Your patience','Your gullibility','Your continued tapping','','','Wait...','','Is this really the end?','','','No.','','Tap to continue.'];
+      const lineH = 30 * scale;
+      for (let i = 0; i < creditLines.length; i++) {
+        const ly = roomState.scrollY + i * lineH;
+        if (ly > -30 * scale && ly < H + 30 * scale) {
+          drawCleanText(creditLines[i], centerX, ly, i === 0 ? 28 : 14, i === 0 ? '#ffd700' : '#ccc', 'center', i === 0 ? '700' : '300');
+        }
+      }
+    }
+    if (roomState.phase === 'escape') {
+      drawCleanText('Oh, you made it past the credits.', centerX, centerY - 30 * scale, 16, '#fff');
+      drawCleanText('Tap anywhere. For real this time.', centerX, centerY + 10 * scale, 12, '#44ff44');
+    }
+  }
+};
+
+// --- ROOM 20: The Trust Test ---
+rooms[20] = {
+  init() {
+    roomState.questions = [
+      { q: 'Is this door safe?', options: ['Yes', 'No'], correct: 1, explanation: 'Nothing is safe.' },
+      { q: 'Should you press the red button?', options: ['Yes', 'No'], correct: 0, explanation: 'Reverse psychology works here.' },
+      { q: 'Do you trust this game?', options: ['Yes', 'No'], correct: -1, explanation: 'Both answers are wrong.' },
+      { q: 'Which door is the exit?', options: ['Left', 'Right', 'Neither'], correct: 2, explanation: 'Learning!' },
+    ];
+    roomState.currentQ = 0;
+    roomState.answered = false;
+    roomState.waitTimer = 0;
+    roomState.showExplanation = false;
+    playerTrustScore = 0;
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'confused';
+    stickFigure.x = centerX;
+    stickFigure.y = centerY + 120 * scale;
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 2;
+    if (roomState.showExplanation) {
+      roomState.waitTimer += deltaTime;
+      if (roomState.waitTimer > 2) {
+        roomState.showExplanation = false;
+        roomState.answered = false;
+        roomState.currentQ++;
+        roomState.waitTimer = 0;
+        if (roomState.currentQ >= roomState.questions.length) { sfxWin(); spawnParticles(centerX, centerY, 30, '#44ff44'); fadeToRoom(21); return; }
+      }
+      return;
+    }
+    for (const ev of inputEvents) {
+      if (showingDeath || roomState.answered) continue;
+      if (ev.type === 'tap') {
+        const q = roomState.questions[roomState.currentQ];
+        const optCount = q.options.length;
+        for (let i = 0; i < optCount; i++) {
+          const optX = centerX + (i - (optCount-1)/2) * 100 * scale, optY = centerY + 30 * scale;
+          if (hitTest(ev.x, ev.y, optX, optY, 85 * scale, 40 * scale)) {
+            sfxClick();
+            if (q.correct === -1) { die('I told you: TRUST NOTHING. Not even the questions.'); return; }
+            if (i === q.correct) { roomState.answered = true; roomState.showExplanation = true; roomState.waitTimer = 0; stickFigure.eyeState = 'happy'; sfxChime(); playerTrustScore++; }
+            else { die(q.explanation); return; }
+          }
+        }
+      }
+    }
+  },
+  draw() {
+    drawSketchBackground();
+    drawText('Room 21: Trust Test', centerX, 25 * scale, 12, '#999');
+    const q = roomState.questions[Math.min(roomState.currentQ, roomState.questions.length - 1)];
+    drawText((roomState.currentQ + 1) + '/' + roomState.questions.length, W - 40 * scale, 50 * scale, 10, '#888');
+    drawText(q.q, centerX, centerY - 60 * scale, 20, '#222');
+    const optCount = q.options.length;
+    for (let i = 0; i < optCount; i++) {
+      const optX = centerX + (i - (optCount-1)/2) * 100 * scale, optY = centerY + 30 * scale;
+      const isCorrect = roomState.answered && i === q.correct;
+      drawSketchButton(optX, optY, 85 * scale, 40 * scale, q.options[i], isCorrect ? '#22aa22' : '#222', isCorrect ? '#ccffcc' : '#f5f0e6');
+    }
+    if (roomState.showExplanation) { ctx.save(); ctx.globalAlpha = Math.min(1, roomState.waitTimer * 2); drawText(q.explanation, centerX, centerY + 80 * scale, 12, '#22aa22'); ctx.restore(); }
+    drawText('Trust Score: ' + playerTrustScore, centerX, centerY + 120 * scale, 10, '#ffd700');
+    drawStickFigure(stickFigure.x, stickFigure.y, 0.6, stickFigure.eyeState);
+  }
+};
+
+// ============================================================
+// ACT 4: ROOMS 21-24 — THE META GAME
+// ============================================================
+
+// --- ROOM 21: The Fake Save Corruption ---
+rooms[21] = {
+  init() {
+    roomState.phase = 'corrupted';
+    roomState.glitchTimer = 0;
+    roomState.shakeIntensity = 0;
+    roomState.corruptedSlots = [
+      { name: 'Save 1 - Room 7', corrupted: true },
+      { name: 'Save 2 - Room 12', corrupted: true },
+      { name: 'Save 3 - ???', corrupted: false },
+    ];
+    stickFigure.visible = false;
+    document.title = 'WARNING: Save data corrupted';
+  },
+  update() {
+    roomState.glitchTimer += deltaTime;
+    roomState.shakeIntensity = Math.max(0, roomState.shakeIntensity - deltaTime * 5);
+    for (const ev of inputEvents) {
+      if (showingDeath) continue;
+      if (ev.type === 'tap') {
+        for (let i = 0; i < 3; i++) {
+          const slotY = centerY - 40 * scale + i * 70 * scale;
+          if (hitTest(ev.x, ev.y, centerX, slotY, 250 * scale, 55 * scale)) {
+            sfxClick();
+            if (roomState.corruptedSlots[i].corrupted) { die('That save was corrupted. The corruption corrupted you too.'); roomState.shakeIntensity = 15; return; }
+            else { sfxWin(); spawnParticles(ev.x, ev.y, 20, '#44ff44'); document.title = 'Trust Nothing'; unlock('act4complete'); fadeToRoom(22); return; }
+          }
+        }
+        const delY = centerY + 170 * scale;
+        if (hitTest(ev.x, ev.y, centerX, delY, 180 * scale, 40 * scale)) { die('You deleted everything. Including yourself.'); return; }
+      }
+    }
+  },
+  draw() {
+    ctx.fillStyle = '#1a1a2e'; ctx.fillRect(0, 0, W, H);
+    if (roomState.shakeIntensity > 0) { ctx.save(); ctx.translate((Math.random()-0.5) * roomState.shakeIntensity, (Math.random()-0.5) * roomState.shakeIntensity); }
+    ctx.save(); ctx.globalAlpha = 0.05 + Math.sin(gameTime * 10) * 0.03;
+    for (let i = 0; i < 30; i++) { ctx.fillStyle = Math.random() > 0.5 ? '#fff' : '#000'; ctx.fillRect(Math.random() * W, Math.random() * 60 * scale, Math.random() * 50 * scale, 2); }
+    ctx.restore();
+    drawCleanText('SAVE DATA MANAGER', centerX, 40 * scale, 18, '#ff4444', 'center', '700');
+    drawCleanText('WARNING: Corruption detected', centerX, 65 * scale, 11, '#ff8800');
+    for (let i = 0; i < 3; i++) {
+      const slotY = centerY - 40 * scale + i * 70 * scale;
+      const slot = roomState.corruptedSlots[i];
+      ctx.save(); ctx.fillStyle = slot.corrupted ? 'rgba(255,50,50,0.15)' : 'rgba(50,255,50,0.15)';
+      roundRect(centerX - 125 * scale, slotY - 27 * scale, 250 * scale, 55 * scale, 8 * scale); ctx.fill();
+      ctx.strokeStyle = slot.corrupted ? '#cc3333' : '#33cc33'; ctx.lineWidth = 1.5 * scale;
+      roundRect(centerX - 125 * scale, slotY - 27 * scale, 250 * scale, 55 * scale, 8 * scale); ctx.stroke(); ctx.restore();
+      drawCleanText(slot.name, centerX, slotY - 5 * scale, 14, slot.corrupted ? '#ff6666' : '#66ff66');
+      drawCleanText(slot.corrupted ? '[CORRUPTED]' : '[OK]', centerX, slotY + 15 * scale, 10, slot.corrupted ? '#cc3333' : '#33cc33');
+      if (slot.corrupted && Math.random() < 0.1) { ctx.save(); ctx.globalAlpha = 0.3; ctx.fillStyle = '#ff0000'; ctx.fillRect(centerX - 120 * scale + Math.random() * 200 * scale, slotY - 20 * scale + Math.random() * 40 * scale, Math.random() * 60 * scale, 3); ctx.restore(); }
+    }
+    drawCleanButton(centerX, centerY + 170 * scale, 180 * scale, 40 * scale, 'Delete All Saves', '#cc3333');
+    if (hintLevel >= 3) { ctx.save(); ctx.globalAlpha = 0.3 + Math.sin(gameTime * 3) * 0.2; drawCleanText('(not all saves are corrupted...)', centerX, centerY + 210 * scale, 9, '#555'); ctx.restore(); }
+    if (roomState.shakeIntensity > 0) ctx.restore();
+  }
+};
+
+// --- ROOM 22: The Mirror Self ---
+rooms[22] = {
+  init() {
+    roomState.playerX = centerX / 2;
+    roomState.mirrorX = centerX + centerX / 2;
+    roomState.desyncTimer = 0;
+    roomState.syncCounter = 0;
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'normal';
+    stickFigure.x = centerX / 2;
+    stickFigure.y = centerY + 40 * scale;
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 2;
+    roomState.desyncTimer += deltaTime;
+    const desync = Math.min(1, roomState.desyncTimer / 30);
+    for (const ev of inputEvents) {
+      if (showingDeath) continue;
+      if (ev.type === 'tap') {
+        if (ev.x < W / 2) {
+          roomState.playerX = ev.x;
+          stickFigure.x = ev.x;
+          sfxClick();
+          roomState.mirrorX = W - ev.x + (Math.sin(gameTime) * desync * 60 * scale);
+          roomState.syncCounter++;
+        } else {
+          if (roomState.desyncTimer > 15) {
+            if (ev.y > centerY + 20 * scale && ev.y < centerY + 100 * scale) {
+              sfxWin(); spawnParticles(ev.x, ev.y, 20, '#44ff44'); fadeToRoom(23); return;
+            }
+          }
+          die('Stay on your side! The mirror is not for touching.');
+          return;
+        }
+      }
+    }
+    if (roomState.desyncTimer > 20) roomState.mirrorX = W / 2 + W / 4 + Math.sin(gameTime * 1.5) * 80 * scale;
+  },
+  draw() {
+    drawSketchBackground();
+    ctx.save(); ctx.strokeStyle = '#aaa'; ctx.lineWidth = 3 * scale; ctx.setLineDash([10 * scale, 5 * scale]);
+    ctx.beginPath(); ctx.moveTo(centerX, 60 * scale); ctx.lineTo(centerX, H - 30 * scale); ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+    drawText('Room 23: Mirror Self', centerX, 25 * scale, 12, '#999');
+    drawText('YOUR SIDE', centerX / 2, 55 * scale, 9, '#666');
+    drawText('MIRROR', centerX + centerX / 2, 55 * scale, 9, '#666');
+    drawStickFigure(stickFigure.x, stickFigure.y, 0.7, stickFigure.eyeState);
+    const mirrorEye = roomState.desyncTimer > 20 ? 'panic' : roomState.desyncTimer > 10 ? 'confused' : 'normal';
+    ctx.save(); ctx.translate(roomState.mirrorX * 2, 0); ctx.scale(-1, 1);
+    drawStickFigure(roomState.mirrorX, stickFigure.y, 0.7, mirrorEye); ctx.restore();
+    if (roomState.desyncTimer > 10) { ctx.save(); ctx.globalAlpha = Math.min(0.8, (roomState.desyncTimer - 10) / 10); drawCleanText('Mirror is desyncing...', centerX, H - 60 * scale, 11, '#cc3333'); ctx.restore(); }
+    if (roomState.desyncTimer > 15) { ctx.save(); ctx.globalAlpha = 0.3 + Math.sin(gameTime * 3) * 0.2; drawCleanText('Tap the mirror side now?', centerX, H - 40 * scale, 10, '#22aa22'); ctx.restore(); }
+  }
+};
+
+// --- ROOM 23: The Recursive Room ---
+rooms[23] = {
+  init() {
+    roomState.depth = 0;
+    roomState.maxDepth = newGamePlus ? 5 : 3;
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'confused';
+    stickFigure.x = centerX;
+    stickFigure.y = centerY + 50 * scale;
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 2;
+    for (const ev of inputEvents) {
+      if (showingDeath) continue;
+      if (ev.type === 'tap') {
+        const sz = 280 * scale * Math.pow(0.55, roomState.depth);
+        const rx = centerX, ry = centerY + 20 * scale;
+        if (hitTest(ev.x, ev.y, rx, ry, sz * 0.3, sz * 0.3) && roomState.depth >= roomState.maxDepth) {
+          sfxWin(); spawnParticles(ev.x, ev.y, 25, '#44ff44'); fadeToRoom(24); return;
+        }
+        if (hitTest(ev.x, ev.y, rx, ry, sz, sz)) {
+          sfxClick();
+          if (roomState.depth < roomState.maxDepth) { roomState.depth++; shake(3); }
+        } else {
+          if (roomState.depth > 0) roomState.depth--;
+          else die('There is no escape from the room. Only deeper rooms.');
+        }
+      }
+    }
+  },
+  draw() {
+    drawSketchBackground();
+    drawText('Room 24: Recursion', centerX, 25 * scale, 12, '#999');
+    const drawNestedRoom = (x, y, size, depth) => {
+      if (depth > roomState.maxDepth + 1) return;
+      const isCurrentDepth = depth === roomState.depth;
+      ctx.save(); ctx.globalAlpha = isCurrentDepth ? 1 : 0.3 + depth * 0.1;
+      wobblyRect(x - size/2, y - size/2, size, size, isCurrentDepth ? '#222' : '#888', isCurrentDepth ? 'rgba(245,240,230,0.9)' : 'rgba(200,195,185,0.5)', isCurrentDepth ? 2.5 : 1);
+      if (size > 40 * scale) drawText('Room ' + (24 + depth), x, y - size/2 + 15 * scale, Math.max(6, 10 - depth * 2), '#888');
+      if (depth === roomState.maxDepth) { ctx.fillStyle = '#44ff44'; ctx.globalAlpha = 0.5 + Math.sin(gameTime * 3) * 0.3; ctx.fillRect(x - size * 0.15, y - size * 0.15, size * 0.3, size * 0.3); if (size > 20 * scale) drawCleanText('EXIT', x, y, Math.max(5, 8 - depth), '#fff'); }
+      ctx.restore();
+      if (depth < roomState.maxDepth + 1) drawNestedRoom(x, y, size * 0.55, depth + 1);
+    };
+    drawNestedRoom(centerX, centerY + 20 * scale, 280 * scale, 0);
+    const currentSize = 280 * scale * Math.pow(0.55, roomState.depth);
+    stickFigure.x = centerX;
+    stickFigure.y = centerY + 20 * scale + currentSize * 0.2;
+    drawStickFigure(stickFigure.x, stickFigure.y, Math.max(0.2, 0.7 * Math.pow(0.7, roomState.depth)), stickFigure.eyeState);
+    drawText('Depth: ' + roomState.depth + '/' + roomState.maxDepth, centerX, H - 40 * scale, 11, '#666');
+    drawText('Tap inside to go deeper. Tap outside to go back.', centerX, H - 20 * scale, 8, '#999');
+  }
+};
+
+// ============================================================
+// ACT 5: ROOM 24 — THE FINAL DECEPTION
+// ============================================================
+
+// --- ROOM 24: The Final Room ---
+rooms[24] = {
+  init() {
+    roomState.phase = 'fake_ending';
+    roomState.timer = 0;
+    roomState.revealTimer = 0;
+    roomState.wallTaps = { top: 0, right: 0, bottom: 0, left: 0 };
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'happy';
+    stickFigure.x = centerX;
+    stickFigure.y = centerY + 40 * scale;
+    document.title = 'Congratulations! You Won!';
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 2;
+    roomState.timer += deltaTime;
+    if (roomState.phase === 'fake_ending') {
+      if (roomState.timer > 5) {
+        roomState.phase = 'reveal'; roomState.revealTimer = 0; stickFigure.eyeState = 'panic';
+        document.title = 'Wait... something is wrong'; shake(15); sfxExplosion();
+      }
+      for (const ev of inputEvents) { if (ev.type === 'tap') spawnParticles(ev.x, ev.y, 3, '#ffd700'); }
+    }
+    if (roomState.phase === 'reveal') {
+      roomState.revealTimer += deltaTime;
+      if (roomState.revealTimer > 3) { roomState.phase = 'real_exit'; stickFigure.eyeState = 'confused'; document.title = 'Trust Nothing - Find the real exit'; }
+    }
+    if (roomState.phase === 'real_exit') {
+      for (const ev of inputEvents) {
+        if (showingDeath) continue;
+        if (ev.type === 'tap') {
+          const margin = 40 * scale;
+          if (ev.y < margin) roomState.wallTaps.top++;
+          else if (ev.x > W - margin) roomState.wallTaps.right++;
+          else if (ev.y > H - margin) roomState.wallTaps.bottom++;
+          else if (ev.x < margin) roomState.wallTaps.left++;
+          else {
+            if (hitTest(ev.x, ev.y, centerX, centerY + 20 * scale, 180 * scale, 50 * scale)) {
+              die('Did you learn NOTHING? The big button is ALWAYS a trap!'); return;
+            }
+          }
+          if (roomState.wallTaps.top >= 1 && roomState.wallTaps.right >= 1 && roomState.wallTaps.bottom >= 1 && roomState.wallTaps.left >= 1) {
+            sfxWin(); spawnParticles(centerX, centerY, 40, '#44ff44'); document.title = 'Trust Nothing';
+            unlock('allwalls'); unlock('act5complete');
+            showChapterComplete();
+            return;
+          }
+        }
+      }
+    }
+  },
+  draw() {
+    if (roomState.phase === 'fake_ending') {
+      drawSketchBackground();
+      ctx.save(); ctx.font = 'bold ' + (40 * scale) + "px 'Comic Sans MS', cursive"; ctx.textAlign = 'center'; ctx.fillStyle = '#ffd700'; ctx.shadowColor = '#ffd700'; ctx.shadowBlur = 20 * scale;
+      ctx.fillText('YOU WON!', centerX, centerY - 80 * scale); ctx.restore();
+      drawText('Congratulations!', centerX, centerY - 30 * scale, 20, '#22aa22');
+      drawText('Only ' + totalDeaths + ' deaths!', centerX, centerY, 16, '#666');
+      drawStickFigure(stickFigure.x, stickFigure.y, 1, 'happy');
+      if (Math.random() < 0.4) { const colors = ['#ff4444', '#44ff44', '#4444ff', '#ffff44', '#ff44ff', '#ffd700']; spawnParticles(Math.random() * W, -10, 1, colors[Math.floor(Math.random() * colors.length)], 2); }
+    } else if (roomState.phase === 'reveal') {
+      const glitchAmt = roomState.revealTimer * 5;
+      ctx.fillStyle = '#f5f0e6'; ctx.fillRect(0, 0, W, H);
+      for (let i = 0; i < glitchAmt; i++) { ctx.save(); ctx.fillStyle = 'rgba(' + Math.floor(Math.random()*255) + ',' + Math.floor(Math.random()*50) + ',' + Math.floor(Math.random()*50) + ',0.3)'; ctx.fillRect(0, Math.random() * H, W, 2 + Math.random() * 5); ctx.restore(); }
+      drawText('WAIT...', centerX, centerY - 50 * scale, 36, '#cc3333');
+      drawText('That ending was FAKE.', centerX, centerY, 18, '#222');
+      drawText('You should know better by now.', centerX, centerY + 30 * scale, 14, '#888');
+      drawStickFigure(stickFigure.x, stickFigure.y, 0.8, 'panic');
+    } else {
+      drawSketchBackground();
+      drawText('Room 25: The REAL Final Room', centerX, 25 * scale, 14, '#cc3333');
+      drawSketchButton(centerX, centerY + 20 * scale, 180 * scale, 50 * scale, 'FINISH GAME', '#fff', '#ff8800', true);
+      drawStickFigure(stickFigure.x, stickFigure.y, 0.7, stickFigure.eyeState);
+      const wallAlpha = 0.15 + hintLevel * 0.05;
+      ctx.save(); ctx.globalAlpha = wallAlpha;
+      ctx.fillStyle = roomState.wallTaps.top > 0 ? '#44ff44' : '#ff4444'; ctx.fillRect(0, 0, W, roomState.wallTaps.top > 0 ? 40 * scale : 5 * scale);
+      ctx.fillStyle = roomState.wallTaps.right > 0 ? '#44ff44' : '#ff4444'; ctx.fillRect(W - (roomState.wallTaps.right > 0 ? 40 : 5) * scale, 0, (roomState.wallTaps.right > 0 ? 40 : 5) * scale, H);
+      ctx.fillStyle = roomState.wallTaps.bottom > 0 ? '#44ff44' : '#ff4444'; ctx.fillRect(0, H - (roomState.wallTaps.bottom > 0 ? 40 : 5) * scale, W, (roomState.wallTaps.bottom > 0 ? 40 : 5) * scale);
+      ctx.fillStyle = roomState.wallTaps.left > 0 ? '#44ff44' : '#ff4444'; ctx.fillRect(0, 0, (roomState.wallTaps.left > 0 ? 40 : 5) * scale, H);
+      ctx.restore();
+      if (hintLevel >= 3) drawText('Tap all four walls...', centerX, H - 60 * scale, 10, '#888');
+      const tapped = (roomState.wallTaps.top > 0 ? 1 : 0) + (roomState.wallTaps.right > 0 ? 1 : 0) + (roomState.wallTaps.bottom > 0 ? 1 : 0) + (roomState.wallTaps.left > 0 ? 1 : 0);
+      if (tapped > 0 && tapped < 4) drawText(tapped + '/4', centerX, centerY + 80 * scale, 12, '#22aa22');
+    }
+  }
+};
+
+// ============================================================
+// SECRET ENDINGS
+// ============================================================
+
+// Secret Ending 1: "The Pacifist" - complete with 0 deaths (checked at chapter complete)
+// Secret Ending 2: "The Konami Code" - enter Konami Code anytime
+document.addEventListener('keydown', (e) => {
+  konami.push(e.keyCode);
+  if (konami.length > KONAMI_CODE.length) konami.shift();
+  if (konami.length === KONAMI_CODE.length && konami.every((v, i) => v === KONAMI_CODE[i])) {
+    triggerSecretEnding('konami');
+  }
+});
+
+function triggerSecretEnding(endingId) {
+  if (secretEndingsFound[endingId]) return;
+  secretEndingsFound[endingId] = { time: Date.now() };
+  saveSecrets();
+  chapterComplete = true;
+  stopAllAmbient();
+  roomState.secretEnding = endingId;
+  unlock('secret_' + endingId);
+}
+
+// ============================================================
+// ACHIEVEMENTS (expanded)
 // ============================================================
 let achievements = {};
 try { const a = localStorage.getItem('trustnothing_ach'); if (a) achievements = JSON.parse(a); } catch(e) {}
@@ -2973,11 +3977,23 @@ let achievementPopupTimer = 0;
 
 const ACHIEVEMENTS = {
   firstdeath: { name: 'Welcome to Pain', desc: 'Die for the first time' },
-  speedster: { name: 'Speed Demon', desc: 'Complete all rooms in under 3 minutes' },
+  speedster: { name: 'Speed Demon', desc: 'Complete all rooms in under 5 minutes' },
   persistent: { name: 'Never Give Up', desc: 'Die 50 times total' },
   truthseeker: { name: 'Truth Seeker', desc: 'Question the fake score' },
   nodeath5: { name: 'Untouchable', desc: 'Clear a room with 0 deaths' },
   masochist: { name: 'Masochist', desc: 'Die 100 times total' },
+  act2complete: { name: 'System Breaker', desc: 'Complete Act 2' },
+  act3complete: { name: 'Nothing Is Real', desc: 'Complete Act 3' },
+  act4complete: { name: 'Meta Gamer', desc: 'Complete Act 4' },
+  act5complete: { name: 'Trust Destroyer', desc: 'Complete Act 5' },
+  secret_konami: { name: 'Old School', desc: 'Enter the Konami Code' },
+  secret_pacifist: { name: 'The Pacifist', desc: 'Complete the game with 0 deaths' },
+  secret_speedrun: { name: 'Lightspeed', desc: 'Complete in under 2 minutes' },
+  ngplus: { name: 'New Game+', desc: 'Start New Game+ mode' },
+  ngplus_complete: { name: 'Trust Nothing Twice', desc: 'Complete New Game+' },
+  allwalls: { name: 'Wall Tapper', desc: 'Tap all walls in the final room' },
+  death200: { name: 'Glutton for Punishment', desc: 'Die 200 times' },
+  narrator: { name: 'Shut Up Narrator', desc: 'Tap the narrator to escape' },
 };
 
 function unlock(id) {

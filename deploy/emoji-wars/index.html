@@ -211,17 +211,18 @@ function addBattleMsg(text, color = '#fff') {
 }
 
 function updateParticles() {
+  const d60 = deltaTime * 60;
   for (let i = particles.length - 1; i >= 0; i--) {
-    const p = particles[i]; p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life -= p.decay;
+    const p = particles[i]; p.x += p.vx * d60; p.y += p.vy * d60; p.vy += 0.15 * d60; p.life -= p.decay * d60;
     if (p.life <= 0) particles.splice(i, 1);
   }
   if (particles.length > 300) particles.splice(0, particles.length - 300);
   for (let i = floatingTexts.length - 1; i >= 0; i--) {
-    const f = floatingTexts[i]; f.y += f.vy; f.life -= f.decay;
+    const f = floatingTexts[i]; f.y += f.vy * d60; f.life -= f.decay * d60;
     if (f.life <= 0) floatingTexts.splice(i, 1);
   }
   for (let i = battleMessages.length - 1; i >= 0; i--) {
-    const m = battleMessages[i]; m.life -= deltaTime; m.y -= 0.3;
+    const m = battleMessages[i]; m.life -= deltaTime; m.y -= 0.3 * d60;
     if (m.life <= 0) battleMessages.splice(i, 1);
   }
 }
