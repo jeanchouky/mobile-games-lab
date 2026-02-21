@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a0a1a">
+<title>Fractal Explorer</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a0a1a;touch-action:none;user-select:none;-webkit-user-select:none;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif}
+canvas{display:block;width:100%;height:100%;position:absolute;top:0;left:0}
+#ui{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10}
+#info{position:absolute;top:12px;left:12px;color:rgba(255,255,255,0.7);font-size:0.7rem;line-height:1.6;background:rgba(0,0,0,0.5);padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);backdrop-filter:blur(8px);max-width:280px;pointer-events:auto;transition:opacity 0.3s}
+#controls{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:8px;pointer-events:auto;flex-wrap:wrap;justify-content:center;max-width:calc(100% - 24px)}
+.btn{background:rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.2);color:#fff;font-size:0.75rem;padding:8px 14px;border-radius:20px;cursor:pointer;backdrop-filter:blur(8px);transition:all 0.2s;white-space:nowrap;font-weight:600;letter-spacing:0.5px}
+.btn:hover{background:rgba(255,255,255,0.15);border-color:rgba(255,255,255,0.4)}
+.btn:active{transform:scale(0.95)}
+.btn.active{border-color:#0ff;color:#0ff;box-shadow:0 0 12px rgba(0,255,255,0.3)}
+#favorites-panel{position:absolute;top:12px;right:12px;pointer-events:auto;display:flex;flex-direction:column;gap:6px;max-height:calc(100% - 80px);overflow-y:auto}
+.fav-item{background:rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.15);color:#fff;font-size:0.65rem;padding:6px 10px;border-radius:8px;cursor:pointer;backdrop-filter:blur(8px);transition:all 0.2s;display:flex;align-items:center;gap:6px}
+.fav-item:hover{border-color:#0ff;background:rgba(0,255,255,0.1)}
+.fav-delete{color:#f55;font-weight:bold;margin-left:auto;padding:0 4px;cursor:pointer}
+.fav-delete:hover{color:#f00}
+#splash{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(10,10,26,0.95);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;pointer-events:auto;transition:opacity 0.5s}
+#splash.hidden{opacity:0;pointer-events:none}
+#splash h1{font-size:clamp(2rem,8vw,3.5rem);font-weight:900;background:linear-gradient(135deg,#0ff,#f0f,#ff0);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:8px}
+#splash h2{color:#888;font-size:clamp(0.8rem,3vw,1rem);font-weight:400;margin-bottom:24px;text-align:center;padding:0 20px}
+#splash .start-btn{background:linear-gradient(135deg,#0ff,#f0f);border:none;color:#000;font-weight:900;font-size:1.1rem;padding:14px 40px;border-radius:50px;cursor:pointer;text-transform:uppercase;letter-spacing:2px;transition:transform 0.15s,box-shadow 0.15s}
+#splash .start-btn:hover{box-shadow:0 0 30px rgba(0,255,255,0.4)}
+#splash .start-btn:active{transform:scale(0.95)}
+#splash .hint{color:#555;font-size:0.7rem;margin-top:16px;text-align:center;line-height:1.6;padding:0 20px}
+#iterations-slider{position:absolute;bottom:60px;left:50%;transform:translateX(-50%);pointer-events:auto;display:flex;align-items:center;gap:8px;background:rgba(0,0,0,0.5);padding:6px 12px;border-radius:20px;border:1px solid rgba(255,255,255,0.1)}
+#iterations-slider label{color:rgba(255,255,255,0.6);font-size:0.7rem}
+#iterations-slider input{width:100px;accent-color:#0ff}
+#iterations-slider span{color:#0ff;font-size:0.7rem;min-width:30px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <div id="info"></div>
+  <div id="iterations-slider">
+    <label>Detail:</label>
+    <input type="range" id="iter-range" min="50" max="1000" value="200" step="50">
+    <span id="iter-val">200</span>
+  </div>
+  <div id="controls"></div>
+  <div id="favorites-panel"></div>
+</div>
+
+<div id="splash">
+  <h1>FRACTAL EXPLORER</h1>
+  <h2>Dive into infinite complexity</h2>
+  <button class="start-btn" id="start-btn">EXPLORE</button>
+  <div class="hint">Scroll / pinch to zoom &bull; Drag to pan<br>Click a point in Mandelbrot to see its Julia set</div>
+</div>
+
+<script>
+'use strict';
+
+// ============================================================
+// FRACTAL EXPLORER — WebGL Mandelbrot/Julia Set Explorer
+// ============================================================
+
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl', { antialias: false, preserveDrawingBuffer: false });
+const infoEl = document.getElementById('info');
+const controlsEl = document.getElementById('controls');
+const favPanel = document.getElementById('favorites-panel');
+const splash = document.getElementById('splash');
+const iterRange = document.getElementById('iter-range');
+const iterVal = document.getElementById('iter-val');
+
+// --- State ---
+let W, H;
+let centerX = -0.5, centerY = 0.0;
+let zoom = 3.0; // width of view in fractal space
+let maxIter = 200;
+let mode = 'mandelbrot'; // 'mandelbrot' or 'julia'
+let juliaC = { x: -0.7, y: 0.27015 };
+let paletteIndex = 0;
+let animating = false;
+let targetCenterX, targetCenterY, targetZoom;
+let animStartCX, animStartCY, animStartZ;
+let animProgress = 0;
+let colorCycleOffset = 0;
+let cycling = false;
+let needsRender = true;
+let hideUI = false;
+
+// Palettes (each is array of [r,g,b] stops)
+const palettes = [
+  { name: 'Electric', colors: [[0,7,100],[32,107,203],[237,255,255],[255,170,0],[0,2,0]] },
+  { name: 'Fire', colors: [[0,0,0],[128,0,0],[255,128,0],[255,255,0],[255,255,255]] },
+  { name: 'Ocean', colors: [[0,0,30],[0,50,100],[0,150,200],[100,255,255],[255,255,255]] },
+  { name: 'Neon', colors: [[0,0,0],[255,0,128],[0,255,255],[255,255,0],[255,0,255]] },
+  { name: 'Frost', colors: [[10,0,40],[40,0,120],[0,180,255],[200,240,255],[255,255,255]] },
+  { name: 'Lava', colors: [[0,0,0],[80,0,0],[200,50,0],[255,200,0],[255,255,200]] },
+  { name: 'Matrix', colors: [[0,0,0],[0,40,0],[0,150,0],[0,255,80],[200,255,200]] },
+  { name: 'Sunset', colors: [[10,0,30],[80,0,80],[200,50,50],[255,150,0],[255,255,100]] },
+];
+
+// Favorites
+let favorites = [];
+try { const f = localStorage.getItem('fractal_favs'); if (f) favorites = JSON.parse(f); } catch(e) {}
+
+// --- WebGL Setup ---
+const vsSource = `
+attribute vec2 a_pos;
+void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }
+`;
+
+const fsSource = `
+precision highp float;
+uniform vec2 u_resolution;
+uniform vec2 u_center;
+uniform float u_zoom;
+uniform int u_maxIter;
+uniform int u_mode; // 0 = mandelbrot, 1 = julia
+uniform vec2 u_juliaC;
+uniform float u_palette[15]; // 5 colors * 3 components
+uniform float u_cycleOffset;
+
+vec3 getColor(float t) {
+  t = fract(t + u_cycleOffset);
+  float idx = t * 4.0;
+  int i = int(floor(idx));
+  float f = fract(idx);
+  f = f * f * (3.0 - 2.0 * f); // smoothstep
+  vec3 c0, c1;
+  // Unrolled palette lookup (GLSL ES 1.0 no dynamic indexing)
+  if (i == 0) {
+    c0 = vec3(u_palette[0], u_palette[1], u_palette[2]);
+    c1 = vec3(u_palette[3], u_palette[4], u_palette[5]);
+  } else if (i == 1) {
+    c0 = vec3(u_palette[3], u_palette[4], u_palette[5]);
+    c1 = vec3(u_palette[6], u_palette[7], u_palette[8]);
+  } else if (i == 2) {
+    c0 = vec3(u_palette[6], u_palette[7], u_palette[8]);
+    c1 = vec3(u_palette[9], u_palette[10], u_palette[11]);
+  } else {
+    c0 = vec3(u_palette[9], u_palette[10], u_palette[11]);
+    c1 = vec3(u_palette[12], u_palette[13], u_palette[14]);
+  }
+  return mix(c0, c1, f);
+}
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution;
+  float aspect = u_resolution.x / u_resolution.y;
+  vec2 c;
+  c.x = u_center.x + (uv.x - 0.5) * u_zoom * aspect;
+  c.y = u_center.y + (uv.y - 0.5) * u_zoom;
+
+  vec2 z;
+  vec2 dc;
+  if (u_mode == 0) {
+    z = vec2(0.0);
+    dc = c;
+  } else {
+    z = c;
+    dc = u_juliaC;
+  }
+
+  float iter = 0.0;
+  float maxF = float(u_maxIter);
+  for (int i = 0; i < 2000; i++) {
+    if (i >= u_maxIter) break;
+    float x2 = z.x * z.x;
+    float y2 = z.y * z.y;
+    if (x2 + y2 > 256.0) break;
+    z = vec2(x2 - y2 + dc.x, 2.0 * z.x * z.y + dc.y);
+    iter += 1.0;
+  }
+
+  if (iter >= maxF) {
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+  } else {
+    // Smooth iteration count
+    float zn = sqrt(z.x * z.x + z.y * z.y);
+    float nu = log(log(zn) / log(2.0)) / log(2.0);
+    float smooth_iter = iter + 1.0 - nu;
+    float t = smooth_iter / maxF;
+    t = sqrt(t) * 3.0; // enhance contrast
+    vec3 col = getColor(t);
+    gl_FragColor = vec4(col, 1.0);
+  }
+}
+`;
+
+function createShader(type, source) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, source);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error('Shader error:', gl.getShaderInfoLog(s));
+    gl.deleteShader(s);
+    return null;
+  }
+  return s;
+}
+
+const vs = createShader(gl.VERTEX_SHADER, vsSource);
+const fs = createShader(gl.FRAGMENT_SHADER, fsSource);
+const program = gl.createProgram();
+gl.attachShader(program, vs);
+gl.attachShader(program, fs);
+gl.linkProgram(program);
+if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+  console.error('Program error:', gl.getProgramInfoLog(program));
+}
+gl.useProgram(program);
+
+// Full-screen quad
+const posBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+const aPos = gl.getAttribLocation(program, 'a_pos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+// Uniform locations
+const uResolution = gl.getUniformLocation(program, 'u_resolution');
+const uCenter = gl.getUniformLocation(program, 'u_center');
+const uZoom = gl.getUniformLocation(program, 'u_zoom');
+const uMaxIter = gl.getUniformLocation(program, 'u_maxIter');
+const uMode = gl.getUniformLocation(program, 'u_mode');
+const uJuliaC = gl.getUniformLocation(program, 'u_juliaC');
+const uPalette = gl.getUniformLocation(program, 'u_palette');
+const uCycleOffset = gl.getUniformLocation(program, 'u_cycleOffset');
+
+function resize() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * (window.devicePixelRatio > 1.5 ? 1.5 : window.devicePixelRatio);
+  canvas.height = H * (window.devicePixelRatio > 1.5 ? 1.5 : window.devicePixelRatio);
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  needsRender = true;
+}
+window.addEventListener('resize', resize);
+resize();
+
+function getPaletteUniform() {
+  const p = palettes[paletteIndex].colors;
+  const arr = [];
+  for (let i = 0; i < 5; i++) {
+    arr.push(p[i][0] / 255, p[i][1] / 255, p[i][2] / 255);
+  }
+  return new Float32Array(arr);
+}
+
+function render() {
+  gl.uniform2f(uResolution, canvas.width, canvas.height);
+  gl.uniform2f(uCenter, centerX, centerY);
+  gl.uniform1f(uZoom, zoom);
+  gl.uniform1i(uMaxIter, maxIter);
+  gl.uniform1i(uMode, mode === 'mandelbrot' ? 0 : 1);
+  gl.uniform2f(uJuliaC, juliaC.x, juliaC.y);
+  gl.uniform1fv(uPalette, getPaletteUniform());
+  gl.uniform1f(uCycleOffset, colorCycleOffset);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+function updateInfo() {
+  if (hideUI) { infoEl.style.opacity = '0'; return; }
+  infoEl.style.opacity = '1';
+  const zoomLevel = (3.0 / zoom).toExponential(2);
+  let text = `<b>${mode === 'mandelbrot' ? 'Mandelbrot Set' : 'Julia Set'}</b><br>`;
+  text += `Center: ${centerX.toFixed(12)}, ${centerY.toFixed(12)}<br>`;
+  text += `Zoom: ${zoomLevel}x<br>`;
+  if (mode === 'julia') text += `c = ${juliaC.x.toFixed(6)} + ${juliaC.y.toFixed(6)}i<br>`;
+  text += `Iterations: ${maxIter}`;
+  infoEl.innerHTML = text;
+}
+
+// --- Controls ---
+function buildControls() {
+  const buttons = [
+    { label: 'Mandelbrot', id: 'btn-mandel', action: () => setMode('mandelbrot') },
+    { label: 'Julia', id: 'btn-julia', action: () => setMode('julia') },
+    { label: '< Palette', action: () => cyclePalette(-1) },
+    { label: 'Palette >', action: () => cyclePalette(1) },
+    { label: 'Cycle Colors', id: 'btn-cycle', action: toggleCycling },
+    { label: 'Save View', action: saveCurrentView },
+    { label: 'Reset', action: resetView },
+    { label: 'Hide UI', id: 'btn-hide', action: toggleUI },
+  ];
+  controlsEl.innerHTML = '';
+  buttons.forEach(b => {
+    const btn = document.createElement('button');
+    btn.className = 'btn';
+    if (b.id) btn.id = b.id;
+    btn.textContent = b.label;
+    btn.addEventListener('click', (e) => { e.stopPropagation(); b.action(); });
+    btn.addEventListener('touchend', (e) => { e.preventDefault(); e.stopPropagation(); b.action(); });
+    controlsEl.appendChild(btn);
+  });
+  updateButtonStates();
+}
+
+function updateButtonStates() {
+  const bm = document.getElementById('btn-mandel');
+  const bj = document.getElementById('btn-julia');
+  const bc = document.getElementById('btn-cycle');
+  if (bm) bm.className = 'btn' + (mode === 'mandelbrot' ? ' active' : '');
+  if (bj) bj.className = 'btn' + (mode === 'julia' ? ' active' : '');
+  if (bc) bc.className = 'btn' + (cycling ? ' active' : '');
+}
+
+function setMode(m) {
+  if (m === mode) return;
+  mode = m;
+  if (mode === 'mandelbrot') { centerX = -0.5; centerY = 0; zoom = 3.0; }
+  needsRender = true;
+  updateButtonStates();
+  updateInfo();
+}
+
+function cyclePalette(dir) {
+  paletteIndex = (paletteIndex + dir + palettes.length) % palettes.length;
+  needsRender = true;
+}
+
+function toggleCycling() {
+  cycling = !cycling;
+  updateButtonStates();
+}
+
+function toggleUI() {
+  hideUI = !hideUI;
+  const els = [infoEl, controlsEl, favPanel, document.getElementById('iterations-slider')];
+  els.forEach(el => { if (el) el.style.display = hideUI ? 'none' : ''; });
+  const btn = document.getElementById('btn-hide');
+  if (hideUI) {
+    // Show only the hide button
+    controlsEl.style.display = 'flex';
+    Array.from(controlsEl.children).forEach(c => {
+      c.style.display = c === btn ? '' : 'none';
+    });
+    if (btn) btn.textContent = 'Show UI';
+  } else {
+    Array.from(controlsEl.children).forEach(c => c.style.display = '');
+    if (btn) btn.textContent = 'Hide UI';
+  }
+}
+
+function resetView() {
+  if (mode === 'mandelbrot') {
+    animateTo(-0.5, 0, 3.0);
+  } else {
+    animateTo(0, 0, 3.0);
+  }
+}
+
+function animateTo(tx, ty, tz) {
+  animating = true;
+  targetCenterX = tx; targetCenterY = ty; targetZoom = tz;
+  animStartCX = centerX; animStartCY = centerY; animStartZ = zoom;
+  animProgress = 0;
+}
+
+// --- Favorites ---
+function saveCurrentView() {
+  const fav = {
+    cx: centerX, cy: centerY, zoom: zoom,
+    mode: mode, jx: juliaC.x, jy: juliaC.y,
+    palette: paletteIndex, iter: maxIter,
+    label: mode === 'mandelbrot' ? 'M' : 'J'
+  };
+  favorites.push(fav);
+  try { localStorage.setItem('fractal_favs', JSON.stringify(favorites)); } catch(e) {}
+  renderFavorites();
+}
+
+function loadFavorite(i) {
+  const f = favorites[i];
+  mode = f.mode;
+  juliaC.x = f.jx; juliaC.y = f.jy;
+  paletteIndex = f.palette || 0;
+  maxIter = f.iter || 200;
+  iterRange.value = maxIter;
+  iterVal.textContent = maxIter;
+  animateTo(f.cx, f.cy, f.zoom);
+  updateButtonStates();
+}
+
+function deleteFavorite(i, e) {
+  e.stopPropagation();
+  favorites.splice(i, 1);
+  try { localStorage.setItem('fractal_favs', JSON.stringify(favorites)); } catch(e2) {}
+  renderFavorites();
+}
+
+function renderFavorites() {
+  favPanel.innerHTML = '';
+  favorites.forEach((f, i) => {
+    const div = document.createElement('div');
+    div.className = 'fav-item';
+    const zLvl = (3.0 / f.zoom).toExponential(1);
+    div.innerHTML = `<span style="color:#0ff">${f.label}</span> ${zLvl}x <span class="fav-delete" data-i="${i}">&times;</span>`;
+    div.addEventListener('click', () => loadFavorite(i));
+    div.querySelector('.fav-delete').addEventListener('click', (e) => deleteFavorite(i, e));
+    favPanel.appendChild(div);
+  });
+}
+
+// --- Input Handling ---
+let isDragging = false;
+let dragStartX, dragStartY;
+let dragStartCX, dragStartCY;
+let pinchStartDist = 0;
+let pinchStartZoom = 0;
+let lastClickTime = 0;
+
+function screenToFractal(sx, sy) {
+  const aspect = W / H;
+  const fx = centerX + (sx / W - 0.5) * zoom * aspect;
+  const fy = centerY - (sy / H - 0.5) * zoom; // flip Y
+  return { x: fx, y: fy };
+}
+
+canvas.addEventListener('mousedown', (e) => {
+  isDragging = true;
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+  dragStartCX = centerX;
+  dragStartCY = centerY;
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  if (!isDragging) return;
+  const dx = e.clientX - dragStartX;
+  const dy = e.clientY - dragStartY;
+  const aspect = W / H;
+  centerX = dragStartCX - dx / W * zoom * aspect;
+  centerY = dragStartCY + dy / H * zoom;
+  needsRender = true;
+  updateInfo();
+});
+
+canvas.addEventListener('mouseup', (e) => {
+  isDragging = false;
+});
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const factor = e.deltaY > 0 ? 1.1 : 0.9;
+  const mx = e.clientX;
+  const my = e.clientY;
+  const aspect = W / H;
+  // Zoom towards mouse position
+  const fx = centerX + (mx / W - 0.5) * zoom * aspect;
+  const fy = centerY - (my / H - 0.5) * zoom;
+  zoom *= factor;
+  zoom = Math.max(1e-14, Math.min(zoom, 20));
+  centerX = fx - (mx / W - 0.5) * zoom * aspect;
+  centerY = fy + (my / H - 0.5) * zoom;
+  needsRender = true;
+  updateInfo();
+}, { passive: false });
+
+// Double-click to enter Julia mode
+canvas.addEventListener('dblclick', (e) => {
+  if (mode === 'mandelbrot') {
+    const p = screenToFractal(e.clientX, e.clientY);
+    juliaC.x = p.x;
+    juliaC.y = p.y;
+    mode = 'julia';
+    centerX = 0; centerY = 0; zoom = 3.0;
+    needsRender = true;
+    updateButtonStates();
+    updateInfo();
+  }
+});
+
+// Touch handling
+let touches = [];
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  touches = Array.from(e.touches);
+  if (touches.length === 1) {
+    isDragging = true;
+    dragStartX = touches[0].clientX;
+    dragStartY = touches[0].clientY;
+    dragStartCX = centerX;
+    dragStartCY = centerY;
+    // Double tap detection
+    const now = Date.now();
+    if (now - lastClickTime < 300 && mode === 'mandelbrot') {
+      const p = screenToFractal(touches[0].clientX, touches[0].clientY);
+      juliaC.x = p.x;
+      juliaC.y = p.y;
+      mode = 'julia';
+      centerX = 0; centerY = 0; zoom = 3.0;
+      needsRender = true;
+      updateButtonStates();
+      updateInfo();
+    }
+    lastClickTime = now;
+  } else if (touches.length === 2) {
+    isDragging = false;
+    const dx = touches[1].clientX - touches[0].clientX;
+    const dy = touches[1].clientY - touches[0].clientY;
+    pinchStartDist = Math.sqrt(dx * dx + dy * dy);
+    pinchStartZoom = zoom;
+    dragStartX = (touches[0].clientX + touches[1].clientX) / 2;
+    dragStartY = (touches[0].clientY + touches[1].clientY) / 2;
+    dragStartCX = centerX;
+    dragStartCY = centerY;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  touches = Array.from(e.touches);
+  if (touches.length === 1 && isDragging) {
+    const dx = touches[0].clientX - dragStartX;
+    const dy = touches[0].clientY - dragStartY;
+    const aspect = W / H;
+    centerX = dragStartCX - dx / W * zoom * aspect;
+    centerY = dragStartCY + dy / H * zoom;
+    needsRender = true;
+    updateInfo();
+  } else if (touches.length === 2) {
+    const dx = touches[1].clientX - touches[0].clientX;
+    const dy = touches[1].clientY - touches[0].clientY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const midX = (touches[0].clientX + touches[1].clientX) / 2;
+    const midY = (touches[0].clientY + touches[1].clientY) / 2;
+    const aspect = W / H;
+
+    // Zoom
+    const ratio = pinchStartDist / dist;
+    zoom = pinchStartZoom * ratio;
+    zoom = Math.max(1e-14, Math.min(zoom, 20));
+
+    // Pan
+    const panDX = midX - dragStartX;
+    const panDY = midY - dragStartY;
+    centerX = dragStartCX - panDX / W * zoom * aspect;
+    centerY = dragStartCY + panDY / H * zoom;
+
+    needsRender = true;
+    updateInfo();
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  if (e.touches.length === 0) isDragging = false;
+});
+
+// Iterations slider
+iterRange.addEventListener('input', () => {
+  maxIter = parseInt(iterRange.value);
+  iterVal.textContent = maxIter;
+  needsRender = true;
+  updateInfo();
+});
+
+// Keyboard
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'r' || e.key === 'R') resetView();
+  if (e.key === 'c' || e.key === 'C') toggleCycling();
+  if (e.key === 'p' || e.key === 'P') cyclePalette(1);
+  if (e.key === 's' || e.key === 'S') saveCurrentView();
+  if (e.key === 'm' || e.key === 'M') setMode('mandelbrot');
+  if (e.key === 'j' || e.key === 'J') setMode('julia');
+  if (e.key === 'h' || e.key === 'H') toggleUI();
+});
+
+// --- Animation Loop ---
+let lastTime = 0;
+function loop(time) {
+  requestAnimationFrame(loop);
+  const dt = Math.min((time - lastTime) / 1000, 0.05);
+  lastTime = time;
+
+  // Color cycling
+  if (cycling) {
+    colorCycleOffset += dt * 0.15;
+    needsRender = true;
+  }
+
+  // Smooth animation
+  if (animating) {
+    animProgress += dt * 2.5;
+    if (animProgress >= 1) {
+      animProgress = 1;
+      animating = false;
+    }
+    const t = animProgress * animProgress * (3 - 2 * animProgress); // smoothstep
+    centerX = animStartCX + (targetCenterX - animStartCX) * t;
+    centerY = animStartCY + (targetCenterY - animStartCY) * t;
+    zoom = animStartZ * Math.pow(targetZoom / animStartZ, t);
+    needsRender = true;
+    updateInfo();
+  }
+
+  if (needsRender) {
+    render();
+    needsRender = false;
+  }
+}
+
+// --- Splash Screen ---
+document.getElementById('start-btn').addEventListener('click', () => {
+  splash.classList.add('hidden');
+  setTimeout(() => splash.style.display = 'none', 500);
+});
+
+// --- Init ---
+buildControls();
+renderFavorites();
+updateInfo();
+render();
+requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>
