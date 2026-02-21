@@ -55,8 +55,10 @@ canvas{display:block;position:absolute;top:0;left:0}
 <div class="overlay" id="menu">
   <h1>NEON SNAKE</h1>
   <h2>Slither through the void</h2>
-  <button class="btn" onclick="startGame()">PLAY</button>
+  <button class="btn" onclick="startGame(false)">PLAY</button>
+  <button class="btn" onclick="startGame(true)" style="background:linear-gradient(135deg,#f80,#f0f)">VS AI 🤖</button>
   <label class="toggle-wrap"><input type="checkbox" id="wrap-toggle" onchange="wrapMode=this.checked"><span class="track"></span>Wrap-around walls</label>
+  <label class="toggle-wrap"><input type="checkbox" id="obstacle-toggle" onchange="obstacleMode=this.checked"><span class="track"></span>Obstacles</label>
   <div class="controls-hint">Arrow keys / WASD to move • Swipe on mobile<br>Collect food • Avoid walls & yourself<br>Space to pause</div>
 </div>
 
@@ -86,8 +88,30 @@ let shakeX=0,shakeY=0,shakeT=0;
 let paused=false,gameActive=false;
 let foodEaten=0,powerupsCollected=0,maxLength=3;
 let wrapMode=false;
+let obstacleMode=false;
 let audioCtx;
-let bgPulse=0; // background pulse on eat
+let bgPulse=0;
+
+// AI opponent
+let aiEnabled=false;
+let aiSnake=[];
+let aiDir={x:-1,y:0};
+let aiScore=0;
+let aiAlive=true;
+let aiActiveEffects={};
+
+// Obstacles
+let obstacles=[];
+let movingObstacles=[];
+
+// Standalone power-up spawns
+let powerupItems=[];
+let powerupSpawnTimer=0;
+const POWERUP_DEFS=[
+  {id:'speed',icon:'⚡',color:'#f80',glow:'#f80',duration:50,desc:'SPEED BOOST'},
+  {id:'ghost',icon:'👻',color:'#0ff',glow:'#0ff',duration:40,desc:'GHOST MODE'},
+  {id:'magnet',icon:'🧲',color:'#ff0',glow:'#ff0',duration:40,desc:'MAGNET'},
+];
 
 function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)()}
 function playTone(f,d=0.1,t='sine',v=0.15){
@@ -156,8 +180,9 @@ function addScorePopup(x,y,text,color){
 
 function shake(intensity=4){shakeT=10;shakeX=(Math.random()-0.5)*intensity;shakeY=(Math.random()-0.5)*intensity}
 
-function startGame(){
+function startGame(withAI){
   initAudio();
+  aiEnabled=!!withAI;
   menuEl.classList.add('hidden');goEl.classList.add('hidden');pauseEl.classList.add('hidden');
   resize();
   const cx=Math.floor(COLS/2),cy=Math.floor(ROWS/2);
@@ -166,7 +191,46 @@ function startGame(){
   score=0;speed=120;particles=[];activeEffects={};
   foodEaten=0;powerupsCollected=0;maxLength=3;
   paused=false;gameActive=true;
+  powerupItems=[];powerupSpawnTimer=0;
   scoreEl.textContent='0';
+
+  // AI setup
+  if(aiEnabled){
+    const ax=Math.floor(COLS/2),ay=Math.floor(ROWS/2)-4;
+    aiSnake=[{x:ax,y:ay},{x:ax+1,y:ay},{x:ax+2,y:ay}];
+    aiDir={x:-1,y:0};aiScore=0;aiAlive=true;aiActiveEffects={};
+  }else{
+    aiSnake=[];aiAlive=false;
+  }
+
+  // Obstacles
+  obstacles=[];movingObstacles=[];
+  if(obstacleMode){
+    // Static walls
+    for(let i=0;i<4+Math.floor(Math.random()*3);i++){
+      const ox=3+Math.floor(Math.random()*(COLS-6));
+      const oy=3+Math.floor(Math.random()*(ROWS-6));
+      const horizontal=Math.random()>0.5;
+      const len=2+Math.floor(Math.random()*3);
+      for(let j=0;j<len;j++){
+        const wx=horizontal?ox+j:ox;
+        const wy=horizontal?oy:oy+j;
+        if(!snake.some(s=>s.x===wx&&s.y===wy)){
+          obstacles.push({x:wx,y:wy});
+        }
+      }
+    }
+    // Moving barriers
+    for(let i=0;i<2;i++){
+      movingObstacles.push({
+        x:Math.floor(Math.random()*COLS),
+        y:4+Math.floor(Math.random()*(ROWS-8)),
+        dx:Math.random()>0.5?1:-1,dy:0,
+        timer:0,interval:3+Math.floor(Math.random()*4)
+      });
+    }
+  }
+
   spawnFood();
   if(gameLoop)clearInterval(gameLoop);
   gameLoop=setInterval(tick,speed);
@@ -190,29 +254,46 @@ function resumeGame(){
   gameLoop=setInterval(tick,speed);
 }
 
+function isBlocked(x,y,ignoreGhost){
+  if(x<0||x>=COLS||y<0||y>=ROWS)return!wrapMode;
+  if(obstacles.some(o=>o.x===x&&o.y===y))return true;
+  if(movingObstacles.some(o=>o.x===x&&o.y===y))return true;
+  return false;
+}
+
 function tick(){
   dir={...nextDir};
   const head={x:snake[0].x+dir.x,y:snake[0].y+dir.y};
-  
+
   if(activeEffects.ghost||wrapMode){
     head.x=(head.x+COLS)%COLS;head.y=(head.y+ROWS)%ROWS;
   }else if(head.x<0||head.x>=COLS||head.y<0||head.y>=ROWS){
     die();return;
   }
-  
+
   if(!activeEffects.ghost&&snake.some(s=>s.x===head.x&&s.y===head.y)){
     die();return;
   }
-  
+
+  // Obstacle collision
+  if(!activeEffects.ghost&&isBlocked(head.x,head.y)){
+    die();return;
+  }
+
+  // AI snake collision
+  if(!activeEffects.ghost&&aiAlive&&aiSnake.some(s=>s.x===head.x&&s.y===head.y)){
+    die();return;
+  }
+
   snake.unshift(head);
-  
+
   if(activeEffects.magnet&&food){
     const dx=head.x-food.x,dy=head.y-food.y;
     if(Math.abs(dx)<=4&&Math.abs(dy)<=4){
       food.x+=Math.sign(dx);food.y+=Math.sign(dy);
     }
   }
-  
+
   if(food&&head.x===food.x&&head.y===food.y){
     score+=food.points;foodEaten++;
     scoreEl.textContent=score;
@@ -223,13 +304,11 @@ function tick(){
     for(let i=1;i<food.grow;i++)snake.push({...snake[snake.length-1]});
     maxLength=Math.max(maxLength,snake.length);
     if(food.powerup){
-      activeEffects[food.powerup]=40;// 40 ticks
+      activeEffects[food.powerup]=40;
       powerupsCollected++;
       playPowerup();
     }
-    // Milestone sounds
     if(score%25===0&&score>0)playMilestone();
-    // Gradual speed up (smoother curve)
     if(foodEaten%5===0&&speed>55){
       speed-=3;clearInterval(gameLoop);gameLoop=setInterval(tick,speed);
     }
@@ -237,14 +316,125 @@ function tick(){
   }else{
     snake.pop();
   }
-  
+
+  // Power-up item collection
+  for(let i=powerupItems.length-1;i>=0;i--){
+    const pu=powerupItems[i];
+    pu.life--;
+    if(pu.life<=0){powerupItems.splice(i,1);continue}
+    if(head.x===pu.x&&head.y===pu.y){
+      activeEffects[pu.id]=pu.duration;
+      powerupsCollected++;
+      playPowerup();
+      addParticles(pu.x,pu.y,pu.color,15);
+      addScorePopup(pu.x,pu.y,pu.desc,pu.color);
+      powerupItems.splice(i,1);
+    }
+  }
+
+  // Spawn power-ups periodically
+  powerupSpawnTimer++;
+  if(powerupSpawnTimer>=80&&powerupItems.length<2){
+    powerupSpawnTimer=0;
+    if(Math.random()<0.4){
+      const def=POWERUP_DEFS[Math.floor(Math.random()*POWERUP_DEFS.length)];
+      let px,py,ok=false;
+      for(let a=0;a<50;a++){
+        px=Math.floor(Math.random()*COLS);py=Math.floor(Math.random()*ROWS);
+        if(!snake.some(s=>s.x===px&&s.y===py)&&!obstacles.some(o=>o.x===px&&o.y===py)){ok=true;break}
+      }
+      if(ok)powerupItems.push({...def,x:px,y:py,life:120,pulse:0});
+    }
+  }
+
+  // Moving obstacles
+  for(const mo of movingObstacles){
+    mo.timer++;
+    if(mo.timer>=mo.interval){
+      mo.timer=0;
+      mo.x+=mo.dx;mo.y+=mo.dy;
+      if(mo.x<=0||mo.x>=COLS-1)mo.dx*=-1;
+      if(mo.y<=0||mo.y>=ROWS-1)mo.dy*=-1;
+      // Kill player if moved into
+      if(!activeEffects.ghost&&head.x===mo.x&&head.y===mo.y){die();return}
+    }
+  }
+
   for(const k in activeEffects){
     activeEffects[k]--;
     if(activeEffects[k]<=0)delete activeEffects[k];
   }
-  
-  // Fewer trail particles for performance
+
   if(Math.random()<0.5)addParticles(head.x,head.y,activeEffects.ghost?'rgba(0,255,255,0.3)':activeEffects.speed?'#f80':'#0ff',1);
+
+  // AI snake tick
+  if(aiEnabled&&aiAlive)tickAI();
+}
+
+function tickAI(){
+  // Simple AI: move toward food, avoid walls/self/player
+  const head=aiSnake[0];
+  let bestDir=aiDir;
+  let bestDist=Infinity;
+
+  const target=food||{x:Math.floor(COLS/2),y:Math.floor(ROWS/2)};
+  const dirs=[{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
+
+  // Don't reverse
+  const validDirs=dirs.filter(d=>!(d.x===-aiDir.x&&d.y===-aiDir.y));
+
+  for(const d of validDirs){
+    const nx=(head.x+d.x+COLS)%COLS,ny=(head.y+d.y+ROWS)%ROWS;
+    // Check safe
+    const blocked=aiSnake.some(s=>s.x===nx&&s.y===ny)||
+      snake.some(s=>s.x===nx&&s.y===ny)||
+      obstacles.some(o=>o.x===nx&&o.y===ny)||
+      (!wrapMode&&(nx<0||nx>=COLS||ny<0||ny>=ROWS));
+    if(blocked)continue;
+    const dist=Math.abs(nx-target.x)+Math.abs(ny-target.y);
+    // Add randomness to make AI imperfect
+    const jitter=Math.random()*3;
+    if(dist+jitter<bestDist){bestDist=dist+jitter;bestDir=d}
+  }
+
+  aiDir=bestDir;
+  const newHead={x:head.x+aiDir.x,y:head.y+aiDir.y};
+  if(wrapMode){newHead.x=(newHead.x+COLS)%COLS;newHead.y=(newHead.y+ROWS)%ROWS}
+
+  // AI death check
+  if(newHead.x<0||newHead.x>=COLS||newHead.y<0||newHead.y>=ROWS||
+    aiSnake.some(s=>s.x===newHead.x&&s.y===newHead.y)||
+    snake.some(s=>s.x===newHead.x&&s.y===newHead.y)||
+    obstacles.some(o=>o.x===newHead.x&&o.y===newHead.y)){
+    aiAlive=false;
+    aiSnake.forEach((s,i)=>setTimeout(()=>addParticles(s.x,s.y,'#f80',3),i*15));
+    return;
+  }
+
+  aiSnake.unshift(newHead);
+
+  // AI eats food
+  if(food&&newHead.x===food.x&&newHead.y===food.y){
+    aiScore+=food.points;
+    addParticles(food.x,food.y,'#f80',10);
+    for(let i=1;i<food.grow;i++)aiSnake.push({...aiSnake[aiSnake.length-1]});
+    spawnFood();
+  }else{
+    aiSnake.pop();
+  }
+
+  // AI collects power-ups
+  for(let i=powerupItems.length-1;i>=0;i--){
+    const pu=powerupItems[i];
+    if(newHead.x===pu.x&&newHead.y===pu.y){
+      aiActiveEffects[pu.id]=pu.duration;
+      addParticles(pu.x,pu.y,pu.color,10);
+      powerupItems.splice(i,1);
+    }
+  }
+
+  for(const k in aiActiveEffects){aiActiveEffects[k]--;if(aiActiveEffects[k]<=0)delete aiActiveEffects[k]}
+  if(Math.random()<0.3)addParticles(newHead.x,newHead.y,'rgba(255,136,0,0.3)',1);
 }
 
 function die(){

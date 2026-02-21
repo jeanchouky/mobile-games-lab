@@ -734,6 +734,11 @@ document.querySelectorAll('.reveal').forEach((el,i)=>{
   el.style.transitionDelay=(i%6)*0.06+'s';
   obs.observe(el);
 });
+// Fallback: reveal all cards after 1s in case IntersectionObserver doesn't fire
+setTimeout(()=>{
+  document.querySelectorAll('.reveal:not(.visible)').forEach(el=>el.classList.add('visible'));
+},1000);
+
 
 // Category filter
 const filterBtns=document.querySelectorAll('.filter-btn');
