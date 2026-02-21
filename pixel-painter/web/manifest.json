@@ -1,0 +1,16 @@
+{
+  "name": "Pixel Painter",
+  "short_name": "Pixel Painter",
+  "description": "Create pixel art with layers, export PNG, undo/redo, and color picker",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#1a0a1a",
+  "theme_color": "#1a0a1a",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
