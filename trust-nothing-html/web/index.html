@@ -101,7 +101,10 @@ const ROOM_HINTS = {
   6: 'The arrow lies. Go the other way.',
   7: 'Tap the paintings in the right order.',
   8: 'Everything is mirrored. Swipe the opposite way.',
-  9: 'Don\'t trust the troll. Do nothing. Or do you?'
+  9: 'Don\'t trust the troll. Do nothing. Or do you?',
+  10: 'The game knows when you look away. Use it.',
+  11: 'What time is it? The clock holds the answer.',
+  12: 'Tilt your device (or move your mouse) to guide the ball.'
 };
 
 // Save/load progress
@@ -1035,7 +1038,7 @@ function drawDeathCounter() {
   if (!chapterComplete && currentRoom > 0) {
     const dotSize = 4 * scale;
     const dotGap = 10 * scale;
-    const totalRooms = 10;
+    const totalRooms = 13;
     const dotsWidth = totalRooms * dotGap;
     const startX = centerX - dotsWidth / 2;
     const dotY = H - 12 * scale;
@@ -2649,9 +2652,8 @@ rooms[9] = {
           if (hitTest(ev.x, ev.y, btnX, btnY, 50 * scale, 50 * scale)) {
             sfxWin();
             spawnParticles(ev.x, ev.y, 30, '#44ff44');
-            // WIN! Show chapter complete
             roomState.won = true;
-            showChapterComplete();
+            fadeToRoom(10);
             return;
           }
         }
@@ -2780,6 +2782,453 @@ rooms[9] = {
     
     // Stick figure
     drawStickFigure(stickFigure.x, stickFigure.y, 0.8, stickFigure.eyeState);
+  }
+};
+
+// --- ROOM 10: The Watcher (Page Visibility API) ---
+// Controls invert when tab is visible; only work correctly when you look away
+rooms[10] = {
+  init() {
+    roomState.btnPositions = [
+      { x: centerX - 80 * scale, y: centerY - 20 * scale, label: 'A', color: '#dd4444' },
+      { x: centerX + 80 * scale, y: centerY - 20 * scale, label: 'B', color: '#4444dd' },
+      { x: centerX, y: centerY + 80 * scale, label: 'C', color: '#44aa44' },
+    ];
+    roomState.sequence = [];
+    roomState.requiredSeq = ['A', 'C', 'B']; // the "real" sequence
+    roomState.tabHidden = false;
+    roomState.invertActive = true; // controls inverted while visible
+    roomState.eyeOpen = true;
+    roomState.messageTimer = 0;
+    roomState.showMsg = '';
+    stickFigure.x = centerX;
+    stickFigure.y = centerY + 140 * scale;
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'normal';
+
+    // Visibility listener
+    roomState._visHandler = () => {
+      roomState.tabHidden = document.hidden;
+      roomState.eyeOpen = !document.hidden;
+      if (document.hidden) {
+        roomState.invertActive = false;
+      } else {
+        roomState.invertActive = true;
+      }
+    };
+    document.addEventListener('visibilitychange', roomState._visHandler);
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 2;
+    if (roomState.messageTimer > 0) roomState.messageTimer -= deltaTime;
+
+    for (const ev of inputEvents) {
+      if (showingDeath) continue;
+      if (ev.type === 'tap') {
+        for (const btn of roomState.btnPositions) {
+          if (hitTest(ev.x, ev.y, btn.x, btn.y, 70 * scale, 55 * scale)) {
+            sfxClick();
+            let pressedLabel = btn.label;
+            // When visible (eye watching), controls are inverted
+            if (roomState.invertActive) {
+              const map = { 'A': 'B', 'B': 'A', 'C': 'C' };
+              // Actually invert the mapping — pressing A gives B, pressing B gives A
+              pressedLabel = map[btn.label];
+              spawnParticles(btn.x, btn.y, 4, '#ff8800');
+            } else {
+              spawnParticles(btn.x, btn.y, 4, btn.color);
+            }
+
+            roomState.sequence.push(pressedLabel);
+
+            // Check sequence
+            const idx = roomState.sequence.length - 1;
+            if (roomState.sequence[idx] !== roomState.requiredSeq[idx]) {
+              die('💀 Wrong sequence. The eye sees all... and swaps all.', 'default', 10);
+              roomState.sequence = [];
+              return;
+            }
+
+            if (roomState.sequence.length === roomState.requiredSeq.length) {
+              sfxWin();
+              spawnParticles(centerX, centerY, 25, '#44ff44');
+              document.removeEventListener('visibilitychange', roomState._visHandler);
+              fadeToRoom(11);
+              return;
+            }
+          }
+        }
+      }
+    }
+  },
+  draw() {
+    drawSketchBackground();
+    drawText('Room 11: The Watcher', centerX, 25 * scale, 12, '#999');
+
+    // Giant eye
+    const eyeY = centerY - 120 * scale;
+    ctx.save();
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = 3 * scale;
+    ctx.beginPath();
+    ctx.ellipse(centerX, eyeY, 55 * scale, 30 * scale, 0, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+    // Iris
+    ctx.fillStyle = roomState.eyeOpen ? '#4466aa' : '#222';
+    ctx.beginPath();
+    ctx.arc(centerX, eyeY, roomState.eyeOpen ? 18 * scale : 2 * scale, 0, Math.PI * 2);
+    ctx.fill();
+    // Pupil
+    if (roomState.eyeOpen) {
+      ctx.fillStyle = '#111';
+      ctx.beginPath(); ctx.arc(centerX, eyeY, 8 * scale, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(centerX - 4 * scale, eyeY - 4 * scale, 3 * scale, 0, Math.PI * 2); ctx.fill();
+    }
+    // Eyelid when closed
+    if (!roomState.eyeOpen) {
+      ctx.strokeStyle = '#222';
+      ctx.lineWidth = 3 * scale;
+      ctx.beginPath();
+      ctx.moveTo(centerX - 55 * scale, eyeY);
+      ctx.lineTo(centerX + 55 * scale, eyeY);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Status text
+    drawText(roomState.invertActive ? '👁 WATCHING — controls inverted' : '😴 Not watching — controls normal',
+      centerX, eyeY + 45 * scale, 11, roomState.invertActive ? '#cc4444' : '#44aa44');
+
+    // Hint
+    if (hintLevel >= 2) {
+      ctx.save();
+      ctx.globalAlpha = 0.5 + Math.sin(gameTime * 2) * 0.3;
+      drawText('Switch to another tab...', centerX, eyeY + 65 * scale, 10, '#888');
+      ctx.restore();
+    }
+
+    // Buttons
+    for (const btn of roomState.btnPositions) {
+      drawSketchButton(btn.x, btn.y, 65 * scale, 50 * scale, btn.label, '#222', btn.color + '33', false);
+    }
+
+    // Sequence display
+    drawText(`Sequence: ${roomState.sequence.join(' → ') || '...'}`, centerX, centerY + 140 * scale, 13, '#555');
+    drawText(`Need: A → C → B`, centerX, centerY + 160 * scale, 10, '#888');
+
+    drawStickFigure(stickFigure.x, stickFigure.y, 0.7, stickFigure.eyeState);
+  }
+};
+
+// --- ROOM 11: Temporal Lock (Time of Day) ---
+// The solution changes based on the current hour
+rooms[11] = {
+  init() {
+    const hour = new Date().getHours();
+    // Determine time period and correct door
+    let period, correctDoor;
+    if (hour >= 6 && hour < 12) { period = 'morning'; correctDoor = 'sun'; }
+    else if (hour >= 12 && hour < 18) { period = 'afternoon'; correctDoor = 'cloud'; }
+    else if (hour >= 18 && hour < 22) { period = 'evening'; correctDoor = 'moon'; }
+    else { period = 'night'; correctDoor = 'star'; }
+
+    roomState.period = period;
+    roomState.correctDoor = correctDoor;
+    roomState.hour = hour;
+    roomState.clockAngle = 0;
+    roomState.doorsShake = [0, 0, 0, 0];
+    roomState.showClockHint = false;
+
+    stickFigure.x = centerX;
+    stickFigure.y = centerY + 120 * scale;
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'normal';
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 2;
+    roomState.clockAngle += deltaTime * 0.5;
+    for (let i = 0; i < 4; i++) {
+      if (roomState.doorsShake[i] > 0) roomState.doorsShake[i] -= deltaTime * 5;
+    }
+
+    for (const ev of inputEvents) {
+      if (showingDeath) continue;
+      if (ev.type === 'tap') {
+        // Clock tap — toggle hint
+        if (hitTest(ev.x, ev.y, centerX, 55 * scale, 60 * scale, 60 * scale)) {
+          roomState.showClockHint = !roomState.showClockHint;
+          sfxClick();
+          continue;
+        }
+
+        // Door taps
+        const doors = [
+          { id: 'sun', x: centerX - 120 * scale, y: centerY - 30 * scale, icon: '☀️', label: 'Dawn' },
+          { id: 'cloud', x: centerX - 40 * scale, y: centerY - 30 * scale, icon: '⛅', label: 'Day' },
+          { id: 'moon', x: centerX + 40 * scale, y: centerY - 30 * scale, icon: '🌙', label: 'Dusk' },
+          { id: 'star', x: centerX + 120 * scale, y: centerY - 30 * scale, icon: '⭐', label: 'Night' },
+        ];
+        for (let i = 0; i < doors.length; i++) {
+          const d = doors[i];
+          if (hitTest(ev.x, ev.y, d.x, d.y, 60 * scale, 80 * scale)) {
+            sfxClick();
+            if (d.id === roomState.correctDoor) {
+              sfxWin();
+              spawnParticles(d.x, d.y, 25, '#44ff44');
+              fadeToRoom(12);
+              return;
+            } else {
+              roomState.doorsShake[i] = 1;
+              const messages = [
+                '💀 Wrong time, wrong door.',
+                '💀 The clock disagrees with your choice.',
+                '💀 Time waits for no one. Neither does this trap.',
+                '💀 Perhaps check what hour it is?'
+              ];
+              die(messages[Math.floor(Math.random() * messages.length)], 'default', 8);
+              return;
+            }
+          }
+        }
+      }
+    }
+  },
+  draw() {
+    drawSketchBackground();
+    drawText('Room 12: Temporal Lock', centerX, 25 * scale, 12, '#999');
+
+    // Clock face
+    const clockX = centerX, clockY = 55 * scale, clockR = 25 * scale;
+    ctx.save();
+    ctx.fillStyle = '#f5f0e6';
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = 2 * scale;
+    ctx.beginPath(); ctx.arc(clockX, clockY, clockR, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    // Hour hand
+    const hourAngle = (roomState.hour % 12) / 12 * Math.PI * 2 - Math.PI / 2;
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 3 * scale;
+    ctx.beginPath();
+    ctx.moveTo(clockX, clockY);
+    ctx.lineTo(clockX + Math.cos(hourAngle) * clockR * 0.5, clockY + Math.sin(hourAngle) * clockR * 0.5);
+    ctx.stroke();
+    // Minute hand
+    const minAngle = roomState.clockAngle * 2;
+    ctx.lineWidth = 1.5 * scale;
+    ctx.beginPath();
+    ctx.moveTo(clockX, clockY);
+    ctx.lineTo(clockX + Math.cos(minAngle) * clockR * 0.7, clockY + Math.sin(minAngle) * clockR * 0.7);
+    ctx.stroke();
+    ctx.restore();
+
+    // Clock hint
+    if (roomState.showClockHint || hintLevel >= 3) {
+      drawText(`It's ${roomState.hour}:00 — ${roomState.period}`, centerX, 90 * scale, 11, '#666');
+    }
+
+    // Four doors
+    const doors = [
+      { id: 'sun', x: centerX - 120 * scale, y: centerY - 30 * scale, icon: '☀️', label: 'Dawn', color: '#ffa500' },
+      { id: 'cloud', x: centerX - 40 * scale, y: centerY - 30 * scale, icon: '⛅', label: 'Day', color: '#87ceeb' },
+      { id: 'moon', x: centerX + 40 * scale, y: centerY - 30 * scale, icon: '🌙', label: 'Dusk', color: '#6a5acd' },
+      { id: 'star', x: centerX + 120 * scale, y: centerY - 30 * scale, icon: '⭐', label: 'Night', color: '#191970' },
+    ];
+
+    for (let i = 0; i < doors.length; i++) {
+      const d = doors[i];
+      const shk = roomState.doorsShake[i] > 0 ? Math.sin(roomState.doorsShake[i] * 30) * 3 * scale : 0;
+      const dx = d.x + shk;
+
+      // Door
+      wobblyRect(dx - 25 * scale, d.y - 35 * scale, 50 * scale, 70 * scale, d.color, d.color + '33', 2);
+      // Icon
+      ctx.font = `${22 * scale}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(d.icon, dx, d.y - 5 * scale);
+      // Label
+      drawText(d.label, dx, d.y + 25 * scale, 9, '#555');
+    }
+
+    // Flavor text
+    drawText('Choose the door that matches the time.', centerX, centerY + 70 * scale, 11, '#777');
+    drawText('Tap the clock for a hint.', centerX, centerY + 90 * scale, 9, '#aaa');
+
+    drawStickFigure(stickFigure.x, stickFigure.y, 0.7, stickFigure.eyeState);
+  }
+};
+
+// --- ROOM 12: Gravity Well (Device Orientation / Mouse) ---
+// Tilt device or move mouse to guide a ball into a hole
+rooms[12] = {
+  init() {
+    roomState.ballX = centerX;
+    roomState.ballY = centerY;
+    roomState.ballVX = 0;
+    roomState.ballVY = 0;
+    roomState.holeX = centerX + (Math.random() - 0.5) * 140 * scale;
+    roomState.holeY = centerY - 60 * scale + (Math.random() - 0.5) * 80 * scale;
+    roomState.tiltX = 0;
+    roomState.tiltY = 0;
+    roomState.hasGyro = false;
+    roomState.mouseInfluence = { x: 0, y: 0 };
+    roomState.won = false;
+    roomState.traps = [];
+    // Add some trap holes
+    for (let i = 0; i < 3; i++) {
+      roomState.traps.push({
+        x: centerX + (Math.random() - 0.5) * 200 * scale,
+        y: centerY + (Math.random() - 0.5) * 160 * scale,
+      });
+    }
+    // Filter traps that are too close to the real hole
+    roomState.traps = roomState.traps.filter(t => {
+      const d = Math.hypot(t.x - roomState.holeX, t.y - roomState.holeY);
+      return d > 60 * scale;
+    });
+
+    stickFigure.x = centerX;
+    stickFigure.y = centerY + 160 * scale;
+    stickFigure.visible = true;
+    stickFigure.eyeState = 'normal';
+
+    // Device orientation
+    roomState._orientHandler = (e) => {
+      roomState.hasGyro = true;
+      roomState.tiltX = (e.gamma || 0) / 45; // -1 to 1
+      roomState.tiltY = (e.beta || 0) / 45;
+    };
+    window.addEventListener('deviceorientation', roomState._orientHandler);
+
+    // Mouse fallback
+    roomState._mouseHandler = (e) => {
+      if (!roomState.hasGyro) {
+        roomState.mouseInfluence.x = (e.clientX - centerX) / (W / 2);
+        roomState.mouseInfluence.y = (e.clientY - centerY) / (H / 2);
+      }
+    };
+    window.addEventListener('mousemove', roomState._mouseHandler);
+    canvas.addEventListener('touchmove', roomState._touchMoveHandler = (e) => {
+      if (!roomState.hasGyro && e.touches[0]) {
+        roomState.mouseInfluence.x = (e.touches[0].clientX - centerX) / (W / 2);
+        roomState.mouseInfluence.y = (e.touches[0].clientY - centerY) / (H / 2);
+      }
+    });
+  },
+  update() {
+    stickFigure.breathPhase += deltaTime * 2;
+    if (roomState.won) return;
+
+    // Apply tilt/mouse forces
+    const fx = roomState.hasGyro ? roomState.tiltX : roomState.mouseInfluence.x;
+    const fy = roomState.hasGyro ? roomState.tiltY : roomState.mouseInfluence.y;
+
+    const accel = 400 * scale;
+    roomState.ballVX += fx * accel * deltaTime;
+    roomState.ballVY += fy * accel * deltaTime;
+
+    // Friction
+    roomState.ballVX *= 0.97;
+    roomState.ballVY *= 0.97;
+
+    roomState.ballX += roomState.ballVX * deltaTime;
+    roomState.ballY += roomState.ballVY * deltaTime;
+
+    // Bounds
+    const margin = 30 * scale;
+    const minX = margin, maxX = W - margin;
+    const minY = 50 * scale, maxY = H - 80 * scale;
+    if (roomState.ballX < minX) { roomState.ballX = minX; roomState.ballVX *= -0.5; }
+    if (roomState.ballX > maxX) { roomState.ballX = maxX; roomState.ballVX *= -0.5; }
+    if (roomState.ballY < minY) { roomState.ballY = minY; roomState.ballVY *= -0.5; }
+    if (roomState.ballY > maxY) { roomState.ballY = maxY; roomState.ballVY *= -0.5; }
+
+    // Check hole
+    const distToHole = Math.hypot(roomState.ballX - roomState.holeX, roomState.ballY - roomState.holeY);
+    if (distToHole < 20 * scale) {
+      roomState.won = true;
+      sfxWin();
+      spawnParticles(roomState.holeX, roomState.holeY, 30, '#44ff44');
+      window.removeEventListener('deviceorientation', roomState._orientHandler);
+      window.removeEventListener('mousemove', roomState._mouseHandler);
+      canvas.removeEventListener('touchmove', roomState._touchMoveHandler);
+      showChapterComplete();
+      return;
+    }
+
+    // Check traps
+    for (const t of roomState.traps) {
+      const d = Math.hypot(roomState.ballX - t.x, roomState.ballY - t.y);
+      if (d < 18 * scale && !showingDeath) {
+        die('💀 That wasn\'t the right hole. Trust nothing.', 'default', 10);
+        roomState.ballX = centerX;
+        roomState.ballY = centerY;
+        roomState.ballVX = 0;
+        roomState.ballVY = 0;
+        return;
+      }
+    }
+  },
+  draw() {
+    drawSketchBackground();
+    drawText('Room 13: The Gravity Well', centerX, 25 * scale, 12, '#999');
+
+    // Instruction
+    const instrText = roomState.hasGyro ? 'Tilt your device to guide the ball' : 'Move your mouse/finger to guide the ball';
+    drawText(instrText, centerX, 48 * scale, 10, '#888');
+
+    // Trap holes (red-ish)
+    for (const t of roomState.traps) {
+      ctx.save();
+      ctx.fillStyle = '#331111';
+      ctx.strokeStyle = '#883333';
+      ctx.lineWidth = 2 * scale;
+      ctx.beginPath(); ctx.arc(t.x, t.y, 16 * scale, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      // Subtle danger marks
+      ctx.fillStyle = '#663333';
+      ctx.beginPath(); ctx.arc(t.x, t.y, 10 * scale, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+
+    // Goal hole (green)
+    ctx.save();
+    ctx.fillStyle = '#113311';
+    ctx.strokeStyle = '#33aa33';
+    ctx.lineWidth = 2.5 * scale;
+    ctx.beginPath(); ctx.arc(roomState.holeX, roomState.holeY, 18 * scale, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    // Glow
+    ctx.fillStyle = '#228822';
+    ctx.globalAlpha = 0.4 + Math.sin(gameTime * 3) * 0.2;
+    ctx.beginPath(); ctx.arc(roomState.holeX, roomState.holeY, 12 * scale, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+
+    // Labels
+    if (hintLevel >= 2) {
+      drawText('✓', roomState.holeX, roomState.holeY + 4 * scale, 14, '#44aa44');
+      for (const t of roomState.traps) {
+        drawText('✗', t.x, t.y + 4 * scale, 12, '#aa4444');
+      }
+    }
+
+    // Ball
+    if (!roomState.won) {
+      ctx.save();
+      ctx.fillStyle = '#4488ff';
+      ctx.strokeStyle = '#2255cc';
+      ctx.lineWidth = 2 * scale;
+      ctx.shadowColor = '#4488ff';
+      ctx.shadowBlur = 8 * scale;
+      ctx.beginPath(); ctx.arc(roomState.ballX, roomState.ballY, 12 * scale, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      // Highlight
+      ctx.fillStyle = '#88bbff';
+      ctx.shadowBlur = 0;
+      ctx.beginPath(); ctx.arc(roomState.ballX - 3 * scale, roomState.ballY - 3 * scale, 4 * scale, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    drawStickFigure(stickFigure.x, stickFigure.y, 0.7, stickFigure.eyeState);
   }
 };
 
