@@ -3,14 +3,24 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="A collection of 11 unique mobile-first HTML5 games. Play free in your browser.">
-<title>Mobile Games Lab — 11 Free HTML5 Games</title>
+<meta name="description" content="24 handcrafted HTML5 games — puzzles, action, creative tools, and music. No downloads, no ads, no tracking. Play free in your browser.">
+<meta property="og:title" content="Mobile Games Lab — 24 Free HTML5 Games">
+<meta property="og:description" content="24 handcrafted HTML5 games. No downloads, no ads, no tracking. Pure play.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Mobile Games Lab — 24 Free HTML5 Games">
+<meta name="twitter:description" content="24 handcrafted HTML5 games. No downloads, no ads. Play free in your browser.">
+<meta name="theme-color" content="#0a0a14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json">
+<title>Mobile Games Lab — 24 Free HTML5 Games</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --bg:#0a0a14;--card:#13132a;--card-hover:#1a1a3a;
+  --bg:#0a0a14;--surface:#111125;--card:#13132a;--card-hover:#1a1a3a;
   --accent:#e94560;--accent2:#ff6b6b;--text:#f0f0f0;--muted:#8888aa;
-  --gold:#ffd700;--neon:#00f5d4;--purple:#7b2ff7;
+  --gold:#ffd700;--neon:#00f5d4;--purple:#7b2ff7;--blue:#00b4d8;
+  --cat-puzzle:#ff6b9d;--cat-action:#00e5ff;--cat-creative:#ffd700;--cat-music:#c77dff;
 }
 html{scroll-behavior:smooth}
 body{
@@ -32,7 +42,7 @@ body{
 
 /* Floating orbs */
 .orb{
-  position:fixed;border-radius:50%;filter:blur(80px);opacity:0.15;z-index:0;
+  position:fixed;border-radius:50%;filter:blur(80px);opacity:0.12;z-index:0;
   animation:orbFloat 15s ease-in-out infinite alternate;
 }
 .orb-1{width:400px;height:400px;background:var(--accent);top:-100px;left:-100px;animation-duration:20s}
@@ -45,12 +55,19 @@ body{
   100%{transform:translate(40px,20px) scale(1.05)}
 }
 
-/* Content wrapper */
 .content{position:relative;z-index:1}
 
-/* Hero */
+/* Cursor glow */
+.cursor-glow{
+  position:fixed;width:200px;height:200px;border-radius:50%;
+  background:radial-gradient(circle,rgba(233,69,96,0.06),transparent 70%);
+  pointer-events:none;z-index:0;transform:translate(-50%,-50%);
+  transition:left 0.3s ease-out,top 0.3s ease-out;
+}
+
+/* ===== HERO ===== */
 .hero{
-  text-align:center;padding:80px 20px 60px;
+  text-align:center;padding:70px 20px 50px;
   position:relative;overflow:hidden;
 }
 .hero::after{
@@ -81,7 +98,7 @@ body{
 }
 .hero .subtitle{
   color:var(--muted);font-size:clamp(1rem,2.5vw,1.3rem);
-  max-width:600px;margin:0 auto 30px;
+  max-width:640px;margin:0 auto 30px;
   animation:fadeInUp 0.6s ease-out 0.2s both;
 }
 .hero-stats{
@@ -101,122 +118,146 @@ body{
   to{opacity:1;transform:translateY(0)}
 }
 
-/* Filter bar */
+/* ===== SEARCH & FILTER BAR ===== */
+.search-filter{
+  max-width:900px;margin:0 auto;padding:0 20px 10px;
+  animation:fadeInUp 0.6s ease-out 0.35s both;
+}
+.search-box{
+  display:flex;align-items:center;gap:10px;
+  background:var(--surface);border:1px solid rgba(255,255,255,0.06);
+  border-radius:14px;padding:10px 18px;margin-bottom:14px;
+  transition:border-color 0.3s;
+}
+.search-box:focus-within{border-color:var(--accent)}
+.search-box svg{flex-shrink:0;color:var(--muted)}
+.search-box input{
+  background:none;border:none;outline:none;color:var(--text);
+  font-size:0.95rem;width:100%;font-family:inherit;
+}
+.search-box input::placeholder{color:var(--muted)}
+.search-count{
+  font-size:0.75rem;color:var(--muted);margin-left:auto;white-space:nowrap;
+}
+
 .filters{
   display:flex;justify-content:center;gap:8px;flex-wrap:wrap;
-  padding:10px 20px 40px;max-width:900px;margin:0 auto;
-  animation:fadeInUp 0.6s ease-out 0.4s both;
+  padding:0 0 30px;
 }
 .filter-btn{
   background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);
   color:var(--muted);padding:8px 18px;border-radius:50px;cursor:pointer;
   font-size:0.85rem;font-weight:600;transition:all 0.3s;font-family:inherit;
 }
-.filter-btn:hover,.filter-btn.active{
-  background:rgba(233,69,96,0.15);border-color:var(--accent);color:var(--accent);
-}
+.filter-btn:hover{background:rgba(255,255,255,0.08);color:var(--text)}
+.filter-btn.active[data-filter="all"]{background:rgba(233,69,96,0.15);border-color:var(--accent);color:var(--accent)}
+.filter-btn.active[data-filter="puzzle"]{background:rgba(255,107,157,0.15);border-color:var(--cat-puzzle);color:var(--cat-puzzle)}
+.filter-btn.active[data-filter="action"]{background:rgba(0,229,255,0.15);border-color:var(--cat-action);color:var(--cat-action)}
+.filter-btn.active[data-filter="creative"]{background:rgba(255,215,0,0.15);border-color:var(--cat-creative);color:var(--cat-creative)}
+.filter-btn.active[data-filter="music"]{background:rgba(199,125,255,0.15);border-color:var(--cat-music);color:var(--cat-music)}
 
-/* Featured card */
-.featured{
+/* ===== FEATURED SECTION ===== */
+.featured-section{
   max-width:1200px;margin:0 auto 40px;padding:0 24px;
-  animation:fadeInUp 0.6s ease-out 0.5s both;
 }
-.featured-card{
-  display:grid;grid-template-columns:1fr 1fr;
-  background:linear-gradient(135deg,rgba(233,69,96,0.08),rgba(123,47,247,0.08));
-  border:1px solid rgba(233,69,96,0.15);border-radius:24px;
-  overflow:hidden;transition:all 0.4s;position:relative;
-  text-decoration:none;color:inherit;
-}
-.featured-card:hover{
-  transform:translateY(-4px);
-  box-shadow:0 20px 60px rgba(233,69,96,0.15),0 0 0 1px rgba(233,69,96,0.3);
-}
-.featured-card::before{
-  content:'⭐ FEATURED';position:absolute;top:20px;right:20px;z-index:2;
-  background:linear-gradient(135deg,var(--gold),#ffaa00);color:#000;
-  padding:6px 16px;border-radius:50px;font-size:0.75rem;font-weight:800;
-  letter-spacing:1px;
-}
-.featured-visual{
-  aspect-ratio:16/10;display:flex;align-items:center;justify-content:center;
-  font-size:6rem;position:relative;overflow:hidden;
-  background:linear-gradient(135deg,#0a1628,#1a2a4a);
-}
-.featured-visual::after{
-  content:'';position:absolute;inset:0;
-  background:radial-gradient(circle at 30% 40%,rgba(233,69,96,0.2),transparent 60%);
-}
-.featured-info{padding:40px;display:flex;flex-direction:column;justify-content:center}
-.featured-info h2{font-size:2rem;font-weight:800;margin-bottom:12px}
-.featured-info p{color:var(--muted);font-size:1rem;line-height:1.7;margin-bottom:20px}
-.featured-play{
-  display:inline-flex;align-items:center;gap:8px;
-  padding:14px 32px;background:linear-gradient(135deg,var(--accent),var(--purple));
-  color:#fff;border-radius:14px;font-weight:700;font-size:1rem;
-  transition:all 0.3s;width:fit-content;
-}
-.featured-play:hover{transform:scale(1.05);box-shadow:0 8px 30px rgba(233,69,96,0.4)}
-
-/* Grid */
-.grid-section{max-width:1200px;margin:0 auto;padding:0 24px 80px}
-.section-title{
-  font-size:1.5rem;font-weight:800;margin-bottom:24px;
+.section-header{
+  font-size:1.3rem;font-weight:800;margin-bottom:20px;
   display:flex;align-items:center;gap:10px;
 }
+.featured-grid{
+  display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;
+}
+.featured-card{
+  position:relative;display:flex;flex-direction:column;
+  background:var(--card);
+  border:1px solid rgba(255,255,255,0.06);border-radius:20px;
+  overflow:hidden;text-decoration:none;color:inherit;
+  transition:all 0.4s cubic-bezier(0.4,0,0.2,1);
+}
+.featured-card:hover{
+  transform:translateY(-6px);
+  box-shadow:0 20px 50px rgba(0,0,0,0.5),0 0 0 1px rgba(233,69,96,0.2);
+}
+.featured-badge{
+  position:absolute;top:12px;right:12px;z-index:3;
+  background:linear-gradient(135deg,var(--gold),#ffaa00);color:#000;
+  padding:4px 12px;border-radius:50px;font-size:0.68rem;font-weight:800;
+  letter-spacing:0.5px;
+}
+.featured-thumb{
+  width:100%;aspect-ratio:16/10;display:flex;align-items:center;justify-content:center;
+  position:relative;overflow:hidden;
+}
+.featured-thumb .emoji{font-size:3rem;position:relative;z-index:2;transition:transform 0.4s}
+.featured-card:hover .emoji{transform:scale(1.2)}
+.featured-thumb::after{
+  content:'';position:absolute;inset:0;z-index:1;
+  background:linear-gradient(180deg,transparent 40%,rgba(0,0,0,0.6));
+}
+.featured-body{padding:18px 20px 20px;flex:1;display:flex;flex-direction:column}
+.featured-body h3{font-size:1.15rem;font-weight:700;margin-bottom:6px}
+.featured-body p{color:var(--muted);font-size:0.82rem;flex:1;line-height:1.5;margin-bottom:12px}
+.featured-play{
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  padding:10px;width:100%;
+  background:linear-gradient(135deg,rgba(233,69,96,0.15),rgba(123,47,247,0.1));
+  border:1px solid rgba(233,69,96,0.2);
+  color:var(--accent);border-radius:12px;font-weight:700;font-size:0.85rem;
+  transition:all 0.3s;
+}
+.featured-card:hover .featured-play{
+  background:linear-gradient(135deg,var(--accent),var(--purple));
+  color:#fff;border-color:transparent;
+}
+
+/* ===== GAME GRID ===== */
+.grid-section{max-width:1200px;margin:0 auto;padding:0 24px 80px}
 .grid{
-  display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));
-  gap:20px;
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
+  gap:18px;
 }
 
 /* Card */
 .card{
   background:var(--card);border:1px solid rgba(255,255,255,0.04);
-  border-radius:20px;overflow:hidden;transition:all 0.35s cubic-bezier(0.4,0,0.2,1);
+  border-radius:18px;overflow:hidden;transition:all 0.35s cubic-bezier(0.4,0,0.2,1);
   text-decoration:none;color:inherit;display:flex;flex-direction:column;
   position:relative;
 }
-.card::before{
-  content:'';position:absolute;inset:0;border-radius:20px;
-  background:linear-gradient(135deg,transparent,rgba(233,69,96,0.05));
-  opacity:0;transition:opacity 0.35s;z-index:0;
-}
 .card:hover{
-  transform:translateY(-8px) scale(1.01);
-  box-shadow:0 20px 50px rgba(0,0,0,0.4),0 0 0 1px rgba(255,255,255,0.08);
+  transform:translateY(-6px) scale(1.01);
+  box-shadow:0 16px 40px rgba(0,0,0,0.4),0 0 0 1px rgba(255,255,255,0.08);
   border-color:rgba(255,255,255,0.1);
 }
-.card:hover::before{opacity:1}
-.card:hover .card-thumb-emoji{transform:scale(1.15);transition:transform 0.4s}
+.card:hover .card-emoji{transform:scale(1.15)}
 .card-thumb{
   width:100%;aspect-ratio:16/10;display:flex;align-items:center;justify-content:center;
   position:relative;overflow:hidden;
 }
-.card-thumb-emoji{font-size:3.5rem;position:relative;z-index:1;transition:transform 0.4s}
-.card-thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;opacity:0.7;transition:opacity 0.4s}
-.card:hover .card-thumb img{opacity:0.9}
+.card-emoji{font-size:3rem;position:relative;z-index:1;transition:transform 0.4s}
 .card-thumb::after{
   content:'';position:absolute;inset:0;z-index:1;
-  background:radial-gradient(circle at 50% 50%,transparent 30%,rgba(0,0,0,0.3));
+  background:linear-gradient(180deg,transparent 50%,rgba(0,0,0,0.4));
 }
-.featured-visual img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0.6;transition:opacity 0.4s}
-.featured-card:hover .featured-visual img{opacity:0.8}
-.card-body{padding:20px 22px 22px;flex:1;display:flex;flex-direction:column;position:relative;z-index:1}
-.card-body h2{font-size:1.2rem;margin-bottom:8px;font-weight:700}
-.card-body p{color:var(--muted);font-size:0.88rem;flex:1;line-height:1.6}
-.tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px}
-.tag{
-  background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.06);
-  padding:4px 12px;border-radius:50px;font-size:0.72rem;color:var(--muted);
-  font-weight:500;transition:all 0.2s;
+.card-body{padding:16px 18px 18px;flex:1;display:flex;flex-direction:column;position:relative}
+.card-body h3{font-size:1.05rem;margin-bottom:6px;font-weight:700}
+.card-body p{color:var(--muted);font-size:0.82rem;flex:1;line-height:1.5}
+.card-cat{
+  display:inline-block;margin-top:10px;
+  padding:3px 10px;border-radius:50px;font-size:0.68rem;
+  font-weight:600;letter-spacing:0.3px;width:fit-content;
 }
-.card:hover .tag{border-color:rgba(233,69,96,0.2);color:var(--accent)}
+.card-cat[data-cat="puzzle"]{background:rgba(255,107,157,0.12);color:var(--cat-puzzle)}
+.card-cat[data-cat="action"]{background:rgba(0,229,255,0.12);color:var(--cat-action)}
+.card-cat[data-cat="creative"]{background:rgba(255,215,0,0.12);color:var(--cat-creative)}
+.card-cat[data-cat="music"]{background:rgba(199,125,255,0.12);color:var(--cat-music)}
 .play-btn{
-  display:inline-flex;align-items:center;justify-content:center;gap:6px;
-  margin-top:16px;padding:11px 0;width:100%;
-  background:linear-gradient(135deg,rgba(233,69,96,0.15),rgba(123,47,247,0.1));
-  border:1px solid rgba(233,69,96,0.2);
-  color:var(--accent);border-radius:12px;font-weight:700;font-size:0.9rem;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  margin-top:12px;padding:10px 0;width:100%;
+  background:linear-gradient(135deg,rgba(233,69,96,0.12),rgba(123,47,247,0.08));
+  border:1px solid rgba(233,69,96,0.15);
+  color:var(--accent);border-radius:10px;font-weight:700;font-size:0.85rem;
   transition:all 0.3s;
 }
 .card:hover .play-btn{
@@ -224,43 +265,41 @@ body{
   color:#fff;border-color:transparent;
 }
 
-/* Scroll animations */
-.reveal{opacity:0;transform:translateY(30px);transition:all 0.6s cubic-bezier(0.4,0,0.2,1)}
+/* Scroll reveal */
+.reveal{opacity:0;transform:translateY(25px);transition:all 0.5s cubic-bezier(0.4,0,0.2,1)}
 .reveal.visible{opacity:1;transform:translateY(0)}
+
+/* No results */
+.no-results{
+  text-align:center;padding:60px 20px;color:var(--muted);
+  display:none;grid-column:1/-1;
+}
+.no-results .big{font-size:2.5rem;margin-bottom:8px}
 
 /* Footer */
 footer{
-  text-align:center;padding:60px 20px;color:var(--muted);font-size:0.85rem;
+  text-align:center;padding:50px 20px;color:var(--muted);font-size:0.85rem;
   border-top:1px solid rgba(255,255,255,0.04);position:relative;z-index:1;
 }
 footer a{color:var(--accent);text-decoration:none;font-weight:600}
 footer a:hover{text-decoration:underline}
-footer .footer-emoji{font-size:1.5rem;margin-bottom:12px;display:block}
+.footer-links{
+  display:flex;justify-content:center;gap:20px;flex-wrap:wrap;
+  margin-top:12px;font-size:0.78rem;
+}
 
-/* Mobile */
-@media(max-width:768px){
-  .featured-card{grid-template-columns:1fr}
-  .featured-info{padding:24px}
-  .featured-info h2{font-size:1.5rem}
-  .hero{padding:60px 16px 40px}
-  .hero-stats{gap:24px}
+/* ===== RESPONSIVE ===== */
+@media(max-width:900px){
+  .featured-grid{grid-template-columns:1fr}
 }
 @media(max-width:640px){
-  .grid{grid-template-columns:1fr;gap:16px}
+  .grid{grid-template-columns:1fr;gap:14px}
   .grid-section{padding:0 16px 60px}
-  .featured{padding:0 16px}
+  .featured-section{padding:0 16px}
+  .hero{padding:50px 16px 40px}
+  .hero-stats{gap:24px}
+  .search-filter{padding:0 16px 10px}
 }
-
-/* Cursor glow */
-.cursor-glow{
-  position:fixed;width:200px;height:200px;border-radius:50%;
-  background:radial-gradient(circle,rgba(233,69,96,0.06),transparent 70%);
-  pointer-events:none;z-index:0;transform:translate(-50%,-50%);
-  transition:left 0.3s ease-out,top 0.3s ease-out;
-}
-
-/* Number counter animation */
-@keyframes countUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
 </style>
 </head>
 <body>
@@ -275,224 +314,473 @@ footer .footer-emoji{font-size:1.5rem;margin-bottom:12px;display:block}
 
 <!-- Hero -->
 <section class="hero">
-  <div class="hero-badge">🧪 EXPERIMENTAL GAME LAB</div>
+  <div class="hero-badge">EXPERIMENTAL GAME LAB</div>
   <h1><span class="gradient">Mobile Games</span><br>Lab</h1>
-  <p class="subtitle">11 handcrafted HTML5 games. No downloads, no ads, no tracking. Pure play, straight from your browser.</p>
+  <p class="subtitle">24 handcrafted HTML5 games. No downloads, no ads, no tracking. Pure play, straight from your browser.</p>
   <div class="hero-stats">
-    <div class="hero-stat"><div class="num">11</div><div class="label">Games</div></div>
-    <div class="hero-stat"><div class="num">0</div><div class="label">Downloads</div></div>
+    <div class="hero-stat"><div class="num">24</div><div class="label">Games</div></div>
+    <div class="hero-stat"><div class="num">4</div><div class="label">Categories</div></div>
     <div class="hero-stat"><div class="num">100%</div><div class="label">Free</div></div>
   </div>
 </section>
 
-<!-- Filters -->
-<div class="filters">
-  <button class="filter-btn active" data-filter="all">All Games</button>
-  <button class="filter-btn" data-filter="puzzle">🧩 Puzzle</button>
-  <button class="filter-btn" data-filter="action">⚡ Action</button>
-  <button class="filter-btn" data-filter="strategy">♟️ Strategy</button>
-  <button class="filter-btn" data-filter="horror">👻 Horror</button>
-  <button class="filter-btn" data-filter="social">🎉 Social</button>
-  <button class="filter-btn" data-filter="simulation">🌿 Simulation</button>
+<!-- Search + Filters -->
+<div class="search-filter">
+  <div class="search-box">
+    <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input type="text" id="searchInput" placeholder="Search games...">
+    <span class="search-count" id="searchCount">24 games</span>
+  </div>
+  <div class="filters">
+    <button class="filter-btn active" data-filter="all">All Games</button>
+    <button class="filter-btn" data-filter="puzzle">Puzzle</button>
+    <button class="filter-btn" data-filter="action">Action</button>
+    <button class="filter-btn" data-filter="creative">Creative</button>
+    <button class="filter-btn" data-filter="music">Music</button>
+  </div>
 </div>
 
-<!-- Featured: Gravity Flip -->
-<div class="featured reveal">
-  <a class="featured-card" href="gravity-flip/">
-    <div class="featured-visual" style="background:linear-gradient(135deg,#0a1628,#1a2a4a);">
-      <img src="screenshots/gravity-flip.png" alt="Gravity Flip gameplay">
-      <span style="position:relative;z-index:1">🔄</span>
-    </div>
-    <div class="featured-info">
-      <h2>Gravity Flip</h2>
-      <p>Tap to flip gravity and soar through procedurally generated worlds. A polished, fast-paced platformer that feels like it belongs on the App Store — except it runs right in your browser.</p>
-      <div class="tags" style="margin-bottom:20px">
-        <span class="tag">Platformer</span><span class="tag">Arcade</span><span class="tag">Polished</span>
+<!-- Featured Games -->
+<div class="featured-section reveal" id="featuredSection">
+  <div class="section-header">Featured Games</div>
+  <div class="featured-grid">
+
+    <a class="featured-card" href="../fractal-explorer/web/" data-category="creative" data-name="fractal explorer">
+      <span class="featured-badge">FEATURED</span>
+      <div class="featured-thumb" style="background:linear-gradient(135deg,#0a1030,#1a0a3a);">
+        <span class="emoji">🌀</span>
       </div>
-      <span class="featured-play">▶ Play Gravity Flip</span>
-    </div>
-  </a>
+      <div class="featured-body">
+        <h3>Fractal Explorer</h3>
+        <p>Dive into infinite Mandelbrot and Julia sets. Pinch to zoom, tap to explore. WebGL-accelerated beauty.</p>
+        <span class="featured-play">▶ Explore Fractals</span>
+      </div>
+    </a>
+
+    <a class="featured-card" href="../physics-sandbox/web/" data-category="creative" data-name="physics sandbox">
+      <span class="featured-badge">FEATURED</span>
+      <div class="featured-thumb" style="background:linear-gradient(135deg,#1a2a10,#0a1a2a);">
+        <span class="emoji">⚙️</span>
+      </div>
+      <div class="featured-body">
+        <h3>Physics Sandbox</h3>
+        <p>Spawn shapes, apply forces, build Rube Goldberg machines. A Matter.js-powered physics playground.</p>
+        <span class="featured-play">▶ Play with Physics</span>
+      </div>
+    </a>
+
+    <a class="featured-card" href="../trust-nothing-html/web/" data-category="puzzle" data-name="trust nothing">
+      <span class="featured-badge">FEATURED</span>
+      <div class="featured-thumb" style="background:linear-gradient(135deg,#1a1a2e,#2d1b4e);">
+        <span class="emoji">🤥</span>
+      </div>
+      <div class="featured-body">
+        <h3>Trust Nothing</h3>
+        <p>A game that lies to you. Every button, every instruction, every rule might be a trick. What's real?</p>
+        <span class="featured-play">▶ Trust No One</span>
+      </div>
+    </a>
+
+  </div>
 </div>
 
-<!-- Game Grid -->
+<!-- All Games Grid -->
 <div class="grid-section">
-  <div class="section-title">🎮 All Games</div>
-  <div class="grid">
+  <div class="section-header" id="allGamesHeader">All Games</div>
+  <div class="grid" id="gameGrid">
 
-    <a class="card reveal" href="trust-nothing/" data-tags="puzzle">
-      <div class="card-thumb" style="background:linear-gradient(135deg,#1a1a2e,#2d1b4e);">
-        <img src="screenshots/trust-nothing.png" alt="Trust Nothing">
-        <span class="card-thumb-emoji">🤥</span>
+    <!-- PUZZLE GAMES -->
+    <a class="card reveal" href="../color-flood/web/" data-category="puzzle" data-name="color flood">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#2a1a3a,#1a2a4a);">
+        <span class="card-emoji">🎨</span>
       </div>
       <div class="card-body">
-        <h2>Trust Nothing</h2>
-        <p>A game that lies to you. Every button, every instruction, every rule might be a trick. Figure out what's real — if anything is.</p>
-        <div class="tags"><span class="tag">Puzzle</span><span class="tag">Mind-bending</span><span class="tag">Meta</span></div>
+        <h3>Color Flood</h3>
+        <p>Flood the board with colors. Strategic thinking meets vibrant puzzles.</p>
+        <span class="card-cat" data-cat="puzzle">Puzzle</span>
         <span class="play-btn">▶ Play Now</span>
       </div>
     </a>
 
-    <a class="card reveal" href="deja-vu/" data-tags="puzzle,horror">
-      <div class="card-thumb" style="background:linear-gradient(135deg,#2a1a0a,#1a0a2a);">
-        <img src="screenshots/deja-vu.png" alt="Déjà Vu">
-        <span class="card-thumb-emoji">⏳</span>
-      </div>
-      <div class="card-body">
-        <h2>Déjà Vu</h2>
-        <p>60-second time loop. You wake up. The clock reads 3:47. It always does. Find the way out before time collapses — again.</p>
-        <div class="tags"><span class="tag">Time Loop</span><span class="tag">Puzzle</span><span class="tag">Creepy</span></div>
-        <span class="play-btn">▶ Play Now</span>
-      </div>
-    </a>
-
-    <a class="card reveal" href="conspiracy-board/" data-tags="puzzle">
+    <a class="card reveal" href="../conspiracy-board/web/" data-category="puzzle" data-name="conspiracy board">
       <div class="card-thumb" style="background:linear-gradient(135deg,#3a2a1a,#2a1a0a);">
-        <img src="screenshots/conspiracy-board.png" alt="Conspiracy Board">
-        <span class="card-thumb-emoji">📌</span>
+        <span class="card-emoji">📌</span>
       </div>
       <div class="card-body">
-        <h2>Conspiracy Board</h2>
-        <p>Pin clues to a corkboard and connect them with red string. Solve detective cases by finding hidden connections.</p>
-        <div class="tags"><span class="tag">Detective</span><span class="tag">Puzzle</span><span class="tag">Touch</span></div>
+        <h3>Conspiracy Board</h3>
+        <p>Pin clues to a corkboard and connect them with red string. Solve cases by finding hidden connections.</p>
+        <span class="card-cat" data-cat="puzzle">Puzzle</span>
         <span class="play-btn">▶ Play Now</span>
       </div>
     </a>
 
-    <a class="card reveal" href="emoji-wars/" data-tags="strategy,action">
-      <div class="card-thumb" style="background:linear-gradient(135deg,#4a3500,#2a1a00);">
-        <img src="screenshots/emoji-wars.png" alt="Emoji Wars">
-        <span class="card-thumb-emoji">⚔️</span>
+    <a class="card reveal" href="../deja-vu/web/" data-category="puzzle" data-name="deja vu déjà">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#2a1a0a,#1a0a2a);">
+        <span class="card-emoji">⏳</span>
       </div>
       <div class="card-body">
-        <h2>Emoji Wars</h2>
-        <p>Build an emoji army and clash in real-time strategy. 24 unique units, rock-paper-scissors combat, energy management.</p>
-        <div class="tags"><span class="tag">RTS</span><span class="tag">Strategy</span><span class="tag">Battle</span></div>
+        <h3>Déjà Vu</h3>
+        <p>60-second time loop. The clock reads 3:47. It always does. Find the way out before time collapses.</p>
+        <span class="card-cat" data-cat="puzzle">Puzzle</span>
         <span class="play-btn">▶ Play Now</span>
       </div>
     </a>
 
-    <a class="card reveal" href="haunted/" data-tags="horror">
+    <a class="card reveal" href="../haunted/web/" data-category="puzzle" data-name="haunted house escape horror">
       <div class="card-thumb" style="background:linear-gradient(135deg,#1a0a2e,#0a0a14);">
-        <img src="screenshots/haunted.png" alt="Haunted">
-        <span class="card-thumb-emoji">👻</span>
+        <span class="card-emoji">👻</span>
       </div>
       <div class="card-body">
-        <h2>Haunted</h2>
-        <p>Your phone turns against you. Fake notifications, glitches, screen inversions. Survive the horror — or find the secret to stop it.</p>
-        <div class="tags"><span class="tag">Horror</span><span class="tag">Immersive</span><span class="tag">Survival</span></div>
+        <h3>Haunted</h3>
+        <p>Your phone turns against you. Fake notifications, glitches, screen inversions. Survive the horror.</p>
+        <span class="card-cat" data-cat="puzzle">Puzzle</span>
         <span class="play-btn">▶ Play Now</span>
       </div>
     </a>
 
-    <a class="card reveal" href="one-button/" data-tags="action">
-      <div class="card-thumb" style="background:linear-gradient(135deg,#1a2a1a,#2a1a3a);">
-        <img src="screenshots/one-button.png" alt="One Button Odyssey">
-        <span class="card-thumb-emoji">🗡️</span>
+    <a class="card reveal" href="../hex-match/web/" data-category="puzzle" data-name="hex match hexagonal">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#1a2a3a,#2a1a4a);">
+        <span class="card-emoji">⬡</span>
       </div>
       <div class="card-body">
-        <h2>One Button Odyssey</h2>
-        <p>An entire RPG controlled with a single tap. Time attacks to the beat, dodge bosses, explore three zones.</p>
-        <div class="tags"><span class="tag">RPG</span><span class="tag">Rhythm</span><span class="tag">One-Button</span></div>
+        <h3>Hex Match</h3>
+        <p>Hexagonal matching puzzles. Rotate and connect hex tiles in this geometric brain teaser.</p>
+        <span class="card-cat" data-cat="puzzle">Puzzle</span>
         <span class="play-btn">▶ Play Now</span>
       </div>
     </a>
 
-    <a class="card reveal" href="sound-thief/" data-tags="action">
-      <div class="card-thumb" style="background:linear-gradient(135deg,#0a0e1a,#1a1040);">
-        <img src="screenshots/sound-thief.png" alt="Sound Thief">
-        <span class="card-thumb-emoji">🎵</span>
-      </div>
-      <div class="card-body">
-        <h2>Sound Thief</h2>
-        <p>Your microphone is your weapon. Record real sounds and use them as projectiles in this audio-based stealth platformer.</p>
-        <div class="tags"><span class="tag">Audio</span><span class="tag">Stealth</span><span class="tag">Unique</span></div>
-        <span class="play-btn">▶ Play Now</span>
-      </div>
-    </a>
-
-    <a class="card reveal" href="pocket-ecosystem/" data-tags="simulation">
-      <div class="card-thumb" style="background:linear-gradient(135deg,#1a3a2a,#0a2a1a);">
-        <img src="screenshots/pocket-ecosystem.png" alt="Pocket Ecosystem">
-        <span class="card-thumb-emoji">🌿</span>
-      </div>
-      <div class="card-body">
-        <h2>Pocket Ecosystem</h2>
-        <p>A living terrarium in your pocket. Plants grow, creatures breed and hunt. Watercolor art meets nature simulation.</p>
-        <div class="tags"><span class="tag">Simulation</span><span class="tag">Relaxing</span><span class="tag">Art</span></div>
-        <span class="play-btn">▶ Play Now</span>
-      </div>
-    </a>
-
-    <a class="card reveal" href="lie-detector/" data-tags="social">
+    <a class="card reveal" href="../lie-detector/web/" data-category="puzzle" data-name="lie detector party social">
       <div class="card-thumb" style="background:linear-gradient(135deg,#3a0a3a,#1a0a3a);">
-        <img src="screenshots/lie-detector.png" alt="Lie Detector">
-        <span class="card-thumb-emoji">🎭</span>
+        <span class="card-emoji">🎭</span>
       </div>
       <div class="card-body">
-        <h2>Lie Detector</h2>
-        <p>Pass-the-phone party game. Answer questions on the hot seat while a fake AI "analyzes" your face. Friends vote: truth or lie?</p>
-        <div class="tags"><span class="tag">Party</span><span class="tag">Social</span><span class="tag">Multiplayer</span></div>
+        <h3>Lie Detector</h3>
+        <p>Pass-the-phone party game. Answer on the hot seat while a fake AI "analyzes" your face. Truth or lie?</p>
+        <span class="card-cat" data-cat="puzzle">Puzzle</span>
         <span class="play-btn">▶ Play Now</span>
       </div>
     </a>
 
-    <a class="card reveal" href="micro-nations/" data-tags="strategy,simulation">
-      <div class="card-thumb" style="background:linear-gradient(135deg,#0a2a4a,#1a3a5a);">
-        <img src="screenshots/micro-nations.png" alt="Micro Nations">
-        <span class="card-thumb-emoji">🏗️</span>
+    <a class="card reveal" href="../memory-palace/web/" data-category="puzzle" data-name="memory palace challenge">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#2a1a4a,#0a1a3a);">
+        <span class="card-emoji">🏛️</span>
       </div>
       <div class="card-body">
-        <h2>Micro Nations</h2>
-        <p>Build an island civilization from scratch. Assign jobs, resolve disputes, grow your population. Every citizen is visible.</p>
-        <div class="tags"><span class="tag">God Game</span><span class="tag">Strategy</span><span class="tag">Building</span></div>
+        <h3>Memory Palace</h3>
+        <p>Build your memory palace. Place items, recall them in order. A cognitive challenge that grows with you.</p>
+        <span class="card-cat" data-cat="puzzle">Puzzle</span>
         <span class="play-btn">▶ Play Now</span>
       </div>
     </a>
+
+    <a class="card reveal" href="../trust-nothing-html/web/" data-category="puzzle" data-name="trust nothing puzzle meta">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#1a1a2e,#2d1b4e);">
+        <span class="card-emoji">🤥</span>
+      </div>
+      <div class="card-body">
+        <h3>Trust Nothing</h3>
+        <p>A game that lies to you. Every button, every instruction, every rule might be a trick.</p>
+        <span class="card-cat" data-cat="puzzle">Puzzle</span>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <a class="card reveal" href="../word-architect/web/" data-category="puzzle" data-name="word architect building">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#1a2a1a,#2a3a1a);">
+        <span class="card-emoji">🔤</span>
+      </div>
+      <div class="card-body">
+        <h3>Word Architect</h3>
+        <p>Build words from letter blocks. Daily challenges, high score tracking, and letter count hints.</p>
+        <span class="card-cat" data-cat="puzzle">Puzzle</span>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <!-- ACTION GAMES -->
+    <a class="card reveal" href="../asteroid-miner/web/" data-category="action" data-name="asteroid miner space">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#0a1a3a,#1a0a2a);">
+        <span class="card-emoji">🚀</span>
+      </div>
+      <div class="card-body">
+        <h3>Asteroid Miner</h3>
+        <p>Mine asteroids for resources. Ship upgrades, different minerals, and a shop between runs.</p>
+        <span class="card-cat" data-cat="action">Action</span>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <a class="card reveal" href="../emoji-wars/web/" data-category="action" data-name="emoji wars battle strategy">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#4a3500,#2a1a00);">
+        <span class="card-emoji">⚔️</span>
+      </div>
+      <div class="card-body">
+        <h3>Emoji Wars</h3>
+        <p>Build an emoji army and clash in real-time strategy. 24 units, rock-paper-scissors combat.</p>
+        <span class="card-cat" data-cat="action">Action</span>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <a class="card reveal" href="../gravity-flip/web/" data-category="action" data-name="gravity flip platformer arcade">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#0a1628,#1a2a4a);">
+        <span class="card-emoji">🔄</span>
+      </div>
+      <div class="card-body">
+        <h3>Gravity Flip</h3>
+        <p>Tap to flip gravity and soar through procedurally generated worlds. Fast-paced platformer action.</p>
+        <span class="card-cat" data-cat="action">Action</span>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <a class="card reveal" href="../neon-snake/web/" data-category="action" data-name="neon snake classic arcade">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#001a1a,#0a2a1a);">
+        <span class="card-emoji">🐍</span>
+      </div>
+      <div class="card-body">
+        <h3>Neon Snake</h3>
+        <p>Classic snake reimagined with neon visuals. Power-ups, obstacles, and AI opponent mode.</p>
+        <span class="card-cat" data-cat="action">Action</span>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <a class="card reveal" href="../one-button/web/" data-category="action" data-name="one button odyssey rpg">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#1a2a1a,#2a1a3a);">
+        <span class="card-emoji">🗡️</span>
+      </div>
+      <div class="card-body">
+        <h3>One Button Odyssey</h3>
+        <p>An entire RPG controlled with a single tap. Time attacks, dodge bosses, explore three zones.</p>
+        <span class="card-cat" data-cat="action">Action</span>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <a class="card reveal" href="../orbit/web/" data-category="action" data-name="orbit orbital mechanics space">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#0a0a2a,#1a1a4a);">
+        <span class="card-emoji">🪐</span>
+      </div>
+      <div class="card-body">
+        <h3>Orbit</h3>
+        <p>Master orbital mechanics. Launch satellites, navigate gravity wells, and explore the cosmos.</p>
+        <span class="card-cat" data-cat="action">Action</span>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <a class="card reveal" href="../tower-defense/web/" data-category="action" data-name="tower defense strategy">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#2a1a0a,#1a2a0a);">
+        <span class="card-emoji">🏰</span>
+      </div>
+      <div class="card-body">
+        <h3>Tower Defense</h3>
+        <p>Place towers, plan your strategy, and defend against waves of enemies. Classic TD refined.</p>
+        <span class="card-cat" data-cat="action">Action</span>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <!-- CREATIVE GAMES -->
+    <a class="card reveal" href="../fractal-explorer/web/" data-category="creative" data-name="fractal explorer mandelbrot julia">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#0a1030,#1a0a3a);">
+        <span class="card-emoji">🌀</span>
+      </div>
+      <div class="card-body">
+        <h3>Fractal Explorer</h3>
+        <p>Interactive Mandelbrot and Julia set explorer. Smooth zooming, color palette cycling, WebGL rendering.</p>
+        <span class="card-cat" data-cat="creative">Creative</span>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <a class="card reveal" href="../micro-nations/web/" data-category="creative" data-name="micro nations civilization building">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#0a2a4a,#1a3a5a);">
+        <span class="card-emoji">🏗️</span>
+      </div>
+      <div class="card-body">
+        <h3>Micro Nations</h3>
+        <p>Build an island civilization from scratch. Assign jobs, resolve disputes, grow your population.</p>
+        <span class="card-cat" data-cat="creative">Creative</span>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <a class="card reveal" href="../physics-sandbox/web/" data-category="creative" data-name="physics sandbox matter playground">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#1a2a10,#0a1a2a);">
+        <span class="card-emoji">⚙️</span>
+      </div>
+      <div class="card-body">
+        <h3>Physics Sandbox</h3>
+        <p>Matter.js playground. Spawn shapes, apply forces, build machines. Gravity and material controls.</p>
+        <span class="card-cat" data-cat="creative">Creative</span>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <a class="card reveal" href="../pixel-painter/web/" data-category="creative" data-name="pixel painter art creator">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#2a0a2a,#1a1a3a);">
+        <span class="card-emoji">🖼️</span>
+      </div>
+      <div class="card-body">
+        <h3>Pixel Painter</h3>
+        <p>Create pixel art masterpieces. Layers, export as PNG, undo/redo, and hex color picker.</p>
+        <span class="card-cat" data-cat="creative">Creative</span>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <a class="card reveal" href="../pocket-ecosystem/web/" data-category="creative" data-name="pocket ecosystem terrarium nature simulation">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#1a3a2a,#0a2a1a);">
+        <span class="card-emoji">🌿</span>
+      </div>
+      <div class="card-body">
+        <h3>Pocket Ecosystem</h3>
+        <p>A living terrarium in your pocket. Plants grow, creatures breed and hunt. Nature simulation art.</p>
+        <span class="card-cat" data-cat="creative">Creative</span>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <!-- MUSIC GAMES -->
+    <a class="card reveal" href="../rhythm-tap/web/" data-category="music" data-name="rhythm tap beat music">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#2a0a3a,#3a1a4a);">
+        <span class="card-emoji">🎵</span>
+      </div>
+      <div class="card-body">
+        <h3>Rhythm Tap</h3>
+        <p>Tap to the beat! Built-in songs with beat maps, score grading (S/A/B/C), and combo multipliers.</p>
+        <span class="card-cat" data-cat="music">Music</span>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <a class="card reveal" href="../sound-thief/web/" data-category="music" data-name="sound thief audio stealth">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#0a0e1a,#1a1040);">
+        <span class="card-emoji">🔊</span>
+      </div>
+      <div class="card-body">
+        <h3>Sound Thief</h3>
+        <p>Your microphone is your weapon. Record real sounds and use them as projectiles. Audio-based stealth.</p>
+        <span class="card-cat" data-cat="music">Music</span>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <a class="card reveal" href="../synth-pad/web/" data-category="music" data-name="synth pad synthesizer audio">
+      <div class="card-thumb" style="background:linear-gradient(135deg,#1a0a3a,#0a2a3a);">
+        <span class="card-emoji">🎹</span>
+      </div>
+      <div class="card-body">
+        <h3>Synth Pad</h3>
+        <p>Web Audio synthesizer with a grid of pads. Record loops, layer sounds, add effects. Visual waveforms.</p>
+        <span class="card-cat" data-cat="music">Music</span>
+        <span class="play-btn">▶ Play Now</span>
+      </div>
+    </a>
+
+    <div class="no-results" id="noResults">
+      <div class="big">🔍</div>
+      <p>No games found matching your search.</p>
+    </div>
 
   </div>
 </div>
 
 <!-- Footer -->
 <footer>
-  <span class="footer-emoji">🧪</span>
-  <p>Built with ❤️ by <a href="https://github.com/jeanchouky">JeanChouky</a></p>
-  <p style="margin-top:8px;font-size:0.78rem">Every game is a single HTML file — no frameworks, no dependencies, no nonsense.</p>
+  <p>Built with care by <a href="https://github.com/jeanchouky">JeanChouky</a></p>
+  <p style="margin-top:6px;font-size:0.78rem;color:var(--muted)">Every game is a single HTML file — no frameworks, no dependencies, no nonsense.</p>
+  <div class="footer-links">
+    <a href="../shared/dashboard.html">Analytics Dashboard</a>
+  </div>
 </footer>
 
 </div>
 
+<script src="../shared/analytics.js"></script>
 <script>
-// Cursor glow
-const glow=document.getElementById('glow');
-document.addEventListener('mousemove',e=>{glow.style.left=e.clientX+'px';glow.style.top=e.clientY+'px'});
+// Init analytics for landing page
+GameAnalytics.init('landing-page');
+GameAnalytics.trackPlay();
 
-// Scroll reveal
+// Cursor glow (desktop only)
+const glow=document.getElementById('glow');
+if(window.matchMedia('(hover:hover)').matches){
+  document.addEventListener('mousemove',e=>{glow.style.left=e.clientX+'px';glow.style.top=e.clientY+'px'});
+} else {
+  glow.style.display='none';
+}
+
+// Scroll reveal with stagger
 const obs=new IntersectionObserver(entries=>{
-  entries.forEach((e,i)=>{
+  entries.forEach(e=>{
     if(e.isIntersecting){
-      setTimeout(()=>e.target.classList.add('visible'),i*80);
+      e.target.classList.add('visible');
       obs.unobserve(e.target);
     }
   });
-},{threshold:0.1,rootMargin:'0px 0px -40px 0px'});
-document.querySelectorAll('.reveal').forEach(el=>obs.observe(el));
+},{threshold:0.05,rootMargin:'0px 0px -30px 0px'});
+document.querySelectorAll('.reveal').forEach((el,i)=>{
+  el.style.transitionDelay=(i%6)*0.06+'s';
+  obs.observe(el);
+});
 
-// Filter
-document.querySelectorAll('.filter-btn').forEach(btn=>{
+// Category filter
+const filterBtns=document.querySelectorAll('.filter-btn');
+const cards=document.querySelectorAll('.card');
+const featuredSection=document.getElementById('featuredSection');
+const featuredCards=document.querySelectorAll('.featured-card');
+const noResults=document.getElementById('noResults');
+const searchInput=document.getElementById('searchInput');
+const searchCount=document.getElementById('searchCount');
+let activeFilter='all';
+
+function applyFilters(){
+  const query=searchInput.value.toLowerCase().trim();
+  let count=0;
+
+  // Filter game cards
+  cards.forEach(card=>{
+    const cat=card.dataset.category||'';
+    const name=card.dataset.name||'';
+    const catMatch=activeFilter==='all'||cat===activeFilter;
+    const searchMatch=!query||name.includes(query);
+    const show=catMatch&&searchMatch;
+    card.style.display=show?'':'none';
+    if(show) count++;
+  });
+
+  // Filter featured section
+  let featuredVisible=0;
+  featuredCards.forEach(fc=>{
+    const cat=fc.dataset.category||'';
+    const name=fc.dataset.name||'';
+    const catMatch=activeFilter==='all'||cat===activeFilter;
+    const searchMatch=!query||name.includes(query);
+    const show=catMatch&&searchMatch;
+    fc.style.display=show?'':'none';
+    if(show) featuredVisible++;
+  });
+  featuredSection.style.display=featuredVisible>0?'':'none';
+
+  // No results
+  noResults.style.display=count===0?'block':'none';
+  searchCount.textContent=count+(count===1?' game':' games');
+}
+
+filterBtns.forEach(btn=>{
   btn.addEventListener('click',()=>{
-    document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+    filterBtns.forEach(b=>b.classList.remove('active'));
     btn.classList.add('active');
-    const f=btn.dataset.filter;
-    document.querySelectorAll('.card').forEach(card=>{
-      const tags=card.dataset.tags||'';
-      const show=f==='all'||tags.includes(f);
-      card.style.display=show?'':'none';
-    });
-    // Show/hide featured
-    const feat=document.querySelector('.featured');
-    if(feat)feat.style.display=(f==='all'||f==='action')?'':'none';
+    activeFilter=btn.dataset.filter;
+    applyFilters();
   });
 });
+
+searchInput.addEventListener('input',applyFilters);
 </script>
 
 </body>
