@@ -86,6 +86,38 @@ function calcTotalStars() {
 }
 calcTotalStars();
 
+// Leaderboard
+let leaderboard = {};
+try { const lb = localStorage.getItem('gflip3_lb'); if (lb) leaderboard = JSON.parse(lb); } catch(e) {}
+function saveLeaderboard() { try { localStorage.setItem('gflip3_lb', JSON.stringify(leaderboard)); } catch(e) {} }
+function addLeaderboardEntry(levelId, time, stars, deaths) {
+  if (!leaderboard[levelId]) leaderboard[levelId] = [];
+  leaderboard[levelId].push({ time: +time.toFixed(2), stars, deaths, date: Date.now() });
+  leaderboard[levelId].sort((a, b) => a.time - b.time);
+  if (leaderboard[levelId].length > 10) leaderboard[levelId].length = 10;
+  saveLeaderboard();
+}
+
+// Custom levels (editor)
+let customLevels = [];
+try { const cl = localStorage.getItem('gflip3_custom'); if (cl) customLevels = JSON.parse(cl); } catch(e) {}
+function saveCustomLevels() { try { localStorage.setItem('gflip3_custom', JSON.stringify(customLevels)); } catch(e) {} }
+
+// Infinite mode tracking
+let infiniteLvl = 0;
+let isInfiniteMode = false;
+let isCustomLevel = false;
+let customLevelIndex = -1;
+
+// Editor state
+let editor = {
+  tool: 'platform', // platform, spike, orb, portal, bouncy, crumble, eraser
+  elements: { platforms: [], spikes: [], orbs: [], portal: null },
+  dragging: false, dragStart: null, dragEnd: null,
+  scrollY: 0, selectedIndex: -1, selectedType: '',
+  testMode: false
+};
+
 // --- RESIZE ---
 function resize() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -347,7 +379,7 @@ function drawParticles() {
 // DRAWING HELPERS
 // ============================================================
 function drawBg() {
-  const lc = levelColors[lvl] || levelColors[0];
+  const lc = levelColors[lvl % levelColors.length] || levelColors[0];
   const bg1 = (screen === 'game' || screen === 'victory') ? lc.bg1 : '#0a001a';
   const bg2 = (screen === 'game' || screen === 'victory') ? lc.bg2 : '#1a0033';
   const g = X.createLinearGradient(0, 0, 0, H);
@@ -1427,11 +1459,98 @@ const LEVELS = [
 ];
 
 // ============================================================
+// PROCEDURAL LEVEL GENERATION
+// ============================================================
+function seededRandom(seed) {
+  let s = seed;
+  return function() {
+    s = (s * 1664525 + 1013904223) & 0xFFFFFFFF;
+    return (s >>> 0) / 0xFFFFFFFF;
+  };
+}
+
+function generateProceduralLevel(index) {
+  const difficulty = index - LEVELS.length + 1; // 1, 2, 3, ...
+  const rng = seededRandom(index * 7919 + 42);
+  const names = ['Void Walk','Nebula Run','Star Drift','Dark Matter','Quantum Leap',
+    'Warp Zone','Singularity','Nova Burst','Cosmic Drift','Antimatter',
+    'Photon Path','Ion Storm','Pulsar Way','Quasar Run','Event Horizon'];
+  const name = names[index % names.length] + (index >= names.length ? ` ${Math.floor(index / names.length) + 1}` : '');
+
+  const numPlatforms = 4 + Math.min(8, Math.floor(difficulty * 0.8));
+  const numSpikes = 2 + Math.min(6, Math.floor(difficulty * 0.6));
+  const numOrbs = 3;
+  const hasWell = difficulty >= 3 && rng() > 0.4;
+  const hasLaser = difficulty >= 5 && rng() > 0.3;
+
+  const platforms = [];
+  // Top and bottom boundaries
+  platforms.push([0, 0.0, 1.0, 0.02]);
+  platforms.push([0, 0.98, 1.0, 0.02]);
+  // Starting platform
+  platforms.push([0, 0.5, 0.12, 0.03]);
+
+  for (let i = 0; i < numPlatforms; i++) {
+    const px = 0.12 + (i / numPlatforms) * 0.75;
+    const py = 0.15 + rng() * 0.65;
+    const pw = 0.06 + rng() * 0.12;
+    const types = ['solid', 'solid', 'solid'];
+    if (difficulty >= 2) types.push('bouncy');
+    if (difficulty >= 3) types.push('crumble');
+    if (difficulty >= 4) types.push('moving');
+    const type = types[Math.floor(rng() * types.length)];
+    const p = [px, py, pw, 0.03, type];
+    if (type === 'moving') {
+      p.push(rng() > 0.5 ? 0.05 + rng() * 0.08 : 0);
+      p.push(rng() > 0.5 ? 0.04 + rng() * 0.06 : 0);
+      p.push(0.8 + rng() * 1.0);
+    }
+    platforms.push(p);
+  }
+  // End platform
+  platforms.push([0.88, 0.3 + rng() * 0.4, 0.12, 0.03]);
+
+  const spikes = [];
+  for (let i = 0; i < numSpikes; i++) {
+    const sx = 0.1 + rng() * 0.75;
+    const sy = rng() > 0.5 ? 0.02 + rng() * 0.05 : 0.88 + rng() * 0.08;
+    spikes.push([sx, sy, 0.04 + rng() * 0.06, 0.04 + rng() * 0.04]);
+  }
+
+  const orbs = [];
+  for (let i = 0; i < numOrbs; i++) {
+    orbs.push([0.15 + (i / numOrbs) * 0.7 + rng() * 0.1, 0.15 + rng() * 0.6]);
+  }
+
+  const wells = hasWell ? [[0.3 + rng() * 0.4, 0.3 + rng() * 0.4, 0.2 + rng() * 0.15, 70 + difficulty * 10]] : [];
+  const lasers = hasLaser ? [[0.2 + rng() * 0.6, 0.1 + rng() * 0.3, 0.03, 0.2 + rng() * 0.2, 1.2 + rng() * 0.5, 1.8 + rng() * 0.8, rng() * 2]] : [];
+
+  const baseTime = 12 + difficulty * 2;
+  return {
+    name,
+    stars: [baseTime, baseTime + 5, baseTime + 10],
+    spawn: [0.05, 0.4],
+    goal: [0.92, platforms[platforms.length - 1][1]],
+    width: 1.0,
+    platforms, spikes, orbs, wells, lasers,
+    procedural: true
+  };
+}
+
+function getLevelData(index) {
+  if (isCustomLevel && customLevelIndex >= 0) {
+    return customLevels[customLevelIndex];
+  }
+  if (index < LEVELS.length) return LEVELS[index];
+  return generateProceduralLevel(index);
+}
+
+// ============================================================
 // LEVEL INITIALIZATION
 // ============================================================
 function startLevel(index) {
   lvl = index;
-  const L = LEVELS[index];
+  const L = getLevelData(index);
   
   const p = new Player(W * L.spawn[0], H * L.spawn[1]);
   p.invuln = 0.5; // brief invulnerability on spawn
@@ -1473,8 +1592,8 @@ function startLevel(index) {
   slowMo = 0;
   cameraZoom = 1;
   cameraZoomTarget = 1;
-  currentAccent = (levelColors[index] || levelColors[0]).accent;
-  
+  currentAccent = (levelColors[index % levelColors.length] || levelColors[0]).accent;
+
   ensureAudio();
   startMusic();
 }
@@ -1619,22 +1738,27 @@ function killPlayer() {
 
 function winLevel() {
   const time = gs.time;
-  const L = LEVELS[lvl];
+  const L = getLevelData(lvl);
   let stars = 1;
   if (time <= L.stars[1]) stars = 2;
-  if (time <= L.stars[0]) stars = 3; // Fixed: stars[0] is the fastest time for 3 stars
-  
+  if (time <= L.stars[0]) stars = 3;
+
   gs.victoryStars = stars;
   gs.victoryTime = time;
   victoryAnimTime = 0;
-  
-  if (!progress[lvl] || progress[lvl].stars < stars) {
-    progress[lvl] = { completed: true, stars, time };
-    saveProgress();
-    calcTotalStars();
-  } else if (progress[lvl] && time < progress[lvl].time) {
-    progress[lvl].time = time;
-    saveProgress();
+
+  const levelId = isCustomLevel ? 'custom_' + customLevelIndex : (isInfiniteMode ? 'inf_' + lvl : '' + lvl);
+  addLeaderboardEntry(levelId, time, stars, gs.deathCount);
+
+  if (!isCustomLevel) {
+    if (!progress[lvl] || progress[lvl].stars < stars) {
+      progress[lvl] = { completed: true, stars, time };
+      saveProgress();
+      calcTotalStars();
+    } else if (progress[lvl] && time < progress[lvl].time) {
+      progress[lvl].time = time;
+      saveProgress();
+    }
   }
   
   // Score calculation
@@ -1643,8 +1767,10 @@ function winLevel() {
   const deathPenalty = gs.deathCount * 20;
   const levelScore = Math.max(10, baseScore + timeBonus - deathPenalty + stars * 50);
   gs.levelScore = levelScore;
-  totalScore += levelScore;
-  saveTotalScore();
+  if (!isCustomLevel) {
+    totalScore += levelScore;
+    saveTotalScore();
+  }
   
   sfxWin();
   screenShake = 12;
@@ -1754,7 +1880,9 @@ function drawHUD() {
   X.fillStyle = 'rgba(255,255,255,0.7)';
   X.font = `${13 * S}px sans-serif`;
   X.textAlign = 'left';
-  X.fillText(`${lvl + 1}/${LEVELS.length}  ${LEVELS[lvl].name}`, 12 * S, 20 * S);
+  const curLevelData = getLevelData(lvl);
+  const levelLabel = isInfiniteMode ? `∞ ${lvl - LEVELS.length + 1}` : isCustomLevel ? 'Custom' : `${lvl + 1}/${LEVELS.length}`;
+  X.fillText(`${levelLabel}  ${curLevelData.name}`, 12 * S, 20 * S);
 
   // Level progress bar
   const progW = 80 * S;
@@ -1768,7 +1896,7 @@ function drawHUD() {
   X.fillStyle = currentAccent;
   X.shadowColor = currentAccent;
   X.shadowBlur = 3 * S;
-  const progFill = (lvl + 1) / LEVELS.length;
+  const progFill = isInfiniteMode ? 1 : (lvl + 1) / LEVELS.length;
   X.beginPath();
   X.roundRect(progX, progY, Math.max(progH, progW * progFill), progH, progH / 2);
   X.fill();
@@ -1816,7 +1944,7 @@ function drawHUD() {
   X.fillText(`${gs.time.toFixed(1)}s`, W - 12 * S, 20 * S);
   
   // Star time targets
-  const L = LEVELS[lvl];
+  const L = getLevelData(lvl);
   X.font = `${10 * S}px sans-serif`;
   X.fillStyle = gs.time <= L.stars[0] ? '#ffd700' : 'rgba(255,215,0,0.3)';
   X.fillText(`⭐⭐⭐ < ${L.stars[0]}s`, W - 12 * S, 36 * S);
@@ -1921,35 +2049,32 @@ function drawMenu() {
   X.fillText('Tap to flip gravity • Collect orbs • Reach the portal', W/2, titleY + 85 * S);
   X.restore();
   
-  const bw = 200 * S, bh = 52 * S;
-  const btnY = H * 0.58;
+  const bw = 200 * S, bh = 46 * S;
+  const btnY = H * 0.53;
   gs.btns = gs.btns || {};
   gs.btns.start = drawBtn(W/2 - bw/2, btnY, bw, bh, '▶  PLAY');
-  gs.btns.select = drawBtn(W/2 - bw/2, btnY + bh + 15 * S, bw, bh, '📋  LEVELS', false);
+  gs.btns.select = drawBtn(W/2 - bw/2, btnY + bh + 10 * S, bw, bh, '📋  LEVELS', false);
+  gs.btns.infinite = drawBtn(W/2 - bw/2, btnY + (bh + 10 * S) * 2, bw, bh, '∞  INFINITE', false);
+  gs.btns.editor = drawBtn(W/2 - bw/2, btnY + (bh + 10 * S) * 3, bw, bh, '🔧  EDITOR', false);
+  gs.btns.leaderboard = drawBtn(W/2 - bw/2, btnY + (bh + 10 * S) * 4, bw, bh, '🏆  TIMES', false);
   
-  // Stars and score display
+  // Stars and score at bottom
   if (bestTotalStars > 0 || totalScore > 0) {
     X.save();
     X.fillStyle = '#ffd700';
-    X.font = `bold ${15 * S}px sans-serif`;
+    X.font = `bold ${12 * S}px sans-serif`;
     X.textAlign = 'center';
     X.shadowColor = '#ffd700';
     X.shadowBlur = 6 * S;
-    X.fillText(`⭐ ${bestTotalStars} / ${LEVELS.length * 3}`, W/2, H * 0.85);
-    if (totalScore > 0) {
-      X.fillStyle = '#00ffff';
-      X.shadowColor = '#00ffff';
-      X.fillText(`Score: ${totalScore}`, W/2, H * 0.90);
-    }
+    X.fillText(`⭐ ${bestTotalStars}/${LEVELS.length * 3}  •  Score: ${totalScore}`, W/2, H - 22 * S);
     X.restore();
   }
-  
-  // Version
+
   X.save();
   X.fillStyle = 'rgba(255,255,255,0.2)';
   X.font = `${10 * S}px sans-serif`;
   X.textAlign = 'center';
-  X.fillText('v3.0', W/2, H - 12 * S);
+  X.fillText('v4.0', W/2, H - 8 * S);
   X.restore();
 }
 
@@ -2030,6 +2155,9 @@ function drawSelect() {
     gs.btns.levelBoxes[i] = { x, y, w: boxSz, h: boxSz, unlocked };
   }
   
+  if (customLevels.length > 0) {
+    gs.btns.customBtn = drawBtn(W/2 - 80 * S, H - 105 * S, 160 * S, 38 * S, '🔧 CUSTOM (' + customLevels.length + ')', false);
+  }
   gs.btns.back = drawBtn(W/2 - 50 * S, H - 60 * S, 100 * S, 42 * S, '← BACK', false);
 }
 
@@ -2065,7 +2193,7 @@ function drawVictory() {
   drawNeonText('LEVEL COMPLETE!', 0, 0, 28, '#ffd700');
   X.restore();
   
-  drawNeonText(LEVELS[lvl].name, W/2, H * 0.13 + 35 * S, 14, 'rgba(255,255,255,0.5)');
+  drawNeonText(getLevelData(lvl).name, W/2, H * 0.13 + 35 * S, 14, 'rgba(255,255,255,0.5)');
   
   // Stars with staggered pop-in
   const stars = gs.victoryStars || 1;
@@ -2146,11 +2274,14 @@ function drawVictory() {
     gs.btns = gs.btns || {};
     gs.btns.replay = drawBtn(W/2 - bw - 10 * S, btnY, bw, bh, '↺ RETRY', false);
     
-    if (lvl < LEVELS.length - 1) {
+    if (isInfiniteMode || lvl < LEVELS.length - 1) {
       gs.btns.next = drawBtn(W/2 + 10 * S, btnY, bw, bh, 'NEXT →');
     } else {
       gs.btns.next = drawBtn(W/2 + 10 * S, btnY, bw, bh, '🏠 MENU');
     }
+
+    // Leaderboard button
+    gs.btns.lbBtn = drawBtn(W/2 - 65 * S, btnY + bh + 60 * S, 130 * S, 38 * S, '🏆 TIMES', false);
     
     gs.btns.share = drawBtn(W/2 - 65 * S, btnY + bh + 15 * S, 130 * S, 38 * S, '📤 SHARE', false);
     X.restore();
@@ -2159,7 +2290,7 @@ function drawVictory() {
 
 function shareResult() {
   const stars = gs.victoryStars || 1;
-  const text = `🔮 Gravity Flip - Level ${lvl + 1}: ${LEVELS[lvl].name}\n${'⭐'.repeat(stars)}${'☆'.repeat(3 - stars)} in ${(gs.victoryTime || 0).toFixed(1)}s\nCan you beat my time?`;
+  const text = `🔮 Gravity Flip - Level ${lvl + 1}: ${getLevelData(lvl).name}\n${'⭐'.repeat(stars)}${'☆'.repeat(3 - stars)} in ${(gs.victoryTime || 0).toFixed(1)}s\nCan you beat my time?`;
   if (navigator.share) {
     navigator.share({ title: 'Gravity Flip', text }).catch(() => {});
   } else if (navigator.clipboard) {
@@ -2168,6 +2299,458 @@ function shareResult() {
       addFloatingText(W/2, H * 0.85, 'Copied!', '#00ffff', 14);
     });
   }
+}
+
+// ============================================================
+// LEADERBOARD SCREEN
+// ============================================================
+let lbPage = 0;
+let lbLevelId = null;
+
+function drawLeaderboard() {
+  drawNeonText('BEST TIMES', W/2, 45 * S, 26, '#ffd700');
+
+  // Level tabs
+  const tabW = 50 * S;
+  const tabH = 30 * S;
+  const tabsPerRow = Math.floor((W - 20 * S) / (tabW + 5 * S));
+  gs.btns = gs.btns || {};
+  gs.btns.lbTabs = [];
+
+  const allIds = [];
+  for (let i = 0; i < LEVELS.length; i++) allIds.push({ id: '' + i, label: '' + (i + 1) });
+  // Add infinite levels found in leaderboard
+  Object.keys(leaderboard).filter(k => k.startsWith('inf_')).sort((a, b) => {
+    return parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]);
+  }).forEach(k => allIds.push({ id: k, label: '∞' + (parseInt(k.split('_')[1]) - LEVELS.length + 1) }));
+  // Add custom levels
+  Object.keys(leaderboard).filter(k => k.startsWith('custom_')).forEach(k =>
+    allIds.push({ id: k, label: 'C' + (parseInt(k.split('_')[1]) + 1) })
+  );
+
+  if (!lbLevelId && allIds.length > 0) lbLevelId = allIds[0].id;
+
+  const startY = 70 * S;
+  for (let i = 0; i < Math.min(allIds.length, tabsPerRow * 2); i++) {
+    const col = i % tabsPerRow;
+    const row = Math.floor(i / tabsPerRow);
+    const tx = 10 * S + col * (tabW + 5 * S);
+    const ty = startY + row * (tabH + 5 * S);
+    const active = allIds[i].id === lbLevelId;
+
+    X.save();
+    X.beginPath();
+    X.roundRect(tx, ty, tabW, tabH, 4 * S);
+    X.fillStyle = active ? 'rgba(0,255,255,0.2)' : 'rgba(255,255,255,0.05)';
+    X.fill();
+    if (active) {
+      X.strokeStyle = '#00ffff';
+      X.lineWidth = 2 * S;
+      X.shadowColor = '#00ffff'; X.shadowBlur = 6 * S;
+      X.stroke();
+    }
+    X.fillStyle = active ? '#00ffff' : '#888';
+    X.font = `bold ${11 * S}px sans-serif`;
+    X.textAlign = 'center';
+    X.shadowBlur = 0;
+    X.fillText(allIds[i].label, tx + tabW / 2, ty + tabH / 2 + 4 * S);
+    X.restore();
+
+    gs.btns.lbTabs.push({ x: tx, y: ty, w: tabW, h: tabH, id: allIds[i].id });
+  }
+
+  // Show entries for selected level
+  const entries = lbLevelId ? (leaderboard[lbLevelId] || []) : [];
+  const listY = startY + (Math.ceil(Math.min(allIds.length, tabsPerRow * 2) / tabsPerRow)) * (tabH + 5 * S) + 15 * S;
+
+  if (entries.length === 0) {
+    X.save();
+    X.fillStyle = 'rgba(255,255,255,0.3)';
+    X.font = `${14 * S}px sans-serif`;
+    X.textAlign = 'center';
+    X.fillText('No times recorded yet', W / 2, listY + 40 * S);
+    X.restore();
+  } else {
+    for (let i = 0; i < Math.min(entries.length, 8); i++) {
+      const e = entries[i];
+      const ey = listY + i * 32 * S;
+      const isTop = i === 0;
+
+      X.save();
+      X.beginPath();
+      X.roundRect(15 * S, ey, W - 30 * S, 28 * S, 4 * S);
+      X.fillStyle = isTop ? 'rgba(255,215,0,0.08)' : 'rgba(255,255,255,0.03)';
+      X.fill();
+
+      X.fillStyle = isTop ? '#ffd700' : '#888';
+      X.font = `bold ${14 * S}px sans-serif`;
+      X.textAlign = 'left';
+      X.fillText(`#${i + 1}`, 22 * S, ey + 19 * S);
+
+      X.fillStyle = '#fff';
+      X.font = `${14 * S}px monospace`;
+      X.fillText(`${e.time.toFixed(2)}s`, 55 * S, ey + 19 * S);
+
+      X.fillStyle = '#ffd700';
+      X.font = `${12 * S}px sans-serif`;
+      X.textAlign = 'center';
+      X.fillText('⭐'.repeat(e.stars), W / 2 + 20 * S, ey + 19 * S);
+
+      X.fillStyle = '#ff4466';
+      X.font = `${11 * S}px sans-serif`;
+      X.textAlign = 'right';
+      X.fillText(`💀${e.deaths}`, W - 22 * S, ey + 19 * S);
+      X.restore();
+    }
+  }
+
+  gs.btns.back = drawBtn(W / 2 - 50 * S, H - 55 * S, 100 * S, 40 * S, '← BACK', false);
+}
+
+// ============================================================
+// LEVEL EDITOR
+// ============================================================
+const editorTools = [
+  { id: 'platform', label: 'Plat', color: '#00ccff' },
+  { id: 'bouncy', label: 'Bncy', color: '#00ff80' },
+  { id: 'crumble', label: 'Crmb', color: '#c8a050' },
+  { id: 'spike', label: 'Spke', color: '#ff0064' },
+  { id: 'orb', label: 'Orb', color: '#4488ff' },
+  { id: 'portal', label: 'Goal', color: '#ffd700' },
+  { id: 'eraser', label: 'Eras', color: '#ff4444' },
+];
+
+function editorReset() {
+  editor = {
+    tool: 'platform',
+    elements: { platforms: [], spikes: [], orbs: [], portal: null },
+    dragging: false, dragStart: null, dragEnd: null,
+    scrollY: 0, selectedIndex: -1, selectedType: '',
+    testMode: false, saved: false
+  };
+}
+
+function drawEditor() {
+  gs.btns = gs.btns || {};
+
+  // Grid
+  X.save();
+  X.strokeStyle = 'rgba(255,255,255,0.04)';
+  X.lineWidth = 1;
+  const gridSize = 20 * S;
+  for (let x = 0; x < W; x += gridSize) {
+    X.beginPath(); X.moveTo(x, 60 * S); X.lineTo(x, H - 60 * S); X.stroke();
+  }
+  for (let y = 60 * S; y < H - 60 * S; y += gridSize) {
+    X.beginPath(); X.moveTo(0, y); X.lineTo(W, y); X.stroke();
+  }
+  X.restore();
+
+  // Draw placed elements
+  const el = editor.elements;
+  for (let i = 0; i < el.platforms.length; i++) {
+    const p = el.platforms[i];
+    X.save();
+    X.fillStyle = p.type === 'bouncy' ? 'rgba(0,255,128,0.4)' : p.type === 'crumble' ? 'rgba(160,130,80,0.4)' : 'rgba(0,200,255,0.3)';
+    X.strokeStyle = p.type === 'bouncy' ? '#00ff80' : p.type === 'crumble' ? '#c8a050' : '#00ccff';
+    X.lineWidth = 2 * S;
+    X.fillRect(p.x, p.y, p.w, p.h);
+    X.strokeRect(p.x, p.y, p.w, p.h);
+    X.restore();
+  }
+  for (let i = 0; i < el.spikes.length; i++) {
+    const s = el.spikes[i];
+    X.save();
+    X.fillStyle = 'rgba(255,0,100,0.4)';
+    X.strokeStyle = '#ff0064';
+    X.lineWidth = 2 * S;
+    X.fillRect(s.x, s.y, s.w, s.h);
+    X.strokeRect(s.x, s.y, s.w, s.h);
+    X.restore();
+  }
+  for (const o of el.orbs) {
+    X.save();
+    X.fillStyle = '#4488ff';
+    X.shadowColor = '#4488ff'; X.shadowBlur = 10 * S;
+    X.beginPath(); X.arc(o.x, o.y, 9 * S, 0, Math.PI * 2); X.fill();
+    X.restore();
+  }
+  if (el.portal) {
+    X.save();
+    X.fillStyle = '#ffd700';
+    X.shadowColor = '#ffd700'; X.shadowBlur = 15 * S;
+    X.beginPath(); X.arc(el.portal.x, el.portal.y, 24 * S, 0, Math.PI * 2); X.fill();
+    X.fillStyle = '#fff'; X.shadowBlur = 0;
+    X.font = `${10 * S}px sans-serif`; X.textAlign = 'center';
+    X.fillText('GOAL', el.portal.x, el.portal.y + 4 * S);
+    X.restore();
+  }
+
+  // Drag preview
+  if (editor.dragging && editor.dragStart && editor.dragEnd) {
+    const tool = editor.tool;
+    if (tool === 'platform' || tool === 'bouncy' || tool === 'crumble' || tool === 'spike') {
+      const x1 = Math.min(editor.dragStart.x, editor.dragEnd.x);
+      const y1 = Math.min(editor.dragStart.y, editor.dragEnd.y);
+      const w = Math.abs(editor.dragEnd.x - editor.dragStart.x);
+      const h = Math.max(8 * S, Math.abs(editor.dragEnd.y - editor.dragStart.y));
+      X.save();
+      X.fillStyle = 'rgba(255,255,255,0.15)';
+      X.strokeStyle = '#fff';
+      X.lineWidth = 1 * S;
+      X.setLineDash([4 * S, 4 * S]);
+      X.fillRect(x1, y1, w, h);
+      X.strokeRect(x1, y1, w, h);
+      X.restore();
+    }
+  }
+
+  // Spawn marker (always at left)
+  X.save();
+  X.fillStyle = '#00ffff';
+  X.shadowColor = '#00ffff'; X.shadowBlur = 8 * S;
+  X.beginPath(); X.arc(W * 0.05, H * 0.4, 11 * S, 0, Math.PI * 2); X.fill();
+  X.fillStyle = '#000'; X.shadowBlur = 0;
+  X.font = `bold ${8 * S}px sans-serif`; X.textAlign = 'center';
+  X.fillText('S', W * 0.05, H * 0.4 + 3 * S);
+  X.restore();
+
+  // Top toolbar
+  X.save();
+  X.fillStyle = 'rgba(0,0,0,0.6)';
+  X.fillRect(0, 0, W, 55 * S);
+  X.restore();
+
+  drawNeonText('EDITOR', W / 2, 22 * S, 16, '#00ffff');
+
+  // Tool buttons
+  gs.btns.tools = [];
+  const toolW = Math.min(48 * S, (W - 20 * S) / editorTools.length);
+  const toolStartX = (W - editorTools.length * toolW) / 2;
+  for (let i = 0; i < editorTools.length; i++) {
+    const t = editorTools[i];
+    const tx = toolStartX + i * toolW;
+    const ty = 32 * S;
+    const active = editor.tool === t.id;
+
+    X.save();
+    X.beginPath();
+    X.roundRect(tx + 2 * S, ty, toolW - 4 * S, 20 * S, 3 * S);
+    X.fillStyle = active ? t.color + '44' : 'rgba(255,255,255,0.05)';
+    X.fill();
+    if (active) {
+      X.strokeStyle = t.color;
+      X.lineWidth = 2 * S;
+      X.stroke();
+    }
+    X.fillStyle = active ? t.color : '#888';
+    X.font = `bold ${9 * S}px sans-serif`;
+    X.textAlign = 'center';
+    X.fillText(t.label, tx + toolW / 2, ty + 14 * S);
+    X.restore();
+
+    gs.btns.tools.push({ x: tx + 2 * S, y: ty, w: toolW - 4 * S, h: 20 * S, id: t.id });
+  }
+
+  // Bottom bar
+  X.save();
+  X.fillStyle = 'rgba(0,0,0,0.6)';
+  X.fillRect(0, H - 55 * S, W, 55 * S);
+  X.restore();
+
+  const bbw = 80 * S, bbh = 36 * S, bby = H - 48 * S;
+  gs.btns.edBack = drawBtn(10 * S, bby, bbw, bbh, '← BACK', false);
+  gs.btns.edClear = drawBtn(W / 2 - bbw / 2, bby, bbw, bbh, 'CLEAR', false);
+
+  const canTest = el.portal && el.orbs.length > 0 && el.platforms.length > 0;
+  if (canTest) {
+    gs.btns.edTest = drawBtn(W - bbw - 10 * S, bby, bbw, bbh, '▶ TEST');
+  } else {
+    gs.btns.edTest = null;
+    X.save();
+    X.fillStyle = 'rgba(255,255,255,0.2)';
+    X.font = `${10 * S}px sans-serif`;
+    X.textAlign = 'center';
+    X.fillText('Need: platforms + orbs + goal', W / 2, H - 55 * S - 8 * S);
+    X.restore();
+  }
+
+  // Save button
+  if (canTest) {
+    gs.btns.edSave = drawBtn(W - bbw - 10 * S, bby - bbh - 8 * S, bbw, bbh - 4 * S, 'SAVE', false);
+  } else {
+    gs.btns.edSave = null;
+  }
+}
+
+function editorBuildLevel() {
+  const el = editor.elements;
+  const platforms = el.platforms.map(p => [p.x / W, p.y / H, p.w / W, p.h / H, p.type || 'solid']);
+  const spikes = el.spikes.map(s => [s.x / W, s.y / H, s.w / W, s.h / H]);
+  const orbs = el.orbs.map(o => [o.x / W, o.y / H]);
+  const portal = el.portal ? [el.portal.x / W, el.portal.y / H] : [0.9, 0.5];
+  return {
+    name: 'Custom Level',
+    stars: [20, 30, 45],
+    spawn: [0.05, 0.4],
+    goal: portal,
+    width: 1.0,
+    platforms, spikes, orbs,
+    wells: [], lasers: [],
+    custom: true
+  };
+}
+
+function editorHandleTap(x, y) {
+  // Tool bar taps
+  if (gs.btns.tools) {
+    for (const t of gs.btns.tools) {
+      if (hit(x, y, t)) { editor.tool = t.id; sfxClick(); return; }
+    }
+  }
+  if (hit(x, y, gs.btns.edBack)) { sfxClick(); screen = 'menu'; gs.btns = {}; return; }
+  if (hit(x, y, gs.btns.edClear)) { sfxClick(); editorReset(); return; }
+  if (gs.btns.edTest && hit(x, y, gs.btns.edTest)) {
+    sfxClick();
+    const lvlData = editorBuildLevel();
+    customLevels.push(lvlData);
+    saveCustomLevels();
+    isCustomLevel = true;
+    customLevelIndex = customLevels.length - 1;
+    isInfiniteMode = false;
+    startLevel(0);
+    return;
+  }
+  if (gs.btns.edSave && hit(x, y, gs.btns.edSave)) {
+    sfxClick();
+    const lvlData = editorBuildLevel();
+    customLevels.push(lvlData);
+    saveCustomLevels();
+    editor.saved = true;
+    addFloatingText(W / 2, H / 2, 'SAVED!', '#00ff88', 22);
+    return;
+  }
+
+  // Ignore taps in toolbar/bottom areas
+  if (y < 55 * S || y > H - 55 * S) return;
+
+  const tool = editor.tool;
+  if (tool === 'orb') {
+    editor.elements.orbs.push({ x, y });
+    sfxClick();
+  } else if (tool === 'portal') {
+    editor.elements.portal = { x, y };
+    sfxClick();
+  } else if (tool === 'eraser') {
+    // Find and remove closest element
+    let minDist = 30 * S;
+    let removeType = null, removeIdx = -1;
+    editor.elements.orbs.forEach((o, i) => {
+      const d = Math.sqrt((o.x - x) ** 2 + (o.y - y) ** 2);
+      if (d < minDist) { minDist = d; removeType = 'orbs'; removeIdx = i; }
+    });
+    if (editor.elements.portal) {
+      const d = Math.sqrt((editor.elements.portal.x - x) ** 2 + (editor.elements.portal.y - y) ** 2);
+      if (d < minDist) { minDist = d; removeType = 'portal'; removeIdx = 0; }
+    }
+    editor.elements.platforms.forEach((p, i) => {
+      if (x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h) {
+        removeType = 'platforms'; removeIdx = i; minDist = 0;
+      }
+    });
+    editor.elements.spikes.forEach((s, i) => {
+      if (x >= s.x && x <= s.x + s.w && y >= s.y && y <= s.y + s.h) {
+        removeType = 'spikes'; removeIdx = i; minDist = 0;
+      }
+    });
+    if (removeType === 'portal') editor.elements.portal = null;
+    else if (removeType && removeIdx >= 0) editor.elements[removeType].splice(removeIdx, 1);
+    if (removeType) sfxClick();
+  }
+}
+
+function editorHandleDragStart(x, y) {
+  if (y < 55 * S || y > H - 55 * S) return;
+  const tool = editor.tool;
+  if (tool === 'platform' || tool === 'bouncy' || tool === 'crumble' || tool === 'spike') {
+    editor.dragging = true;
+    editor.dragStart = { x, y };
+    editor.dragEnd = { x, y };
+  }
+}
+
+function editorHandleDragMove(x, y) {
+  if (editor.dragging) {
+    editor.dragEnd = { x, y };
+  }
+}
+
+function editorHandleDragEnd() {
+  if (editor.dragging && editor.dragStart && editor.dragEnd) {
+    const x1 = Math.min(editor.dragStart.x, editor.dragEnd.x);
+    const y1 = Math.min(editor.dragStart.y, editor.dragEnd.y);
+    const w = Math.abs(editor.dragEnd.x - editor.dragStart.x);
+    const h = Math.max(8 * S, Math.abs(editor.dragEnd.y - editor.dragStart.y));
+    if (w > 10 * S) {
+      const tool = editor.tool;
+      if (tool === 'spike') {
+        editor.elements.spikes.push({ x: x1, y: y1, w, h });
+      } else {
+        editor.elements.platforms.push({ x: x1, y: y1, w, h, type: tool === 'bouncy' ? 'bouncy' : tool === 'crumble' ? 'crumble' : 'solid' });
+      }
+      sfxClick();
+    }
+    editor.dragging = false;
+    editor.dragStart = null;
+    editor.dragEnd = null;
+  }
+}
+
+// ============================================================
+// CUSTOM LEVELS SELECT
+// ============================================================
+function drawCustomSelect() {
+  drawNeonText('CUSTOM LEVELS', W / 2, 45 * S, 22, '#00ff88');
+
+  gs.btns = gs.btns || {};
+  gs.btns.customLvls = [];
+
+  if (customLevels.length === 0) {
+    X.save();
+    X.fillStyle = 'rgba(255,255,255,0.3)';
+    X.font = `${14 * S}px sans-serif`;
+    X.textAlign = 'center';
+    X.fillText('No custom levels yet', W / 2, H * 0.4);
+    X.fillText('Use the Editor to create one!', W / 2, H * 0.4 + 25 * S);
+    X.restore();
+  } else {
+    for (let i = 0; i < Math.min(customLevels.length, 8); i++) {
+      const ey = 75 * S + i * 50 * S;
+      X.save();
+      X.beginPath();
+      X.roundRect(15 * S, ey, W - 30 * S, 42 * S, 6 * S);
+      X.fillStyle = 'rgba(0,255,136,0.06)';
+      X.fill();
+      X.strokeStyle = '#00ff88';
+      X.lineWidth = 1.5 * S;
+      X.stroke();
+
+      X.fillStyle = '#fff';
+      X.font = `bold ${14 * S}px sans-serif`;
+      X.textAlign = 'left';
+      X.fillText(`Custom Level ${i + 1}`, 25 * S, ey + 18 * S);
+
+      X.fillStyle = '#888';
+      X.font = `${11 * S}px sans-serif`;
+      const cl = customLevels[i];
+      X.fillText(`${cl.platforms.length} plats  ${cl.orbs.length} orbs`, 25 * S, ey + 34 * S);
+
+      X.restore();
+      gs.btns.customLvls.push({ x: 15 * S, y: ey, w: W - 30 * S, h: 42 * S, index: i });
+    }
+  }
+
+  gs.btns.back = drawBtn(W / 2 - 50 * S, H - 55 * S, 100 * S, 40 * S, '← BACK', false);
 }
 
 // ============================================================
@@ -2181,7 +2764,7 @@ function handleTap(x, y) {
   if (screen === 'menu') {
     if (hit(x, y, gs.btns.start)) {
       sfxClick();
-      // Start from first uncompleted or level 0
+      isInfiniteMode = false; isCustomLevel = false;
       let startLvl = 0;
       for (let i = 0; i < LEVELS.length; i++) {
         if (!progress[i] || !progress[i].completed) { startLvl = i; break; }
@@ -2190,12 +2773,42 @@ function handleTap(x, y) {
       startLevel(startLvl);
     }
     else if (hit(x, y, gs.btns.select)) { sfxClick(); screen = 'select'; gs.btns = {}; }
+    else if (hit(x, y, gs.btns.infinite)) {
+      sfxClick(); isInfiniteMode = true; isCustomLevel = false;
+      startLevel(LEVELS.length);
+    }
+    else if (hit(x, y, gs.btns.editor)) { sfxClick(); editorReset(); screen = 'editor'; gs.btns = {}; }
+    else if (hit(x, y, gs.btns.leaderboard)) { sfxClick(); lbLevelId = null; screen = 'leaderboard'; gs.btns = {}; }
   } else if (screen === 'select') {
     if (hit(x, y, gs.btns.back)) { sfxClick(); screen = 'menu'; gs.btns = {}; }
+    else if (gs.btns.customBtn && hit(x, y, gs.btns.customBtn)) { sfxClick(); screen = 'customselect'; gs.btns = {}; }
     else if (gs.btns.levelBoxes) {
       for (let i = 0; i < gs.btns.levelBoxes.length; i++) {
         const b = gs.btns.levelBoxes[i];
-        if (b && b.unlocked && hit(x, y, b)) { sfxClick(); startLevel(i); break; }
+        if (b && b.unlocked && hit(x, y, b)) {
+          sfxClick(); isInfiniteMode = false; isCustomLevel = false; startLevel(i); break;
+        }
+      }
+    }
+  } else if (screen === 'customselect') {
+    if (hit(x, y, gs.btns.back)) { sfxClick(); screen = 'select'; gs.btns = {}; }
+    else if (gs.btns.customLvls) {
+      for (const b of gs.btns.customLvls) {
+        if (hit(x, y, b)) {
+          sfxClick(); isCustomLevel = true; isInfiniteMode = false;
+          customLevelIndex = b.index;
+          startLevel(0);
+          break;
+        }
+      }
+    }
+  } else if (screen === 'editor') {
+    editorHandleTap(x, y);
+  } else if (screen === 'leaderboard') {
+    if (hit(x, y, gs.btns.back)) { sfxClick(); screen = 'menu'; gs.btns = {}; }
+    else if (gs.btns.lbTabs) {
+      for (const t of gs.btns.lbTabs) {
+        if (hit(x, y, t)) { sfxClick(); lbLevelId = t.id; break; }
       }
     }
   } else if (screen === 'game') {
@@ -2206,20 +2819,48 @@ function handleTap(x, y) {
     if (hit(x, y, gs.btns.replay)) { sfxClick(); startLevel(lvl); }
     else if (hit(x, y, gs.btns.next)) {
       sfxClick();
-      if (lvl < LEVELS.length - 1) startLevel(lvl + 1);
+      if (isInfiniteMode) startLevel(lvl + 1);
+      else if (isCustomLevel) { screen = 'menu'; gs.btns = {}; isCustomLevel = false; }
+      else if (lvl < LEVELS.length - 1) startLevel(lvl + 1);
       else { screen = 'menu'; gs.btns = {}; }
     }
     else if (gs.btns.share && hit(x, y, gs.btns.share)) { sfxClick(); shareResult(); }
+    else if (gs.btns.lbBtn && hit(x, y, gs.btns.lbBtn)) {
+      sfxClick();
+      const levelId = isCustomLevel ? 'custom_' + customLevelIndex : (isInfiniteMode ? 'inf_' + lvl : '' + lvl);
+      lbLevelId = levelId;
+      screen = 'leaderboard'; gs.btns = {};
+    }
   }
 }
 
 C.addEventListener('touchstart', e => {
   e.preventDefault();
-  handleTap(e.touches[0].clientX, e.touches[0].clientY);
+  const tx = e.touches[0].clientX, ty = e.touches[0].clientY;
+  if (screen === 'editor') editorHandleDragStart(tx, ty);
+  handleTap(tx, ty);
+}, { passive: false });
+
+C.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (screen === 'editor') editorHandleDragMove(e.touches[0].clientX, e.touches[0].clientY);
+}, { passive: false });
+
+C.addEventListener('touchend', e => {
+  if (screen === 'editor') editorHandleDragEnd();
 }, { passive: false });
 
 C.addEventListener('mousedown', e => {
+  if (screen === 'editor') editorHandleDragStart(e.clientX, e.clientY);
   handleTap(e.clientX, e.clientY);
+});
+
+C.addEventListener('mousemove', e => {
+  if (screen === 'editor') editorHandleDragMove(e.clientX, e.clientY);
+});
+
+C.addEventListener('mouseup', e => {
+  if (screen === 'editor') editorHandleDragEnd();
 });
 
 document.addEventListener('keydown', e => {
@@ -2234,6 +2875,8 @@ document.addEventListener('keydown', e => {
   }
   if (e.code === 'Escape') {
     if (screen === 'game' || screen === 'victory') {
+      screen = 'menu'; gs.btns = {}; isInfiniteMode = false; isCustomLevel = false;
+    } else if (screen === 'editor' || screen === 'leaderboard' || screen === 'select' || screen === 'customselect') {
       screen = 'menu'; gs.btns = {};
     }
   }
@@ -2305,6 +2948,9 @@ function loop(time) {
   
   if (screen === 'menu') drawMenu();
   else if (screen === 'select') drawSelect();
+  else if (screen === 'customselect') drawCustomSelect();
+  else if (screen === 'editor') { drawEditor(); updateParticles(); drawParticles(); }
+  else if (screen === 'leaderboard') drawLeaderboard();
   else if (screen === 'game') {
     // Apply camera zoom
     if (cameraZoom !== 1) {
